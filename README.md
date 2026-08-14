@@ -49,6 +49,28 @@ python tahmin.py analiz --ev Alanyaspor --dep Konyaspor --oran 2.20 3.30 3.30 --
 Takım adlarında Türkçe karakter ve kısaltma serbesttir: `başakşehir`,
 `göztepe`, `bayern münih`, `man city`, `real` gibi girişler otomatik eşlenir.
 
+## 🌐 Web arayüzü
+
+```bash
+python tahmin.py web          # http://127.0.0.1:8000
+```
+
+Koyu temalı, tek sayfalık modern panel; üç ayrı bölümden oluşur:
+
+- **📈 Oran Analizi** — takımdan bağımsız: 1X2 oranını girin, geçmişte benzer
+  oranla açılan tüm maçların gerçek dağılımını, gol/üst-alt/KG eğilimlerini,
+  en sık skorları, örnek maçları ve orana göre beklenen değer sinyalini görün.
+- **🎯 Takım Analizi** — iki takımı seçin (oran girmek isteğe bağlı): form
+  serileri, aralarındaki maçlar, Poisson tahmini; oran girilirse oran kalıbı,
+  değer tablosu ve yıldızlı öneri banner'ı eklenir.
+- **🕰 Geçmiş Maçlar** — eski maçları açılış oranlarıyla listeleyin;
+  "📈 bu oranı analiz et" düğmesi o maçın oranını Oran Analizi'ne taşır.
+
+Veri hiç indirilmemişse panel tek tıkla indirme önerir; üstteki
+**Veriyi Güncelle** düğmesi arşivi tazeler. Arayüz `iddaa/static/index.html`
+içindedir (bağımlılıksız, tek dosya); JSON API uçları `iddaa/web.py` başında
+listelenmiştir.
+
 ## Komutlar
 
 | Komut | Açıklama |
@@ -57,6 +79,7 @@ Takım adlarında Türkçe karakter ve kısaltma serbesttir: `başakşehir`,
 | `analiz --ev X --dep Y [--oran 1 X 2] [--gemini] [--tolerans 0.02]` | Maç analizi ve rapor |
 | `takimlar [--lig T1]` | Veri setindeki resmi takım adları (● = güncel takım) |
 | `durum` | İndirilen veri setinin özeti |
+| `web [--port 8000] [--host 127.0.0.1]` | Modern web panelini başlat |
 
 Desteklenen ligler: `T1` Süper Lig, `E0` Premier League, `E1` Championship,
 `SP1` La Liga, `D1` Bundesliga, `I1` Serie A, `F1` Ligue 1, `N1` Eredivisie,

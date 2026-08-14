@@ -87,6 +87,25 @@ def _cmd_analiz(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_web(args: argparse.Namespace) -> int:
+    try:
+        from .web import calistir
+    except ModuleNotFoundError as hata:
+        if "flask" in str(hata).lower():
+            print("Web arayüzü için Flask gerekli: pip install flask")
+            return 1
+        raise
+    print(f"🌐 İddaa Analiz paneli: http://{args.host}:{args.port}  (kapatmak için Ctrl+C)")
+    try:
+        calistir(host=args.host, port=args.port)
+    except ModuleNotFoundError as hata:
+        if "flask" in str(hata).lower():
+            print("Web arayüzü için Flask gerekli: pip install flask")
+            return 1
+        raise
+    return 0
+
+
 def arg_ayristirici() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="tahmin.py",
@@ -114,6 +133,11 @@ def arg_ayristirici() -> argparse.ArgumentParser:
     a.add_argument("--tolerans", type=float, default=0.02, help="Oran kalıbı benzerlik toleransı (varsayılan 0.02)")
     a.add_argument("--gemini", action="store_true", help="Rapora Gemini AI yorumu ekle (GEMINI_API_KEY gerekir)")
     a.set_defaults(fn=_cmd_analiz)
+
+    w = alt.add_parser("web", help="Modern web arayüzünü başlat")
+    w.add_argument("--host", default="127.0.0.1", help="Dinlenecek adres (varsayılan 127.0.0.1)")
+    w.add_argument("--port", type=int, default=8000, help="Port (varsayılan 8000)")
+    w.set_defaults(fn=_cmd_web)
 
     return p
 

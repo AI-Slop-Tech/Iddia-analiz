@@ -1,0 +1,493 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>⚽ İddaa Analiz Sistemi</title>
+<style>
+  :root{
+    --bg:#0a0f1c; --kart:#111a2e; --kart-ic:#0d1526; --cizgi:#1d2a45;
+    --metin:#e2e8f0; --soluk:#8ea0bf; --cok-soluk:#5b6b8c;
+    --yesil:#34d399; --sari:#fbbf24; --mavi:#60a5fa; --kirmizi:#f87171;
+    --grad:linear-gradient(135deg,#34d399 0%,#0ea5e9 100%);
+    --radius:16px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    background:radial-gradient(1200px 600px at 80% -10%,#12305522,transparent),
+               radial-gradient(900px 500px at -10% 10%,#0d3b2e22,transparent),var(--bg);
+    color:var(--metin);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Inter",Arial,sans-serif;
+    min-height:100vh; line-height:1.5;
+  }
+  .sarici{max-width:1080px;margin:0 auto;padding:0 20px 60px}
+
+  /* ---------- üst bar ---------- */
+  header{position:sticky;top:0;z-index:20;background:#0a0f1cd9;backdrop-filter:blur(10px);border-bottom:1px solid var(--cizgi)}
+  .ust{max-width:1080px;margin:0 auto;padding:14px 20px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  .logo{font-size:22px;font-weight:800;letter-spacing:.2px;display:flex;align-items:center;gap:10px}
+  .logo .top{font-size:26px}
+  .logo b{background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .durum-chipler{display:flex;gap:8px;flex-wrap:wrap;margin-left:auto;align-items:center}
+  .chip{background:var(--kart);border:1px solid var(--cizgi);border-radius:999px;padding:5px 12px;font-size:12.5px;color:var(--soluk)}
+  .chip b{color:var(--metin)}
+
+  /* ---------- sekmeler ---------- */
+  nav{display:flex;gap:8px;margin:26px 0 22px;flex-wrap:wrap}
+  .sekme{
+    border:1px solid var(--cizgi);background:var(--kart);color:var(--soluk);
+    padding:11px 20px;border-radius:999px;font-size:15px;font-weight:600;cursor:pointer;
+    transition:all .18s ease;
+  }
+  .sekme:hover{color:var(--metin);border-color:#2c3d63}
+  .sekme.aktif{background:var(--grad);color:#04121f;border-color:transparent;box-shadow:0 6px 24px #0ea5e933}
+  section{display:none}
+  section.aktif{display:block;animation:gel .25s ease}
+  @keyframes gel{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+
+  /* ---------- kartlar & formlar ---------- */
+  .kart{background:var(--kart);border:1px solid var(--cizgi);border-radius:var(--radius);padding:22px;margin-bottom:18px}
+  .kart h2{font-size:17px;margin-bottom:4px}
+  .kart .alt-baslik{color:var(--soluk);font-size:13.5px;margin-bottom:16px}
+  .form-satir{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end}
+  .alan{display:flex;flex-direction:column;gap:6px}
+  .alan label{font-size:12.5px;color:var(--soluk);font-weight:600}
+  input,select{
+    background:var(--kart-ic);border:1px solid var(--cizgi);color:var(--metin);
+    border-radius:10px;padding:11px 13px;font-size:15px;outline:none;min-width:0;
+    transition:border-color .15s;
+  }
+  input:focus,select:focus{border-color:#3b82f6}
+  input.oran{width:96px;text-align:center;font-weight:700;font-size:16px}
+  input.takim{width:220px}
+  .btn{
+    background:var(--grad);color:#04121f;border:none;border-radius:12px;
+    padding:12px 24px;font-size:15px;font-weight:800;cursor:pointer;
+    transition:transform .12s,box-shadow .12s;box-shadow:0 6px 20px #0ea5e926;
+  }
+  .btn:hover{transform:translateY(-1px);box-shadow:0 10px 26px #0ea5e940}
+  .btn:disabled{opacity:.55;cursor:wait;transform:none}
+  .btn.ikincil{background:var(--kart-ic);color:var(--metin);border:1px solid var(--cizgi);box-shadow:none;font-weight:600}
+  .mini-btn{
+    background:var(--kart-ic);border:1px solid var(--cizgi);color:var(--mavi);
+    border-radius:8px;padding:5px 10px;font-size:12.5px;cursor:pointer;font-weight:700;white-space:nowrap;
+  }
+  .mini-btn:hover{border-color:var(--mavi)}
+  .not{color:var(--cok-soluk);font-size:12.5px;margin-top:10px}
+
+  /* ---------- sonuç bileşenleri ---------- */
+  .izgara{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  @media(max-width:760px){.izgara{grid-template-columns:1fr}.durum-chipler{margin-left:0}}
+  .bar-satir{display:grid;grid-template-columns:110px 1fr 110px;gap:12px;align-items:center;margin:9px 0}
+  .bar-satir .etiket{font-size:13.5px;color:var(--soluk);font-weight:600}
+  .bar-satir .deger{font-size:13.5px;text-align:right;font-weight:700;white-space:nowrap}
+  .bar{height:12px;border-radius:999px;background:#0b1322;border:1px solid #16223c;overflow:hidden}
+  .bar>div{height:100%;border-radius:999px;transition:width .5s ease}
+  .b-yesil>div{background:linear-gradient(90deg,#059669,#34d399)}
+  .b-sari>div{background:linear-gradient(90deg,#b45309,#fbbf24)}
+  .b-mavi>div{background:linear-gradient(90deg,#1d4ed8,#60a5fa)}
+  .rozetler{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+  .rozet{background:var(--kart-ic);border:1px solid var(--cizgi);border-radius:10px;padding:7px 12px;font-size:13px;color:var(--soluk)}
+  .rozet b{color:var(--metin)}
+  .seri{display:inline-flex;gap:4px;vertical-align:middle}
+  .seri i{
+    font-style:normal;width:22px;height:22px;border-radius:6px;display:inline-flex;
+    align-items:center;justify-content:center;font-size:11.5px;font-weight:800;color:#04121f;
+  }
+  .s-G{background:var(--yesil)}.s-B{background:var(--sari)}.s-M{background:var(--kirmizi)}
+  table{width:100%;border-collapse:collapse;font-size:13.5px}
+  th{color:var(--cok-soluk);font-size:12px;text-transform:uppercase;letter-spacing:.4px;text-align:left;padding:8px 10px;border-bottom:1px solid var(--cizgi)}
+  td{padding:9px 10px;border-bottom:1px solid #14203a}
+  tr:last-child td{border-bottom:none}
+  .sag{text-align:right}.orta{text-align:center}
+  .mac-listesi{margin-top:10px;font-size:13.5px;color:var(--soluk)}
+  .mac-listesi div{padding:5px 0;border-bottom:1px dashed #16223c}
+  .mac-listesi div:last-child{border-bottom:none}
+  .skor{color:var(--metin);font-weight:700}
+
+  .banner{border-radius:var(--radius);padding:18px 22px;margin-bottom:18px;border:1px solid;font-size:15px}
+  .banner .buyuk{font-size:17px;font-weight:800}
+  .banner.degerli{background:#052e2210;border-color:#0d9488;background:linear-gradient(135deg,#064e3b33,#0f172a00)}
+  .banner.sinirda{background:linear-gradient(135deg,#78350f2e,#0f172a00);border-color:#b45309}
+  .banner.pas{background:linear-gradient(135deg,#33415533,#0f172a00);border-color:#475569}
+  .yildizlar{color:var(--sari);letter-spacing:2px}
+  .ev-poz{color:var(--yesil);font-weight:800}
+  .ev-neg{color:var(--kirmizi);font-weight:700}
+  .ipucu{font-size:12.5px;color:var(--cok-soluk)}
+
+  .bos-durum{text-align:center;padding:70px 20px}
+  .bos-durum .dev{font-size:52px;margin-bottom:14px}
+  .bos-durum p{color:var(--soluk);margin:8px 0 22px}
+
+  #bildirim{
+    position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(120px);
+    background:#111a2e;border:1px solid var(--cizgi);color:var(--metin);
+    border-radius:12px;padding:13px 20px;font-size:14px;max-width:90vw;
+    transition:transform .3s ease;z-index:50;box-shadow:0 12px 40px #000a
+  }
+  #bildirim.goster{transform:translateX(-50%) translateY(0)}
+  #bildirim.hata{border-color:var(--kirmizi)}
+  footer{margin-top:34px;color:var(--cok-soluk);font-size:12.5px;text-align:center;border-top:1px solid var(--cizgi);padding-top:18px}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="ust">
+    <div class="logo"><span class="top">⚽</span> İddaa <b>Analiz</b></div>
+    <div class="durum-chipler" id="durum-chipler">
+      <span class="chip">yükleniyor…</span>
+    </div>
+    <button class="btn ikincil" id="btn-guncelle" onclick="veriGuncelle()">🔄 Veriyi Güncelle</button>
+  </div>
+</header>
+
+<div class="sarici">
+  <nav>
+    <button class="sekme aktif" data-s="oran">📈 Oran Analizi</button>
+    <button class="sekme" data-s="takim">🎯 Takım Analizi</button>
+    <button class="sekme" data-s="gecmis">🕰 Geçmiş Maçlar</button>
+  </nav>
+
+  <!-- ============ ORAN ANALİZİ ============ -->
+  <section id="s-oran" class="aktif">
+    <div class="kart">
+      <h2>📈 Oran Analizi</h2>
+      <div class="alt-baslik">Takımdan bağımsız: bu oranlarla açılan geçmiş maçlarda gerçekte ne oldu? Bültenden ya da eski bir maçtan 1X2 oranlarını girin.</div>
+      <div class="form-satir">
+        <div class="alan"><label>MS 1 (ev)</label><input class="oran" id="o1" type="number" step="0.01" min="1.01" placeholder="2.10"></div>
+        <div class="alan"><label>MS 0 (beraberlik)</label><input class="oran" id="o0" type="number" step="0.01" min="1.01" placeholder="3.40"></div>
+        <div class="alan"><label>MS 2 (deplasman)</label><input class="oran" id="o2" type="number" step="0.01" min="1.01" placeholder="3.20"></div>
+        <div class="alan"><label>Benzerlik: ±<span id="tol-goster">2.0</span> puan</label>
+          <input id="tol" type="range" min="0.005" max="0.05" step="0.005" value="0.02" style="width:150px" oninput="document.getElementById('tol-goster').textContent=(this.value*100).toFixed(1)">
+        </div>
+        <button class="btn" id="btn-oran" onclick="oranAnaliz()">Analiz Et</button>
+      </div>
+      <div class="not">Oranlar önce bahis marjından arındırılır, benzerlik olasılık uzayında aranır — böylece farklı yılların/bahisçilerin marj farkı sonucu bozmaz.</div>
+    </div>
+    <div id="oran-sonuc"></div>
+  </section>
+
+  <!-- ============ TAKIM ANALİZİ ============ -->
+  <section id="s-takim">
+    <div class="kart">
+      <h2>🎯 Takım Analizi</h2>
+      <div class="alt-baslik">Form + aralarındaki maçlar + Poisson gol modeli. Oranları da girerseniz oran kalıbı, değer analizi ve öneri eklenir.</div>
+      <div class="form-satir">
+        <div class="alan"><label>Ev sahibi</label><input class="takim" id="t-ev" list="takim-listesi" placeholder="ör. Galatasaray"></div>
+        <div class="alan"><label>Deplasman</label><input class="takim" id="t-dep" list="takim-listesi" placeholder="ör. Fenerbahçe"></div>
+        <div class="alan"><label>MS 1 <span class="ipucu">(ops.)</span></label><input class="oran" id="to1" type="number" step="0.01" min="1.01" placeholder="—"></div>
+        <div class="alan"><label>MS 0</label><input class="oran" id="to0" type="number" step="0.01" min="1.01" placeholder="—"></div>
+        <div class="alan"><label>MS 2</label><input class="oran" id="to2" type="number" step="0.01" min="1.01" placeholder="—"></div>
+        <button class="btn" id="btn-takim" onclick="takimAnaliz()">Analiz Et</button>
+      </div>
+      <div class="not">Türkçe karakter ve kısaltma serbest: “başakşehir”, “göztepe”, “man city”… otomatik eşlenir.</div>
+    </div>
+    <datalist id="takim-listesi"></datalist>
+    <div id="takim-sonuc"></div>
+  </section>
+
+  <!-- ============ GEÇMİŞ MAÇLAR ============ -->
+  <section id="s-gecmis">
+    <div class="kart">
+      <h2>🕰 Geçmiş Maçlar</h2>
+      <div class="alt-baslik">Eski maçları açılış oranlarıyla listeleyin; 📈 düğmesi o maçın oranını Oran Analizi'ne taşır — “bu oranla açılan maçlar tarihte ne yaptı?” sorusuna tek tıkla dönersiniz.</div>
+      <div class="form-satir">
+        <div class="alan"><label>Takım <span class="ipucu">(ops.)</span></label><input class="takim" id="g-takim" list="takim-listesi" placeholder="tümü"></div>
+        <div class="alan"><label>Lig</label><select id="g-lig"><option value="">Tümü</option></select></div>
+        <div class="alan"><label>Adet</label><select id="g-limit"><option>25</option><option selected>50</option><option>100</option><option>200</option></select></div>
+        <button class="btn" id="btn-gecmis" onclick="gecmisYukle()">Listele</button>
+      </div>
+    </div>
+    <div id="gecmis-sonuc"></div>
+  </section>
+
+  <footer>
+    ℹ Bu sistem istatistiksel bir modeldir; kazanç garantisi yoktur, hiçbir çıktı bahis tavsiyesi değildir. 18+ | Sorumlu oyun.<br>
+    Veri: football-data.co.uk — son 10 yıl + güncel sezon, açılış oranlarıyla.
+  </footer>
+</div>
+
+<div id="bildirim"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = t => String(t).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const pct = p => '%' + Math.round(p * 100);
+const pct1 = p => '%' + (p * 100).toFixed(1);
+const SECIM_AD = {MS1:'MS 1 (ev sahibi)', MS0:'MS 0 (beraberlik)', MS2:'MS 2 (deplasman)'};
+
+function bildir(mesaj, hata=false){
+  const b = $('#bildirim');
+  b.textContent = mesaj; b.className = hata ? 'goster hata' : 'goster';
+  clearTimeout(b._z); b._z = setTimeout(() => b.className = '', 4200);
+}
+
+async function api(yol, govde){
+  const secenek = govde !== undefined
+    ? {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(govde)}
+    : {};
+  const y = await fetch(yol, secenek);
+  const j = await y.json().catch(() => ({}));
+  if(!y.ok) throw new Error(j.hata || ('Sunucu hatası (' + y.status + ')'));
+  return j;
+}
+
+/* ---------- sekmeler ---------- */
+document.querySelectorAll('.sekme').forEach(b => b.onclick = () => sekmeAc(b.dataset.s));
+function sekmeAc(ad){
+  document.querySelectorAll('.sekme').forEach(x => x.classList.toggle('aktif', x.dataset.s === ad));
+  document.querySelectorAll('section').forEach(x => x.classList.toggle('aktif', x.id === 's' + '-' + ad));
+}
+
+/* ---------- ortak bileşenler ---------- */
+function barSatir(etiket, p, renk, sagEk=''){
+  return `<div class="bar-satir">
+    <span class="etiket">${etiket}</span>
+    <div class="bar ${renk}"><div style="width:${(p*100).toFixed(1)}%"></div></div>
+    <span class="deger">${pct(p)}${sagEk}</span>
+  </div>`;
+}
+function rozet(ad, deger){ return `<span class="rozet">${ad}: <b>${deger}</b></span>`; }
+function seriHTML(seri){
+  return '<span class="seri">' + [...seri].map(h => `<i class="s-${h}">${h}</i>`).join('') + '</span>';
+}
+
+/* ---------- başlangıç ---------- */
+let TAKIMLAR = [];
+async function baslat(){
+  try{
+    const d = await api('/api/durum');
+    if(d.veri_yok){
+      $('#durum-chipler').innerHTML = '<span class="chip">veri yok</span>';
+      ['oran','takim','gecmis'].forEach(s => $(`#s-${s}`).insertAdjacentHTML('afterbegin',
+        s === 'oran' ? `<div class="kart bos-durum"><div class="dev">📦</div>
+          <p>Henüz maç verisi indirilmemiş. Tek tıkla son 10 yılın skor + oran arşivini indirin (~1 dk).</p>
+          <button class="btn" onclick="veriGuncelle()">🔄 Veriyi İndir</button></div>` : ''));
+      return;
+    }
+    $('#durum-chipler').innerHTML =
+      rozet('Maç', d.toplam_mac.toLocaleString('tr-TR')) +
+      rozet('Arşiv', d.ilk_tarih.slice(-4) + '–' + d.son_tarih.slice(-4)) +
+      rozet('Oran kapsamı', pct1(d.oran_kapsami));
+    const ligSec = $('#g-lig');
+    d.ligler.forEach(l => ligSec.insertAdjacentHTML('beforeend', `<option value="${esc(l.kod)}">${esc(l.ad)}</option>`));
+    TAKIMLAR = await api('/api/takimlar');
+    const dl = $('#takim-listesi');
+    dl.innerHTML = TAKIMLAR.filter(t => t.aktif).map(t => `<option value="${esc(t.ad)}">`).join('') +
+                   TAKIMLAR.filter(t => !t.aktif).map(t => `<option value="${esc(t.ad)}">`).join('');
+  }catch(h){ bildir(h.message, true); }
+}
+baslat();
+
+async function veriGuncelle(){
+  const b = $('#btn-guncelle');
+  b.disabled = true; b.textContent = '⏳ İndiriliyor… (~1 dk)';
+  try{
+    const s = await api('/api/guncelle', {});
+    bildir(`Veri hazır: ${s.indirilen} dosya indirildi, ${s.onbellek} önbellekten.`);
+    location.reload();
+  }catch(h){ bildir(h.message, true); b.disabled = false; b.textContent = '🔄 Veriyi Güncelle'; }
+}
+
+/* ---------- 1) ORAN ANALİZİ ---------- */
+function oranPrefill(o){
+  sekmeAc('oran');
+  $('#o1').value = o[0]; $('#o0').value = o[1]; $('#o2').value = o[2];
+  oranAnaliz();
+  window.scrollTo({top:0, behavior:'smooth'});
+}
+
+async function oranAnaliz(){
+  const oranlar = [$('#o1').value, $('#o0').value, $('#o2').value].map(Number);
+  if(oranlar.some(x => !x || x <= 1)){ bildir('Üç oranı da girin (hepsi 1.00’den büyük olmalı).', true); return; }
+  const b = $('#btn-oran'); b.disabled = true;
+  try{
+    const s = await api('/api/oran-analiz', {oranlar, tolerans: Number($('#tol').value)});
+    $('#oran-sonuc').innerHTML = oranSonucHTML(s);
+  }catch(h){ bildir(h.message, true); }
+  b.disabled = false;
+}
+
+function oranSonucHTML(s){
+  const k = s.kalip;
+  if(!k) return `<div class="kart bos-durum"><div class="dev">🔍</div>
+    <p>Bu oran profiline yeterince benzeyen geçmiş maç bulunamadı. Toleransı artırıp tekrar deneyin.</p></div>`;
+
+  const adil = s.adil;
+  const evsatir = (ad, kalipP, adilP, oran, renk) => {
+    const ev = kalipP * oran - 1;
+    const isaret = ev >= 0.04 ? ' ✅' : (ev >= 0.01 ? ' 🟡' : '');
+    return barSatir(ad, kalipP, renk) + `
+      <div class="ipucu" style="margin:-4px 0 10px 122px">
+        piyasa ${pct(adilP)} bekliyordu → geçmişte ${pct(kalipP)} gerçekleşti
+        &nbsp;|&nbsp; oran ${oran.toFixed(2)} ile beklenen değer
+        <span class="${ev >= 0 ? 'ev-poz' : 'ev-neg'}">${(ev*100).toFixed(1)}%</span>${isaret}
+      </div>`;
+  };
+
+  return `
+  <div class="kart">
+    <h2>Benzer oranla açılan maçlarda ne oldu?</h2>
+    <div class="alt-baslik">${k.ilk_yil}'den bu yana <b>${k.n} benzer maç</b> — ${k.lig_sayisi} lig, tolerans ±${(k.tolerans*100).toFixed(1)} puan, bahisçi marjı ${pct1(s.marj)}</div>
+    ${evsatir('Ev kazandı', k.ms1, adil.ms1, s.oranlar[0], 'b-yesil')}
+    ${evsatir('Beraberlik', k.ms0, adil.ms0, s.oranlar[1], 'b-sari')}
+    ${evsatir('Dep. kazandı', k.ms2, adil.ms2, s.oranlar[2], 'b-mavi')}
+    <div class="rozetler">
+      ${rozet('Maç başı gol', k.gol_ort)} ${rozet('Üst 2.5', pct(k.ust25))} ${rozet('KG Var', pct(k.kg_var))}
+      ${k.skorlar.slice(0,5).map(x => rozet(x.skor, pct(x.oran))).join('')}
+    </div>
+    <div class="not">✅ = geçmiş dağılıma göre +%4 üzeri beklenen değer, 🟡 = +%1–4. Bu yalnızca oran kalıbı sinyalidir; takım analiziyle birlikte değerlendirin.</div>
+  </div>
+  <div class="kart">
+    <h2>Örnek maçlar <span class="ipucu">(en yeni 12)</span></h2>
+    <table>
+      <tr><th>Tarih</th><th>Lig</th><th>Maç</th><th class="orta">Skor</th><th class="sag">1 / X / 2</th></tr>
+      ${k.ornekler.map(o => `<tr>
+        <td>${o.tarih}</td><td>${esc(o.lig)}</td>
+        <td>${esc(o.ev)} – ${esc(o.dep)}</td>
+        <td class="orta skor">${o.skor}</td>
+        <td class="sag">${o.oranlar.map(x => x.toFixed(2)).join(' / ')}</td>
+      </tr>`).join('')}
+    </table>
+  </div>`;
+}
+
+/* ---------- 2) TAKIM ANALİZİ ---------- */
+async function takimAnaliz(){
+  const ev = $('#t-ev').value.trim(), dep = $('#t-dep').value.trim();
+  if(!ev || !dep){ bildir('İki takımı da girin.', true); return; }
+  const o = [$('#to1').value, $('#to0').value, $('#to2').value];
+  const oranlar = o.every(x => x && Number(x) > 1) ? o.map(Number) : null;
+  const b = $('#btn-takim'); b.disabled = true;
+  try{
+    const s = await api('/api/takim-analiz', {ev, dep, oranlar, tolerans: Number($('#tol').value)});
+    $('#takim-sonuc').innerHTML = takimSonucHTML(s);
+  }catch(h){ bildir(h.message, true); }
+  b.disabled = false;
+}
+
+function formKart(f, saha, etiket){
+  return `<div class="kart">
+    <h2>${esc(f.takim)} <span class="ipucu">${etiket}</span></h2>
+    <div style="margin:10px 0 4px">Son ${f.mac} maç: ${seriHTML(f.seri)} &nbsp;<b>${f.puan} puan</b></div>
+    <div class="ipucu">seri soldan sağa eski→yeni</div>
+    <div class="rozetler">
+      ${rozet('Attığı/maç', f.gol_ort)} ${rozet('Yediği/maç', f.yenilen_ort)}
+      ${saha.mac ? rozet(etiket === 'ev sahibi' ? 'Evinde son ' + saha.mac : 'Depl. son ' + saha.mac, saha.seri + ' • ' + saha.puan + ' p') : ''}
+    </div>
+    <div class="mac-listesi">
+      ${f.son_maclar.slice(0,4).map(m => `<div>${m.tarih} &nbsp; ${esc(m.ev)} <span class="skor">${m.skor}</span> ${esc(m.dep)} &nbsp;<i class="seri"><i class="s-${m.sonuc}" style="font-style:normal">${m.sonuc}</i></i></div>`).join('')}
+    </div>
+  </div>`;
+}
+
+function takimSonucHTML(s){
+  let html = '';
+
+  if(s.oneri){
+    const o = s.oneri, y = '★'.repeat(o.yildiz) + '☆'.repeat(5 - o.yildiz);
+    const govde = {
+      degerli: `<div class="buyuk">✅ DEĞERLİ BAHİS: ${SECIM_AD[o.secim]} @ ${o.oran.toFixed(2)}</div>
+                Beklenen değer <b class="ev-poz">+${(o.ev*100).toFixed(1)}%</b> · Önerilen kasa payı (çeyrek Kelly): %${(o.kelly*100).toFixed(1)} · Güven: <span class="yildizlar">${y}</span>`,
+      sinirda: `<div class="buyuk">🟡 SINIRDA: ${SECIM_AD[o.secim]} @ ${o.oran.toFixed(2)}</div>
+                Beklenen değer +${(o.ev*100).toFixed(1)}% — küçük avantaj var ama hata payının içinde. Güven: <span class="yildizlar">${y}</span>`,
+      pas: `<div class="buyuk">⛔ DEĞER YOK — pas geçin</div>
+            En iyi seçim bile ${(o.ev*100).toFixed(1)}% beklenen değerde. Değer yoksa bahis de yok; profesyonel karar budur.`
+    }[o.karar];
+    html += `<div class="banner ${o.karar}">${govde}</div>`;
+  }
+
+  html += `<div class="izgara">
+    ${formKart(s.form_ev, s.form_ev_saha, 'ev sahibi')}
+    ${formKart(s.form_dep, s.form_dep_saha, 'deplasman')}
+  </div>`;
+
+  const h = s.h2h;
+  html += `<div class="kart"><h2>🔁 Aralarındaki Maçlar</h2>`;
+  if(!h.mac){
+    html += `<div class="alt-baslik">Veri setinde karşılaşma kaydı yok (farklı liglerde olabilirler).</div></div>`;
+  }else{
+    const t = h.mac;
+    html += `<div class="alt-baslik">${t} maç: ${esc(s.ev)} <b>${h.ev_galibiyet}G</b> · <b>${h.beraberlik}B</b> · ${esc(s.dep)} <b>${h.dep_galibiyet}G</b></div>
+      ${barSatir(esc(s.ev), h.ev_galibiyet/t, 'b-yesil')}
+      ${barSatir('Beraberlik', h.beraberlik/t, 'b-sari')}
+      ${barSatir(esc(s.dep), h.dep_galibiyet/t, 'b-mavi')}
+      <div class="rozetler">${rozet('Maç başı gol', h.gol_ort)} ${rozet('Üst 2.5', pct(h.ust25))} ${rozet('KG Var', pct(h.kg_var))}</div>
+      <div class="mac-listesi">${h.son_maclar.map(m => `<div>${m.tarih} &nbsp; ${esc(m.ev)} <span class="skor">${m.skor}</span> ${esc(m.dep)}</div>`).join('')}</div></div>`;
+  }
+
+  const p = s.poisson;
+  html += `<div class="kart">
+    <h2>🎯 Poisson Model Tahmini</h2>
+    <div class="alt-baslik">Zaman ağırlıklı güçlerle gol beklentisi: <b>${esc(s.ev)} ${p.lambda_ev}</b> – <b>${p.lambda_dep} ${esc(s.dep)}</b> &nbsp;·&nbsp; ${esc(s.lig_adi)}</div>
+    ${barSatir('MS 1', p.ms1, 'b-yesil')}
+    ${barSatir('MS 0', p.ms0, 'b-sari')}
+    ${barSatir('MS 2', p.ms2, 'b-mavi')}
+    <div class="rozetler">
+      ${rozet('Üst 2.5', pct(p.ust25))} ${rozet('Alt 2.5', pct(p.alt25))} ${rozet('KG Var', pct(p.kg_var))}
+      ${p.skorlar.slice(0,5).map(x => rozet(x.skor, pct(x.p))).join('')}
+    </div>
+    ${p.uyarilar.map(u => `<div class="not">⚠ ${esc(u)}</div>`).join('')}
+  </div>`;
+
+  const k = s.kalip;
+  if(k){
+    html += `<div class="kart">
+      <h2>📈 Oran Kalıbı</h2>
+      <div class="alt-baslik">${k.ilk_yil}'den beri benzer oranla açılan <b>${k.n} maçın</b> gerçek dağılımı (${k.lig_sayisi} lig, ±${(k.tolerans*100).toFixed(1)} puan)</div>
+      ${barSatir('Ev kazandı', k.ms1, 'b-yesil')}
+      ${barSatir('Beraberlik', k.ms0, 'b-sari')}
+      ${barSatir('Dep. kazandı', k.ms2, 'b-mavi')}
+      <div class="rozetler">${rozet('Maç başı gol', k.gol_ort)} ${rozet('Üst 2.5', pct(k.ust25))} ${rozet('KG Var', pct(k.kg_var))}
+        ${k.skorlar.slice(0,4).map(x => rozet(x.skor, pct(x.oran))).join('')}</div>
+    </div>`;
+  }
+
+  if(s.deger){
+    const d = s.deger;
+    html += `<div class="kart">
+      <h2>💰 Değer Analizi</h2>
+      <div class="alt-baslik">Model karışımı: %${Math.round((1-d.w_kalip)*100)} Poisson + %${Math.round(d.w_kalip*100)} oran kalıbı · Bahisçi marjı ${pct1(d.marj)}</div>
+      <table>
+        <tr><th>Seçim</th><th class="sag">Oran</th><th class="sag">Piyasa</th><th class="sag">Model</th><th class="sag">Beklenen değer</th></tr>
+        ${d.satirlar.map(x => `<tr>
+          <td>${SECIM_AD[x.secim]}</td>
+          <td class="sag">${x.oran.toFixed(2)}</td>
+          <td class="sag">${pct(x.piyasa)}</td>
+          <td class="sag">${pct(x.model)}</td>
+          <td class="sag ${x.ev >= 0 ? 'ev-poz' : 'ev-neg'}">${(x.ev*100).toFixed(1)}% ${x.ev >= 0.04 ? '✅' : (x.ev >= 0.01 ? '🟡' : '')}</td>
+        </tr>`).join('')}
+      </table>
+    </div>`;
+  }else{
+    html += `<div class="not" style="margin-top:-6px">İpucu: 1X2 oranlarını da girerseniz oran kalıbı, değer analizi ve öneri eklenir.</div>`;
+  }
+  return html;
+}
+
+/* ---------- 3) GEÇMİŞ MAÇLAR ---------- */
+async function gecmisYukle(){
+  const b = $('#btn-gecmis'); b.disabled = true;
+  try{
+    const q = new URLSearchParams();
+    if($('#g-takim').value.trim()) q.set('takim', $('#g-takim').value.trim());
+    if($('#g-lig').value) q.set('lig', $('#g-lig').value);
+    q.set('limit', $('#g-limit').value);
+    const liste = await api('/api/gecmis-maclar?' + q);
+    $('#gecmis-sonuc').innerHTML = liste.length ? `<div class="kart"><table>
+      <tr><th>Tarih</th><th>Lig</th><th>Maç</th><th class="orta">Skor</th><th class="sag">1 / X / 2</th><th></th></tr>
+      ${liste.map(m => `<tr>
+        <td>${m.tarih}</td><td>${esc(m.lig)}</td>
+        <td>${esc(m.ev)} – ${esc(m.dep)}</td>
+        <td class="orta skor">${m.skor}</td>
+        <td class="sag">${m.oranlar ? m.oranlar.map(x => x.toFixed(2)).join(' / ') : '—'}</td>
+        <td class="sag">${m.oranlar ? `<button class="mini-btn" onclick='oranPrefill(${JSON.stringify(m.oranlar)})'>📈 bu oranı analiz et</button>` : ''}</td>
+      </tr>`).join('')}
+    </table></div>` : `<div class="kart bos-durum"><div class="dev">🤷</div><p>Filtreyle eşleşen maç yok.</p></div>`;
+  }catch(h){ bildir(h.message, true); }
+  b.disabled = false;
+}
+</script>
+</body>
+</html>

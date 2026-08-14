@@ -209,7 +209,8 @@ def poisson_tahmini(df: pd.DataFrame, ev: str, dep: str) -> dict:
 # ------------------------------------------------------------- 4) oran kalıbı
 
 def oran_kalibi(df: pd.DataFrame, oranlar: tuple[float, float, float],
-                tolerans: float = 0.02, min_mac: int = 40) -> dict | None:
+                tolerans: float = 0.02, min_mac: int = 40,
+                ornek_sayisi: int = 0) -> dict | None:
     """Benzer oranla açılmış geçmiş maçlarda gerçekleşen sonuç dağılımı.
 
     Karşılaştırma, bahis marjı arındırılmış olasılık uzayında yapılır; böylece
@@ -240,7 +241,22 @@ def oran_kalibi(df: pd.DataFrame, oranlar: tuple[float, float, float],
     toplam_gol = sec["FTHG"] + sec["FTAG"]
     skor_sayimi = (sec["FTHG"].astype(str) + "-" + sec["FTAG"].astype(str)).value_counts()
 
+    ornekler = []
+    if ornek_sayisi > 0:
+        for s in sec.sort_values("Tarih", ascending=False).head(ornek_sayisi).itertuples():
+            ornekler.append(
+                {
+                    "tarih": s.Tarih,
+                    "lig": s.Div,
+                    "ev": s.HomeTeam,
+                    "dep": s.AwayTeam,
+                    "skor": f"{int(s.FTHG)}-{int(s.FTAG)}",
+                    "oranlar": [float(s.oran_ev), float(s.oran_berabere), float(s.oran_dep)],
+                }
+            )
+
     return {
+        "ornekler": ornekler,
         "n": n,
         "tolerans": kullanilan_tol,
         "lig_sayisi": int(sec["Div"].nunique()),
