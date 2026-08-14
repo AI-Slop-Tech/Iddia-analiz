@@ -1,0 +1,7 @@
+# indirilen maç verileri (tekrar üretilebilir: python tahmin.py guncelle)
+data/
+
+__pycache__/
+*.pyc
+.env
+.venv/
