@@ -18,7 +18,13 @@ def _cmd_guncelle(args: argparse.Namespace) -> int:
         print("Geçerli kodlar: " + ", ".join(f"{k} ({v})" for k, v in veri.LIGLER.items()))
         return 1
     print(f"Veri indiriliyor: {', '.join(ligler)} — son {args.sezon} sezon\n")
-    ozet = veri.indir(ligler, sezon_sayisi=args.sezon, yenile=args.yenile)
+    try:
+        ozet = veri.indir(ligler, sezon_sayisi=args.sezon, yenile=args.yenile)
+    except veri.ErisimHatasi as hata:
+        inen = hata.ozet.get("indirilen", 0)
+        print(f"\n⛔ İndirme durduruldu. ({inen} dosya inmişti, diskte duruyor.)\n")
+        print(hata)
+        return 2
     print(
         f"\nBitti: {ozet['indirilen']} dosya indirildi, "
         f"{ozet['onbellek']} dosya önbellekten kullanıldı, {len(ozet['hata'])} hata."
@@ -26,6 +32,20 @@ def _cmd_guncelle(args: argparse.Namespace) -> int:
     if ozet["hata"]:
         print("(Bazı eski sezon/lig kombinasyonları kaynakta olmayabilir; bu normaldir.)")
     return 0
+
+
+def _cmd_baglanti(args: argparse.Namespace) -> int:  # noqa: ARG001
+    """Kaynağa erişimi ve vekil ayarını indirmeye başlamadan sınar."""
+    s = veri.baglanti_testi()
+    print(f"Kaynak : {s['taban']}")
+    print(f"Vekil  : {s['vekil'] or '(yok — doğrudan bağlantı)'}")
+    if s["tamam"]:
+        print(f"Sonuç  : ✅ erişim var ({s['sure_ms']} ms)")
+        return 0
+    print(f"Sonuç  : ❌ erişilemedi ({s['hata']})")
+    if s.get("ipucu"):
+        print(f"\n{s['ipucu']}")
+    return 2
 
 
 def _cmd_durum(args: argparse.Namespace) -> int:  # noqa: ARG001
@@ -213,6 +233,9 @@ def arg_ayristirici() -> argparse.ArgumentParser:
     d = alt.add_parser("durum", help="İndirilen veri setinin özetini göster")
     d.set_defaults(fn=_cmd_durum)
 
+    bg = alt.add_parser("baglanti", help="Veri kaynağına erişimi/vekil ayarını test et")
+    bg.set_defaults(fn=_cmd_baglanti)
+
     t = alt.add_parser("takimlar", help="Veri setindeki takım adlarını listele")
     t.add_argument("--lig", help="Tek lige filtrele (ör. T1)")
     t.set_defaults(fn=_cmd_takimlar)
@@ -252,6 +275,9 @@ def main(argv: list[str] | None = None) -> int:
     args = arg_ayristirici().parse_args(argv)
     try:
         return args.fn(args)
+    except veri.ErisimHatasi as hata:
+        print(f"\n{hata}")
+        return 2
     except FileNotFoundError as hata:
         print(f"Hata: {hata}")
         return 1

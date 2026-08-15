@@ -3,6 +3,18 @@
 Kaynak: football-data.co.uk — API anahtarı gerektirmeyen, 1993'e kadar giden
 ücretsiz CSV arşivi. Her maç için skorlar ve çok sayıda bahis şirketinin
 (Bet365, Pinnacle, piyasa ortalaması...) açılış/kapanış oranları bulunur.
+
+Kaynak Türkiye'den erişime kapalıdır (bahis oranı yayınladığı için engelli).
+Bu yüzden ağ katmanı iki ortam değişkeniyle yönlendirilebilir:
+
+  IDDAA_PROXY          HTTP(S)/SOCKS5 vekil adresi. Örn:
+                       http://kullanici:parola@vekil.example.com:8080
+                       socks5h://127.0.0.1:1080  (pip install requests[socks])
+  IDDAA_KAYNAK_TABAN   Kaynağın kök adresi. Kendi ters vekiliniz/aynanız varsa
+                       buraya yazın: https://iddaa-veri.hesabiniz.workers.dev
+
+İkisi de boşsa istekler doğrudan gider (requests'in standart HTTP_PROXY /
+HTTPS_PROXY değişkenleri yine geçerlidir).
 """
 
 from __future__ import annotations
@@ -20,9 +32,139 @@ import requests
 VERI_KLASORU = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data"
 )
-KAYNAK_URL = "https://www.football-data.co.uk/mmz4281/{sezon}/{lig}.csv"
-FIKSTUR_URL = "https://www.football-data.co.uk/fixtures.csv"
+VARSAYILAN_TABAN = "https://www.football-data.co.uk"
+KAYNAK_YOLU = "/mmz4281/{sezon}/{lig}.csv"
+FIKSTUR_YOLU = "/fixtures.csv"
 FIKSTUR_TTL_SANIYE = 6 * 3600  # fikstür dosyası en fazla 6 saatte bir tazelenir
+
+KULLANICI_AJANI = "iddaa-analiz/1.0"
+ZAMAN_ASIMI = 30
+DENEME_SAYISI = 3  # geçici ağ hatalarında toplam deneme (2s, 4s bekleyerek)
+
+ERISIM_IPUCU = (
+    "Kaynağa (football-data.co.uk) ağ seviyesinde ulaşılamıyor. Türkiye'den "
+    "erişim engellendiği için bu beklenen bir durumdur.\n"
+    "Çözüm — şu ortam değişkenlerinden birini tanımlayın:\n"
+    "  IDDAA_PROXY=http://kullanici:parola@vekil:8080   (HTTP/SOCKS5 vekil)\n"
+    "  IDDAA_KAYNAK_TABAN=https://<kendi-ters-vekiliniz>  (ör. Cloudflare Worker)\n"
+    "Ayrıntı ve ücretsiz Worker tarifi için: README > Erişim sorunu (Türkiye)"
+)
+
+
+class ErisimHatasi(RuntimeError):
+    """Kaynağa hiç ulaşılamadı: DNS/bağlantı engeli ya da vekil sorunu.
+
+    Tek bir dosyanın eksik olmasından (404, sezon yayınlanmamış) farklıdır;
+    bu hata alındığında kalan dosyaları denemenin anlamı yoktur.
+    """
+
+    def __init__(self, mesaj: str, ozet: dict | None = None):
+        super().__init__(mesaj)
+        self.ozet = ozet or {"indirilen": 0, "onbellek": 0, "hata": []}
+
+
+def kaynak_taban() -> str:
+    """Veri kaynağının kök adresi (IDDAA_KAYNAK_TABAN ile değiştirilebilir)."""
+    return (os.environ.get("IDDAA_KAYNAK_TABAN") or VARSAYILAN_TABAN).strip().rstrip("/")
+
+
+def kaynak_url(sezon: str, lig: str) -> str:
+    return kaynak_taban() + KAYNAK_YOLU.format(sezon=sezon, lig=lig)
+
+
+def fikstur_url() -> str:
+    return kaynak_taban() + FIKSTUR_YOLU
+
+
+def proxy_ayari() -> dict[str, str]:
+    """IDDAA_PROXY tanımlıysa hem http hem https için kullanılacak vekil."""
+    adres = (os.environ.get("IDDAA_PROXY") or "").strip()
+    return {"http": adres, "https": adres} if adres else {}
+
+
+def _vekil_maskele(adres: str) -> str:
+    """Vekil adresindeki kullanıcı adı/parolayı log ve API çıktısından gizler."""
+    return re.sub(r"//[^/@]*@", "//***@", adres)
+
+
+def _oturum() -> requests.Session:
+    """User-Agent'ı ayarlanmış paylaşılan HTTP oturumu."""
+    oturum = requests.Session()
+    oturum.headers["User-Agent"] = KULLANICI_AJANI
+    return oturum
+
+
+def _istek(oturum: requests.Session, url: str, zaman_asimi: int):
+    """Tek istek. Vekil, oturum yerine istek düzeyinde verilir.
+
+    requests, ortamdaki HTTP_PROXY/HTTPS_PROXY değerlerini oturum ayarının
+    ÜSTÜNE yazar (merge_environment_settings); vekili istek düzeyinde geçmek
+    IDDAA_PROXY'nin ortam değişkenlerini gerçekten ezmesini sağlar. Boş dict
+    verildiğinde requests her zamanki ortam davranışına döner.
+    """
+    return oturum.get(url, timeout=zaman_asimi, proxies=proxy_ayari() or None)
+
+
+def _getir(oturum: requests.Session, url: str, zaman_asimi: int = ZAMAN_ASIMI):
+    """Geçici hatalarda üstel bekleyerek tekrar dener; ulaşılamazsa ErisimHatasi."""
+    son_hata: Exception | None = None
+    for deneme in range(DENEME_SAYISI):
+        try:
+            yanit = _istek(oturum, url, zaman_asimi)
+            if yanit.status_code >= 500:  # sunucu/vekil geçici arızası
+                raise requests.HTTPError(f"HTTP {yanit.status_code}")
+            return yanit
+        except requests.RequestException as hata:
+            son_hata = hata
+            if deneme < DENEME_SAYISI - 1:
+                time.sleep(2 ** (deneme + 1))
+    raise ErisimHatasi(f"{ERISIM_IPUCU}\n(son hata: {son_hata})") from son_hata
+
+
+def baglanti_testi(zaman_asimi: int = 15) -> dict:
+    """Kaynağa erişimi tek istekle sınar; vekil ayarını doğrulamak için.
+
+    242 dosyalık indirmeyi başlatmadan önce ayarın çalıştığını görmeyi sağlar.
+    """
+    vekil = proxy_ayari().get("https", "")
+    sonuc = {
+        "taban": kaynak_taban(),
+        "vekil": _vekil_maskele(vekil) if vekil else None,
+        "tamam": False,
+        "sure_ms": None,
+        "hata": None,
+    }
+    basla = time.monotonic()
+    try:
+        yanit = _istek(_oturum(), fikstur_url(), zaman_asimi)
+        sonuc["sure_ms"] = round((time.monotonic() - basla) * 1000)
+        if yanit.status_code != 200:
+            sonuc["hata"] = f"HTTP {yanit.status_code}"
+        elif b"Div" not in yanit.content[:200]:
+            sonuc["hata"] = (
+                "Yanıt CSV değil — vekil/ters vekil araya bir sayfa koyuyor olabilir."
+            )
+        else:
+            sonuc["tamam"] = True
+    except requests.RequestException as hata:
+        sonuc["sure_ms"] = round((time.monotonic() - basla) * 1000)
+        sonuc["hata"] = str(hata)
+    if not sonuc["tamam"]:
+        if sonuc["vekil"]:
+            sonuc["ipucu"] = (
+                "IDDAA_PROXY tanımlı ama üzerinden geçilemedi. Vekil adresini, "
+                "portu ve varsa kullanıcı/parolayı doğrulayın; SOCKS5 için "
+                "`pip install requests[socks]` ve socks5h:// öneki gerekir."
+            )
+        elif sonuc["taban"] != VARSAYILAN_TABAN:
+            sonuc["ipucu"] = (
+                f"IDDAA_KAYNAK_TABAN={sonuc['taban']} adresine ulaşılamıyor. "
+                "Ters vekilinizin ayakta olduğunu ve /fixtures.csv yolunu "
+                "kaynağa ilettiğini doğrulayın."
+            )
+        else:
+            sonuc["ipucu"] = ERISIM_IPUCU
+    return sonuc
 
 # fixtures.csv / sezon dosyalarındaki kitapçı kolon önekleri -> görünen ad
 KITAPCI_ADLARI = {
@@ -126,8 +268,7 @@ def indir(ligler: list[str] | None = None, sezon_sayisi: int = 11, yenile: bool 
     guncel_kod = kodlar[0]
 
     ozet = {"indirilen": 0, "onbellek": 0, "hata": []}
-    oturum = requests.Session()
-    oturum.headers["User-Agent"] = "iddaa-analiz/1.0"
+    oturum = _oturum()
 
     for lig in ligler:
         for sezon in kodlar:
@@ -135,9 +276,11 @@ def indir(ligler: list[str] | None = None, sezon_sayisi: int = 11, yenile: bool 
             if os.path.exists(hedef) and not yenile and sezon != guncel_kod:
                 ozet["onbellek"] += 1
                 continue
-            url = KAYNAK_URL.format(sezon=sezon, lig=lig)
+            url = kaynak_url(sezon, lig)
             try:
-                yanit = oturum.get(url, timeout=30)
+                # Ağ seviyesinde erişim yoksa 242 dosyayı tek tek denemenin
+                # anlamı yok; ErisimHatasi yakalanmadan yukarı fırlatılır.
+                yanit = _getir(oturum, url)
                 if yanit.status_code != 200 or b"Div" not in yanit.content[:200]:
                     raise ValueError(f"HTTP {yanit.status_code}")
                 satirlar = yanit.content.splitlines()
@@ -149,6 +292,9 @@ def indir(ligler: list[str] | None = None, sezon_sayisi: int = 11, yenile: bool 
                     f.write(yanit.content)
                 ozet["indirilen"] += 1
                 print(f"  ✓ {lig} {sezon[:2]}/{sezon[2:]} sezonu indirildi")
+            except ErisimHatasi as h:
+                h.ozet = ozet  # o ana kadar inen dosyalar diskte kalır
+                raise
             except Exception as h:  # noqa: BLE001 - tek dosya hatası akışı durdurmasın
                 ozet["hata"].append(f"{lig} {sezon}: {h}")
                 print(f"  ✗ {lig} {sezon[:2]}/{sezon[2:]} indirilemedi ({h})")
@@ -288,9 +434,14 @@ def fikstur_indir(yenile: bool = False) -> str:
         and time.time() - os.path.getmtime(hedef) < FIKSTUR_TTL_SANIYE
     )
     if not taze:
-        yanit = requests.get(FIKSTUR_URL, timeout=30, headers={"User-Agent": "iddaa-analiz/1.0"})
-        if yanit.status_code != 200 or b"Div" not in yanit.content[:200]:
+        try:
+            yanit = _getir(_oturum(), fikstur_url())
+        except ErisimHatasi:
             if os.path.exists(hedef):  # eski kopya varsa onunla devam et
+                return hedef
+            raise
+        if yanit.status_code != 200 or b"Div" not in yanit.content[:200]:
+            if os.path.exists(hedef):
                 return hedef
             raise RuntimeError(f"Fikstür indirilemedi (HTTP {yanit.status_code})")
         with open(hedef, "wb") as f:
