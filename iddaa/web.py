@@ -4,6 +4,7 @@ Başlatma: python tahmin.py web  (varsayılan http://127.0.0.1:8000)
 
 Uç noktalar:
   GET  /api/durum          veri seti özeti (yoksa {"veri_yok": true})
+  GET  /api/baglanti       kaynağa erişim/vekil testi (IDDAA_PROXY doğrulama)
   POST /api/guncelle       veriyi indir + belleğe yeniden yükle
   GET  /api/takimlar       takım listesi (arayüz seçicileri için)
   POST /api/oran-analiz    {"oranlar":[1,X,2], "tolerans":0.02} -> oran kalıbı
@@ -214,10 +215,18 @@ def uygulama_olustur():
             }
         )
 
+    @app.get("/api/baglanti")
+    def baglanti():
+        """Veri kaynağına erişim/vekil testi — indirmeye başlamadan önce."""
+        return jsonify(veri.baglanti_testi())
+
     @app.post("/api/guncelle")
     def guncelle():
         govde = request.get_json(silent=True) or {}
-        ozet = veri.indir(govde.get("ligler"))
+        try:
+            ozet = veri.indir(govde.get("ligler"))
+        except veri.ErisimHatasi as hata:
+            return jsonify({"hata": str(hata), "indirilen": hata.ozet.get("indirilen", 0)}), 502
         try:
             _df(zorla=True)
         except FileNotFoundError:
