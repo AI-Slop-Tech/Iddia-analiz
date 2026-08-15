@@ -1,0 +1,564 @@
+"""Analiz motoru.
+
+Dört bağımsız sinyal üretir, sonra bunları tek bir öneride birleştirir:
+
+1. Form        — iki takımın son maçları (genel + saha bazlı).
+2. H2H         — iki takımın birbirine karşı geçmişi.
+3. Poisson     — zaman ağırlıklı hücum/savunma güçlerinden gol beklentisi ve
+                 skor olasılık matrisi (profesyonel modellemenin standart temeli).
+4. Oran kalıbı — bugünkü oranlara benzer oranla açılmış geçmiş maçlarda
+                 gerçekte ne olduğu (kullanıcının istediği "son 10 yılda aynı
+                 oranlar" analizi).
+
+Değer analizi: model olasılığı ile bahis oranının içerdiği olasılık
+karşılaştırılır; pozitif beklenen değer (EV) taşıyan seçimler işaretlenir.
+"""
+
+from __future__ import annotations
+
+import math
+
+import pandas as pd
+
+YARI_OMUR_GUN = 365.0   # 1 yıl önceki maç, bugünkünün yarısı kadar ağırlık taşır
+MAKS_GOL = 8            # skor matrisinin boyutu (0-8 gol)
+MIN_MAC_UYARI = 8       # takım başına bu sayının altında maç varsa "sınırlı veri" uyarısı
+
+
+# ---------------------------------------------------------------- yardımcılar
+
+def _agirlik(tarihler: pd.Series, referans: pd.Timestamp) -> pd.Series:
+    gun = (referans - tarihler).dt.days.clip(lower=0)
+    return 0.5 ** (gun / YARI_OMUR_GUN)
+
+
+def _agirlikli_ort(degerler: pd.Series, agirliklar: pd.Series, varsayilan: float) -> float:
+    toplam_w = float(agirliklar.sum())
+    if toplam_w <= 0:
+        return varsayilan
+    return float((degerler * agirliklar).sum() / toplam_w)
+
+
+def _poisson_pmf(k: int, lam: float) -> float:
+    return math.exp(-lam) * lam**k / math.factorial(k)
+
+
+def adil_olasilik(oran_ev: float, oran_b: float, oran_dep: float) -> tuple[float, float, float]:
+    """Bahis marjı arındırılmış (toplamı 1 olan) olasılık üçlüsü."""
+    q = (1 / oran_ev, 1 / oran_b, 1 / oran_dep)
+    s = sum(q)
+    return q[0] / s, q[1] / s, q[2] / s
+
+
+# -------------------------------------------------------------------- 1) form
+
+def form_analizi(df: pd.DataFrame, takim: str, n: int = 10, saha: str | None = None) -> dict:
+    """Takımın son n maçının özeti. saha='ev' sadece iç saha, 'dep' sadece deplasman."""
+    if saha == "ev":
+        m = df[df["HomeTeam"] == takim]
+    elif saha == "dep":
+        m = df[df["AwayTeam"] == takim]
+    else:
+        m = df[(df["HomeTeam"] == takim) | (df["AwayTeam"] == takim)]
+    m = m.sort_values("Tarih").tail(n)
+
+    seri, puan, atilan, yenilen, maclar = [], 0, 0, 0, []
+    for satir in m.itertuples():
+        evde = satir.HomeTeam == takim
+        gol_at = satir.FTHG if evde else satir.FTAG
+        gol_ye = satir.FTAG if evde else satir.FTHG
+        sonuc = "G" if gol_at > gol_ye else ("B" if gol_at == gol_ye else "M")
+        seri.append(sonuc)
+        puan += {"G": 3, "B": 1, "M": 0}[sonuc]
+        atilan += gol_at
+        yenilen += gol_ye
+        maclar.append(
+            {
+                "tarih": satir.Tarih,
+                "ev": satir.HomeTeam,
+                "dep": satir.AwayTeam,
+                "skor": f"{satir.FTHG}-{satir.FTAG}",
+                "sonuc": sonuc,
+            }
+        )
+
+    adet = len(seri)
+    return {
+        "takim": takim,
+        "mac": adet,
+        "seri": "".join(seri),  # soldan sağa eski -> yeni
+        "puan": puan,
+        "gol_ort": atilan / adet if adet else 0.0,
+        "yenilen_ort": yenilen / adet if adet else 0.0,
+        "son_maclar": list(reversed(maclar)),  # rapor için yeni -> eski
+    }
+
+
+# --------------------------------------------------------------------- 2) H2H
+
+def h2h_analizi(df: pd.DataFrame, ev: str, dep: str) -> dict:
+    """İki takımın (saha fark etmeksizin) birbirine karşı tüm maçları."""
+    m = df[
+        ((df["HomeTeam"] == ev) & (df["AwayTeam"] == dep))
+        | ((df["HomeTeam"] == dep) & (df["AwayTeam"] == ev))
+    ].sort_values("Tarih")
+
+    if m.empty:
+        return {"mac": 0}
+
+    ev_g = int((((m["HomeTeam"] == ev) & (m["FTR"] == "H")) | ((m["AwayTeam"] == ev) & (m["FTR"] == "A"))).sum())
+    dep_g = int((((m["HomeTeam"] == dep) & (m["FTR"] == "H")) | ((m["AwayTeam"] == dep) & (m["FTR"] == "A"))).sum())
+    toplam_gol = m["FTHG"] + m["FTAG"]
+
+    return {
+        "mac": len(m),
+        "ev_galibiyet": ev_g,
+        "beraberlik": int((m["FTR"] == "D").sum()),
+        "dep_galibiyet": dep_g,
+        "gol_ort": float(toplam_gol.mean()),
+        "ust25": float((toplam_gol > 2.5).mean()),
+        "kg_var": float(((m["FTHG"] > 0) & (m["FTAG"] > 0)).mean()),
+        "son_maclar": [
+            {
+                "tarih": s.Tarih,
+                "ev": s.HomeTeam,
+                "dep": s.AwayTeam,
+                "skor": f"{s.FTHG}-{s.FTAG}",
+            }
+            for s in m.tail(6).itertuples()
+        ][::-1],
+    }
+
+
+# ----------------------------------------------------------------- 3) Poisson
+
+def _guc_katsayisi(maclar: pd.DataFrame, gol_kolonu: str, referans: pd.Timestamp,
+                   lig_ort: float) -> tuple[float, float]:
+    """Zaman ağırlıklı gol ortalamasının lig ortalamasına oranı ve etkin maç sayısı."""
+    if maclar.empty or lig_ort <= 0:
+        return 1.0, 0.0
+    w = _agirlik(maclar["Tarih"], referans)
+    ort = _agirlikli_ort(maclar[gol_kolonu], w, lig_ort)
+    katsayi = ort / lig_ort
+    return float(min(max(katsayi, 0.25), 4.0)), float(w.sum())
+
+
+def poisson_tahmini(df: pd.DataFrame, ev: str, dep: str, lig_ipucu: str | None = None) -> dict:
+    """Zaman ağırlıklı hücum/savunma güçleriyle gol beklentisi ve olasılıklar."""
+    referans = df["Tarih"].max() + pd.Timedelta(days=1)
+
+    # Modeli ev sahibinin ligindeki maçlarla kur (lig ortalamaları o lige ait olmalı).
+    # Takımın geçmişi yoksa (yeni çıkan) fikstürden gelen lig ipucu kullanılır.
+    ev_maclari = df[(df["HomeTeam"] == ev) | (df["AwayTeam"] == ev)]
+    if not ev_maclari.empty:
+        lig_kodu = ev_maclari.sort_values("Tarih")["Div"].iloc[-1]
+    elif lig_ipucu and (df["Div"] == lig_ipucu).any():
+        lig_kodu = lig_ipucu
+    else:
+        lig_kodu = df["Div"].iloc[-1]
+    L = df[df["Div"] == lig_kodu]
+
+    w_lig = _agirlik(L["Tarih"], referans)
+    lig_ev_ort = _agirlikli_ort(L["FTHG"], w_lig, 1.5)
+    lig_dep_ort = _agirlikli_ort(L["FTAG"], w_lig, 1.2)
+
+    evde = L[L["HomeTeam"] == ev]
+    depte = L[L["AwayTeam"] == dep]
+
+    ev_atak, n1 = _guc_katsayisi(evde, "FTHG", referans, lig_ev_ort)      # evinde attığı
+    ev_defans, _ = _guc_katsayisi(evde, "FTAG", referans, lig_dep_ort)    # evinde yediği
+    dep_atak, n2 = _guc_katsayisi(depte, "FTAG", referans, lig_dep_ort)   # deplasmanda attığı
+    dep_defans, _ = _guc_katsayisi(depte, "FTHG", referans, lig_ev_ort)   # deplasmanda yediği
+
+    lam_ev = min(max(lig_ev_ort * ev_atak * dep_defans, 0.2), 5.5)
+    lam_dep = min(max(lig_dep_ort * dep_atak * ev_defans, 0.2), 5.5)
+
+    uyarilar = []
+    if len(evde) < MIN_MAC_UYARI:
+        uyarilar.append(f"{ev} için iç saha verisi sınırlı ({len(evde)} maç)")
+    if len(depte) < MIN_MAC_UYARI:
+        uyarilar.append(f"{dep} için deplasman verisi sınırlı ({len(depte)} maç)")
+
+    # Skor olasılık matrisi (0..MAKS_GOL), kesme kaybına karşı normalize edilir.
+    p_ev = [_poisson_pmf(i, lam_ev) for i in range(MAKS_GOL + 1)]
+    p_dep = [_poisson_pmf(j, lam_dep) for j in range(MAKS_GOL + 1)]
+    matris = [[p_ev[i] * p_dep[j] for j in range(MAKS_GOL + 1)] for i in range(MAKS_GOL + 1)]
+    toplam = sum(sum(satir) for satir in matris)
+
+    ms1 = sum(matris[i][j] for i in range(MAKS_GOL + 1) for j in range(MAKS_GOL + 1) if i > j) / toplam
+    ms0 = sum(matris[i][i] for i in range(MAKS_GOL + 1)) / toplam
+    ms2 = 1.0 - ms1 - ms0
+    ust25 = sum(matris[i][j] for i in range(MAKS_GOL + 1) for j in range(MAKS_GOL + 1) if i + j > 2.5) / toplam
+    kg_var = sum(matris[i][j] for i in range(1, MAKS_GOL + 1) for j in range(1, MAKS_GOL + 1)) / toplam
+
+    skorlar = sorted(
+        ((f"{i}-{j}", matris[i][j] / toplam) for i in range(MAKS_GOL + 1) for j in range(MAKS_GOL + 1)),
+        key=lambda x: x[1],
+        reverse=True,
+    )[:6]
+
+    def _esik_ust(esik: float) -> float:
+        return sum(
+            matris[i][j] for i in range(MAKS_GOL + 1) for j in range(MAKS_GOL + 1) if i + j > esik
+        ) / toplam
+
+    # İlk yarı modeli: ligdeki gollerin ilk yarıya düşen payı veriden ölçülür
+    # (tipik ~%45), gol beklentisi bu payla ilk/ikinci yarıya bölüştürülür.
+    ht = L.dropna(subset=["HTHG", "HTAG"])
+    toplam_ft = float((ht["FTHG"] + ht["FTAG"]).sum())
+    iy_pay = float((ht["HTHG"] + ht["HTAG"]).sum()) / toplam_ft if toplam_ft > 0 else 0.45
+    iy_pay = min(max(iy_pay, 0.35), 0.55)
+
+    def _yari_blok(lam_e: float, lam_d: float) -> dict:
+        p_e = [_poisson_pmf(i, lam_e) for i in range(MAKS_GOL + 1)]
+        p_d = [_poisson_pmf(j, lam_d) for j in range(MAKS_GOL + 1)]
+        m = [[p_e[i] * p_d[j] for j in range(MAKS_GOL + 1)] for i in range(MAKS_GOL + 1)]
+        t = sum(sum(satir) for satir in m)
+        skor = max(
+            ((f"{i}-{j}", m[i][j] / t) for i in range(MAKS_GOL + 1) for j in range(MAKS_GOL + 1)),
+            key=lambda x: x[1],
+        )
+        lam_t = lam_e + lam_d
+        return {
+            "ms1": sum(m[i][j] for i in range(MAKS_GOL + 1) for j in range(MAKS_GOL + 1) if i > j) / t,
+            "ms0": sum(m[i][i] for i in range(MAKS_GOL + 1)) / t,
+            "ust05": 1.0 - math.exp(-lam_t),
+            "ust15": 1.0 - math.exp(-lam_t) * (1.0 + lam_t),
+            "skor": skor,
+        }
+
+    iy = _yari_blok(lam_ev * iy_pay, lam_dep * iy_pay)
+    y2 = _yari_blok(lam_ev * (1 - iy_pay), lam_dep * (1 - iy_pay))
+    iy["ms2"] = 1.0 - iy["ms1"] - iy["ms0"]
+
+    return {
+        "lig": lig_kodu,
+        "lambda_ev": lam_ev,
+        "lambda_dep": lam_dep,
+        "ms1": ms1,
+        "ms0": ms0,
+        "ms2": ms2,
+        "ust15": _esik_ust(1.5),
+        "ust25": ust25,
+        "ust35": _esik_ust(3.5),
+        "alt25": 1.0 - ust25,
+        "kg_var": kg_var,
+        "skorlar": skorlar,
+        "iy_pay": iy_pay,
+        "iy": iy,
+        "y2_skor": y2["skor"],
+        "uyarilar": uyarilar,
+    }
+
+
+# ------------------------------------------------------------- 4) oran kalıbı
+
+def oran_kalibi(df: pd.DataFrame, oranlar: tuple[float, float, float],
+                tolerans: float = 0.02, min_mac: int = 40,
+                ornek_sayisi: int = 0) -> dict | None:
+    """Benzer oranla açılmış geçmiş maçlarda gerçekleşen sonuç dağılımı.
+
+    Karşılaştırma, bahis marjı arındırılmış olasılık uzayında yapılır; böylece
+    farklı bahisçilerin/yılların marj farkları kalıbı bozmaz. Yeterli örnek
+    bulunamazsa tolerans kademeli olarak genişletilir.
+    """
+    D = df.dropna(subset=["oran_ev", "oran_berabere", "oran_dep"]).copy()
+    if D.empty:
+        return None
+
+    h_ev, h_b, h_dep = adil_olasilik(*oranlar)
+    q_ev, q_b, q_dep = 1 / D["oran_ev"], 1 / D["oran_berabere"], 1 / D["oran_dep"]
+    s = q_ev + q_b + q_dep
+    fark = pd.concat(
+        [(q_ev / s - h_ev).abs(), (q_b / s - h_b).abs(), (q_dep / s - h_dep).abs()], axis=1
+    ).max(axis=1)
+
+    kullanilan_tol, sec = tolerans, D[fark <= tolerans]
+    for carpan in (1.5, 2.0, 2.5):
+        if len(sec) >= min_mac:
+            break
+        kullanilan_tol = tolerans * carpan
+        sec = D[fark <= kullanilan_tol]
+    if len(sec) < 10:
+        return None
+
+    n = len(sec)
+    toplam_gol = sec["FTHG"] + sec["FTAG"]
+    skor_sayimi = (sec["FTHG"].astype(str) + "-" + sec["FTAG"].astype(str)).value_counts()
+
+    ornekler = []
+    if ornek_sayisi > 0:
+        for s in sec.sort_values("Tarih", ascending=False).head(ornek_sayisi).itertuples():
+            iy_var = not (pd.isna(s.HTHG) or pd.isna(s.HTAG))
+            ornekler.append(
+                {
+                    "tarih": s.Tarih,
+                    "lig": s.Div,
+                    "ev": s.HomeTeam,
+                    "dep": s.AwayTeam,
+                    "skor": f"{int(s.FTHG)}-{int(s.FTAG)}",
+                    "fthg": int(s.FTHG),
+                    "ftag": int(s.FTAG),
+                    "hthg": int(s.HTHG) if iy_var else None,
+                    "htag": int(s.HTAG) if iy_var else None,
+                    "oranlar": [float(s.oran_ev), float(s.oran_berabere), float(s.oran_dep)],
+                }
+            )
+
+    return {
+        "ornekler": ornekler,
+        "n": n,
+        "tolerans": kullanilan_tol,
+        "lig_sayisi": int(sec["Div"].nunique()),
+        "ilk_tarih": sec["Tarih"].min(),
+        "ms1": float((sec["FTR"] == "H").mean()),
+        "ms0": float((sec["FTR"] == "D").mean()),
+        "ms2": float((sec["FTR"] == "A").mean()),
+        "gol_ort": float(toplam_gol.mean()),
+        "ust25": float((toplam_gol > 2.5).mean()),
+        "kg_var": float(((sec["FTHG"] > 0) & (sec["FTAG"] > 0)).mean()),
+        "skorlar": [(skor, int(adet), adet / n) for skor, adet in skor_sayimi.head(6).items()],
+    }
+
+
+def tahmin_hucreleri(poisson: dict, kalip: dict | None = None) -> dict:
+    """Tahmin tablosu satırı: her pazar için yön + olasılık.
+
+    MS Üst 2.5 ve KG için kalıp mevcutsa Poisson ile 50/50 harmanlanır
+    (kalıp, benzer oranlı maçların gerçekleşmiş frekansıdır); diğer hücreler
+    saf Poisson modelinden gelir.
+    """
+    def ikili(p: float, ust_ad: str = "Ü", alt_ad: str = "A") -> dict:
+        return {"sec": ust_ad if p >= 0.5 else alt_ad, "p": p if p >= 0.5 else 1 - p}
+
+    def uclu(p1: float, p0: float, p2: float) -> dict:
+        en = max((("1", p1), ("X", p0), ("2", p2)), key=lambda x: x[1])
+        return {"sec": en[0], "p": en[1]}
+
+    p_ust25 = poisson["ust25"]
+    p_kg = poisson["kg_var"]
+    if kalip:
+        p_ust25 = 0.5 * p_ust25 + 0.5 * kalip["ust25"]
+        p_kg = 0.5 * p_kg + 0.5 * kalip["kg_var"]
+
+    iy = poisson["iy"]
+    return {
+        "iy05": ikili(iy["ust05"]),
+        "iy15": ikili(iy["ust15"]),
+        "ms15": ikili(poisson["ust15"]),
+        "ms25": ikili(p_ust25),
+        "ms35": ikili(poisson["ust35"]),
+        "kg": ikili(p_kg, "Var", "Yok"),
+        "iy_skor": iy["skor"][0],
+        "y2_skor": poisson["y2_skor"][0],
+        "ms_skor": poisson["skorlar"][0][0],
+        "iy_sonuc": uclu(iy["ms1"], iy["ms0"], iy["ms2"]),
+        "ms_sonuc": uclu(poisson["ms1"], poisson["ms0"], poisson["ms2"]),
+    }
+
+
+def gercek_hucreler(fthg: int, ftag: int, hthg: int | None, htag: int | None) -> dict:
+    """Oynanmış bir maçın tahmin tablosu kolonlarındaki gerçekleşmiş değerleri."""
+    def sonuc(a: int, b: int) -> str:
+        return "1" if a > b else ("X" if a == b else "2")
+
+    toplam = fthg + ftag
+    hucre = {
+        "ms15": "Ü" if toplam > 1.5 else "A",
+        "ms25": "Ü" if toplam > 2.5 else "A",
+        "ms35": "Ü" if toplam > 3.5 else "A",
+        "kg": "Var" if fthg > 0 and ftag > 0 else "Yok",
+        "ms_skor": f"{fthg}-{ftag}",
+        "ms_sonuc": sonuc(fthg, ftag),
+        "iy05": None, "iy15": None, "iy_skor": None, "y2_skor": None, "iy_sonuc": None,
+    }
+    if hthg is not None and htag is not None:
+        iy_toplam = hthg + htag
+        hucre.update(
+            {
+                "iy05": "Ü" if iy_toplam > 0.5 else "A",
+                "iy15": "Ü" if iy_toplam > 1.5 else "A",
+                "iy_skor": f"{hthg}-{htag}",
+                "y2_skor": f"{fthg - hthg}-{ftag - htag}",
+                "iy_sonuc": sonuc(hthg, htag),
+            }
+        )
+    return hucre
+
+
+# ----------------------------------------------------------------- 5) Elo
+
+def elo_hesapla(df: pd.DataFrame, k: float = 20.0, ev_avantaji: float = 60.0) -> dict[str, float]:
+    """Tüm arşivi kronolojik gezerek takım Elo reytinglerini üretir (başlangıç 1500)."""
+    r: dict[str, float] = {}
+    for s in df.sort_values("Tarih").itertuples():
+        ra, rb = r.get(s.HomeTeam, 1500.0), r.get(s.AwayTeam, 1500.0)
+        beklenen = 1.0 / (1.0 + 10 ** (-((ra + ev_avantaji) - rb) / 400.0))
+        skor = 1.0 if s.FTR == "H" else (0.5 if s.FTR == "D" else 0.0)
+        r[s.HomeTeam] = ra + k * (skor - beklenen)
+        r[s.AwayTeam] = rb - k * (skor - beklenen)
+    return r
+
+
+# ------------------------------------------------------------ değer + öneri
+
+W_PIYASA = 0.35     # model karışımında piyasa (marj arındırılmış oran) payı
+ORAN_TAVANI = 3.60  # sürpriz oran filtresi: bu oranın üstü öneriye giremez
+                    # (yüksek oranların sistematik pahalı fiyatlandığı — favorite-longshot
+                    # bias — hem literatürde hem kendi backtest'imizde doğrulandı)
+
+
+def deger_analizi(oranlar: tuple[float, float, float], poisson: dict,
+                  kalip: dict | None,
+                  ust_alt: tuple[float, float] | None = None) -> dict:
+    """Model olasılığı ile oranın içerdiği olasılığı karşılaştırır (value bet).
+
+    Model karışımı üç bileşenlidir:
+      piyasa %35 (bahis piyasası uzun vadede en iyi tekil tahmincidir; modele
+      karıştırmak aşırı özgüveni ve sahte 'değer' sinyallerini azaltır)
+      + oran kalıbı %0-25 (örneklem büyüdükçe artar, 200+ maçta tavana ulaşır)
+      + Poisson kalan pay.
+    ust_alt verilirse Üst/Alt 2.5 pazarı için de değer satırları eklenir.
+    """
+    o = dict(zip(("MS1", "MS0", "MS2"), oranlar))
+    p_poisson = {"MS1": poisson["ms1"], "MS0": poisson["ms0"], "MS2": poisson["ms2"]}
+    a1, a0, a2 = adil_olasilik(*oranlar)
+    p_adil = {"MS1": a1, "MS0": a0, "MS2": a2}
+
+    w_kalip = 0.0
+    if kalip and kalip["n"] >= 30:
+        w_kalip = min(kalip["n"] / 200.0, 1.0) * 0.25
+    w_poisson = 1.0 - W_PIYASA - w_kalip
+    p_kalip = {"MS1": kalip["ms1"], "MS0": kalip["ms0"], "MS2": kalip["ms2"]} if kalip else p_poisson
+
+    model = {
+        k: w_poisson * p_poisson[k] + w_kalip * p_kalip[k] + W_PIYASA * p_adil[k] for k in o
+    }
+    norm = sum(model.values())
+    model = {k: v / norm for k, v in model.items()}
+
+    marj = sum(1 / v for v in o.values()) - 1.0
+
+    def _satir(secim: str, oran: float, piyasa_p: float, model_p: float) -> dict:
+        ev_degeri = model_p * oran - 1.0
+        tam_kelly = max(0.0, ev_degeri / (oran - 1.0)) if oran > 1 else 0.0
+        return {
+            "secim": secim,
+            "oran": oran,
+            "piyasa": piyasa_p,
+            "model": model_p,
+            "ev": ev_degeri,
+            "kelly": min(tam_kelly / 4.0, 0.05),  # çeyrek Kelly, %5 kasa tavanı
+        }
+
+    satirlar = [_satir(k, o[k], p_adil[k], model[k]) for k in ("MS1", "MS0", "MS2")]
+    model_p = dict(model)
+
+    if ust_alt and min(ust_alt) > 1.0:
+        o_ust, o_alt = ust_alt
+        q_u, q_a = 1 / o_ust, 1 / o_alt
+        adil_ust = q_u / (q_u + q_a)
+        kalip_ust = kalip["ust25"] if kalip else poisson["ust25"]
+        m_ust = w_poisson * poisson["ust25"] + w_kalip * kalip_ust + W_PIYASA * adil_ust
+        satirlar.append(_satir("ÜST 2.5", o_ust, adil_ust, m_ust))
+        satirlar.append(_satir("ALT 2.5", o_alt, 1 - adil_ust, 1 - m_ust))
+        model_p["ÜST 2.5"] = m_ust
+        model_p["ALT 2.5"] = 1 - m_ust
+
+    return {
+        "satirlar": satirlar,
+        "marj": marj,
+        "w_kalip": w_kalip,
+        "w_piyasa": W_PIYASA,
+        "model_p": model_p,
+    }
+
+
+def oneri_uret(deger: dict, poisson: dict, kalip: dict | None,
+               form_ev: dict, form_dep: dict, elo_farki: float | None = None) -> dict:
+    """Sinyalleri tek bir karara bağlar: seçim, güven yıldızı, karar."""
+    adaylar = [s for s in deger["satirlar"] if s["oran"] <= ORAN_TAVANI]
+    surpriz_filtresi = not adaylar
+    en_iyi = max(adaylar or deger["satirlar"], key=lambda s: s["ev"])
+    secim = en_iyi["secim"]
+
+    yildiz = 1
+    if secim in ("MS1", "MS0", "MS2"):
+        if max(["ms1", "ms0", "ms2"], key=lambda k: poisson[k]).upper() == secim:
+            yildiz += 1
+        if kalip and max(["ms1", "ms0", "ms2"], key=lambda k: kalip[k]).upper() == secim:
+            yildiz += 1
+        puan_farki = form_ev["puan"] - form_dep["puan"]
+        form_yonu = "MS1" if puan_farki >= 3 else ("MS2" if puan_farki <= -3 else "MS0")
+        if form_yonu == secim:
+            yildiz += 1
+        if elo_farki is not None:
+            elo_yonu = "MS1" if elo_farki >= 50 else ("MS2" if elo_farki <= -50 else "MS0")
+            if elo_yonu == secim:
+                yildiz += 1
+    else:  # ÜST 2.5 / ALT 2.5
+        ust_secildi = secim.startswith("ÜST")
+        if (poisson["ust25"] > 0.53) == ust_secildi and abs(poisson["ust25"] - 0.5) > 0.03:
+            yildiz += 1
+        if kalip and (kalip["ust25"] > 0.53) == ust_secildi and abs(kalip["ust25"] - 0.5) > 0.03:
+            yildiz += 1
+    if en_iyi["ev"] >= 0.05:
+        yildiz += 1
+    if poisson["uyarilar"]:
+        yildiz -= 1
+    yildiz = max(1, min(5, yildiz))
+
+    if en_iyi["ev"] >= 0.04:
+        karar = "degerli"
+    elif en_iyi["ev"] >= 0.01:
+        karar = "sinirda"
+    else:
+        karar = "pas"
+    if surpriz_filtresi:
+        karar = "pas"  # tüm adaylar oran tavanının üstünde: longshot tuzağı, oynanmaz
+
+    return {
+        "secim": secim,
+        "oran": en_iyi["oran"],
+        "ev": en_iyi["ev"],
+        "kelly": en_iyi["kelly"],
+        "yildiz": yildiz,
+        "karar": karar,
+    }
+
+
+def mac_analizi(df: pd.DataFrame, ev: str, dep: str,
+                oranlar: tuple[float, float, float] | None = None,
+                tolerans: float = 0.02,
+                elo: dict[str, float] | None = None,
+                ust_alt: tuple[float, float] | None = None,
+                lig_ipucu: str | None = None,
+                ornek_sayisi: int = 0) -> dict:
+    """Tüm analiz adımlarını çalıştırıp tek sözlükte toplar (rapor girdisi)."""
+    sonuc = {
+        "ev": ev,
+        "dep": dep,
+        "oranlar": oranlar,
+        "form_ev": form_analizi(df, ev, n=10),
+        "form_dep": form_analizi(df, dep, n=10),
+        "form_ev_saha": form_analizi(df, ev, n=5, saha="ev"),
+        "form_dep_saha": form_analizi(df, dep, n=5, saha="dep"),
+        "h2h": h2h_analizi(df, ev, dep),
+        "poisson": poisson_tahmini(df, ev, dep, lig_ipucu=lig_ipucu),
+        "elo": None,
+        "kalip": None,
+        "deger": None,
+        "oneri": None,
+    }
+    elo_farki = None
+    if elo and ev in elo and dep in elo:
+        elo_farki = elo[ev] - elo[dep]
+        sonuc["elo"] = {"ev": elo[ev], "dep": elo[dep], "fark": elo_farki}
+    if oranlar:
+        sonuc["kalip"] = oran_kalibi(df, oranlar, tolerans=tolerans, ornek_sayisi=ornek_sayisi)
+        sonuc["deger"] = deger_analizi(oranlar, sonuc["poisson"], sonuc["kalip"], ust_alt=ust_alt)
+        sonuc["oneri"] = oneri_uret(
+            sonuc["deger"], sonuc["poisson"], sonuc["kalip"],
+            sonuc["form_ev"], sonuc["form_dep"], elo_farki=elo_farki,
+        )
+    return sonuc
