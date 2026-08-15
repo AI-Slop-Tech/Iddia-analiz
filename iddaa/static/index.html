@@ -173,6 +173,7 @@
 <div class="sarici">
   <nav>
     <button class="sekme aktif" data-s="hafta">📅 Bu Hafta</button>
+    <button class="sekme" data-s="tablo">📋 Tahmin Tablosu</button>
     <button class="sekme" data-s="oran">📈 Oran Analizi</button>
     <button class="sekme" data-s="takim">🎯 Takım Analizi</button>
     <button class="sekme" data-s="gecmis">🕰 Geçmiş Maçlar</button>
@@ -195,6 +196,24 @@
     <div class="gun-pilleri" id="gun-pilleri"></div>
     <div id="one-cikanlar"></div>
     <div id="hafta-liste"></div>
+  </section>
+
+  <!-- ============ TAHMİN TABLOSU ============ -->
+  <section id="s-tablo">
+    <div class="kart">
+      <h2>📋 Tahmin Tablosu</h2>
+      <div class="alt-baslik">
+        Seçilen günün <b>tüm maçları</b> için model tahminleri tek tabloda: İY/MS Alt-Üst, KG, skorlar ve sonuçlar.
+        Renk tahmin yönünü (yeşil Üst/Var/1 · kırmızı Alt/Yok/2 · sarı X), koyuluk ve yüzde modelin güvenini gösterir.
+        İY tahminleri, ligdeki gollerin ilk yarı payı veriden ölçülerek türetilir.
+      </div>
+      <div class="gun-pilleri" id="tablo-pilleri"></div>
+      <div class="form-satir">
+        <div class="alan"><label>Lig</label><select id="tablo-lig" onchange="tabloCiz()"><option value="">Tümü</option></select></div>
+        <button class="btn" id="btn-tablo" onclick="tabloOlustur()">📋 Tabloyu Oluştur</button>
+      </div>
+    </div>
+    <div id="tablo-sonuc"></div>
   </section>
 
   <!-- ============ ORAN ANALİZİ ============ -->
@@ -323,6 +342,7 @@ async function baslat(){
     d.ligler.forEach(l => {
       $('#g-lig').insertAdjacentHTML('beforeend', `<option value="${esc(l.kod)}">${esc(l.ad)}</option>`);
       $('#h-lig').insertAdjacentHTML('beforeend', `<option value="${esc(l.kod)}">${esc(l.ad)}</option>`);
+      $('#tablo-lig').insertAdjacentHTML('beforeend', `<option value="${esc(l.kod)}">${esc(l.ad)}</option>`);
     });
     haftaYukle(false);
     TAKIMLAR = await api('/api/takimlar');
@@ -355,7 +375,8 @@ async function haftaYukle(yenile){
       return;
     }
     AKTIF_GUN = HAFTA.gunler[0].tarih;
-    pilCiz(); gunCiz();
+    AKTIF_TABLO_GUN = HAFTA.gunler[0].tarih;
+    pilCiz(); gunCiz(); tabloPilCiz();
     if(yenile) bildir('Fikstür yenilendi.');
   }catch(h){
     $('#hafta-liste').innerHTML = `<div class="kart bos-durum"><div class="dev">⚠️</div><p>${esc(h.message)}</p>
@@ -445,7 +466,7 @@ async function detayToggle(id, kaydir){
   kutu.innerHTML = '<div class="detay-panel yukleniyor">⏳ Maç analiz ediliyor…</div>';
   try{
     const s = await api('/api/mac-detay?id=' + id);
-    kutu.innerHTML = `<div class="detay-panel">${kitapciHTML(s)}${takimSonucHTML(s)}</div>`;
+    kutu.innerHTML = `<div class="detay-panel">${kitapciHTML(s)}${takimSonucHTML(s)}${tahminDetayHTML(s)}</div>`;
   }catch(h){
     kutu.innerHTML = `<div class="detay-panel"><span class="ev-neg">${esc(h.message)}</span></div>`;
   }
@@ -466,6 +487,101 @@ function kitapciHTML(s){
       ${f.maks ? `<tr><td><b>En iyi (Max)</b></td>${f.maks.map(x => `<td class="sag eniyi">${x.toFixed(2)}</td>`).join('')}</tr>` : ''}
     </table>
     ${f.ust_alt ? `<div class="rozetler">${rozet('Üst 2.5', f.ust_alt[0].toFixed(2))}${rozet('Alt 2.5', f.ust_alt[1].toFixed(2))}</div>` : ''}
+  </div>`;
+}
+
+/* ---------- TAHMİN TABLOSU ---------- */
+let AKTIF_TABLO_GUN = null, TABLOLAR = {};
+const HUCRE_RENK = {
+  'Ü':'52,211,153', 'Var':'52,211,153', '1':'52,211,153',
+  'A':'248,113,113', 'Yok':'248,113,113', '2':'248,113,113',
+  'X':'251,191,36'
+};
+const TAB_KOLONLAR = ['iy05','iy15','ms15','ms25','ms35','kg','iy_skor','y2_skor','ms_skor','iy_sonuc','ms_sonuc'];
+const TAB_BASLIK = `<th class="orta">İY 0.5</th><th class="orta">İY 1.5</th><th class="orta">MS 1.5</th>
+  <th class="orta">MS 2.5</th><th class="orta">MS 3.5</th><th class="orta">KG</th><th class="orta">İY Skor</th>
+  <th class="orta">2Y Skor</th><th class="orta">MS Skor</th><th class="orta">İY</th><th class="orta">MS</th>`;
+
+function hucreTd(h){
+  if(h === null || h === undefined) return '<td class="orta ipucu">—</td>';
+  if(typeof h === 'string'){
+    const renk = HUCRE_RENK[h];
+    if(!renk) return `<td class="orta skor" style="white-space:nowrap">${esc(h)}</td>`;
+    return `<td class="orta" style="background:rgba(${renk},.32);font-weight:800">${esc(h)}</td>`;
+  }
+  const renk = HUCRE_RENK[h.sec] || '96,165,250';
+  const alfa = Math.min(.75, Math.max(.12, (h.p - .45) * 1.8));
+  return `<td class="orta" style="background:rgba(${renk},${alfa.toFixed(2)});font-weight:800;white-space:nowrap">
+    ${esc(h.sec)} <span style="font-weight:600;font-size:10.5px;opacity:.8">%${Math.round(h.p*100)}</span></td>`;
+}
+
+function tabloPilCiz(){
+  if(!HAFTA) return;
+  $('#tablo-pilleri').innerHTML = HAFTA.gunler.map(g =>
+    `<button class="gun-pil ${g.tarih === AKTIF_TABLO_GUN ? 'aktif' : ''}" onclick="tabloGunSec('${g.tarih}')">
+      ${g.tarih.slice(0,5)} <small>${g.gun_adi} · ${g.maclar.length} maç</small></button>`).join('');
+}
+function tabloGunSec(t){ AKTIF_TABLO_GUN = t; tabloPilCiz(); tabloCiz(); }
+
+async function tabloOlustur(){
+  if(!AKTIF_TABLO_GUN){ bildir('Önce fikstürün yüklenmesini bekleyin.', true); return; }
+  const b = $('#btn-tablo'); b.disabled = true; b.textContent = '⏳ Hesaplanıyor…';
+  try{
+    TABLOLAR[AKTIF_TABLO_GUN] = await api('/api/tahmin-tablosu', {tarih: AKTIF_TABLO_GUN});
+    tabloCiz();
+  }catch(h){ bildir(h.message, true); }
+  b.disabled = false; b.textContent = '📋 Tabloyu Oluştur';
+}
+
+function tabloCiz(){
+  const veri = TABLOLAR[AKTIF_TABLO_GUN];
+  if(!veri){ $('#tablo-sonuc').innerHTML = ''; return; }
+  const lig = $('#tablo-lig').value;
+  const liste = veri.filter(m => !lig || m.lig === lig);
+  if(!liste.length){
+    $('#tablo-sonuc').innerHTML = `<div class="kart bos-durum"><div class="dev">🤷</div><p>Bu gün/lig için maç yok.</p></div>`;
+    return;
+  }
+  $('#tablo-sonuc').innerHTML = `<div class="kart">
+    <h2>${AKTIF_TABLO_GUN} — ${liste.length} maç</h2>
+    <div class="alt-baslik">⚠ = takımın geçmiş verisi sınırlı (yeni çıkan) · "benzer" = aynı oran kalıbındaki geçmiş maç sayısı</div>
+    <div style="overflow-x:auto"><table>
+      <tr><th>Saat</th><th>Lig</th><th>Ev</th><th>Dep</th>${TAB_BASLIK}<th class="orta">Benzer</th><th></th></tr>
+      ${liste.map(m => `<tr>
+        <td>${m.saat}</td><td>${esc(m.lig)}</td>
+        <td style="font-weight:700;white-space:nowrap">${esc(m.ev)}${m.uyari ? ' <span title="sınırlı veri">⚠</span>' : ''}</td>
+        <td style="font-weight:700;white-space:nowrap">${esc(m.dep)}</td>
+        ${TAB_KOLONLAR.map(k => hucreTd(m.hucreler[k])).join('')}
+        <td class="orta ipucu">${m.kalip_n || '—'}</td>
+        <td><button class="mini-btn" onclick="tabloDetay(${m.id})">🔬</button></td>
+      </tr>`).join('')}
+    </table></div>
+    <div class="not">Skor hücreleri modelin en olası tekil skorudur — olasılığı doğal olarak düşüktür (%8-15 bandı tipiktir); yön hücreleri (Alt/Üst, KG, 1X2) daha güvenilirdir.</div>
+  </div>`;
+}
+
+function tabloDetay(id){
+  sekmeAc('hafta');
+  if(AKTIF_GUN !== AKTIF_TABLO_GUN) gunSec(AKTIF_TABLO_GUN);
+  detayToggle(id, true);
+}
+
+function tahminDetayHTML(s){
+  if(!s.tahmin) return '';
+  let satirlar = `<tr style="background:#12203a"><td colspan="2" style="white-space:nowrap"><b>🤖 MODEL TAHMİNİ</b></td>
+    ${TAB_KOLONLAR.map(k => hucreTd(s.tahmin[k])).join('')}</tr>`;
+  const ornekler = ((s.kalip && s.kalip.ornekler) || []).filter(o => o.hucre);
+  satirlar += ornekler.map(o => `<tr>
+    <td class="ipucu" style="white-space:nowrap">${o.tarih} · ${esc(o.lig)}</td>
+    <td style="white-space:nowrap">${esc(o.ev)} – ${esc(o.dep)}</td>
+    ${TAB_KOLONLAR.map(k => hucreTd(o.hucre[k])).join('')}</tr>`).join('');
+  return `<div class="kart">
+    <h2>📋 Tahmin & Benzer Maçlarda Gerçekleşenler</h2>
+    <div class="alt-baslik">İlk satır modelin bu maç tahmini; altı, <b>benzer oranla açılan geçmiş maçlarda gerçekte ne olduğu</b> — skor bazlı eşleştirme. Tahmin ile geçmişin aynı yöne bakması sinyali güçlendirir.</div>
+    <div style="overflow-x:auto"><table>
+      <tr><th>Tarih</th><th>Maç</th>${TAB_BASLIK}</tr>
+      ${satirlar}
+    </table></div>
   </div>`;
 }
 

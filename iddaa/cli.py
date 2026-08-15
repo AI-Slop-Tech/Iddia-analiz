@@ -117,7 +117,7 @@ def _cmd_bulten(args: argparse.Namespace) -> int:
                 a = analiz.mac_analizi(
                     df, s.HomeTeam, s.AwayTeam,
                     oranlar=(float(s.oran_ev), float(s.oran_berabere), float(s.oran_dep)),
-                    elo=elo, ust_alt=ust_alt,
+                    elo=elo, ust_alt=ust_alt, lig_ipucu=s.Div,
                 )
                 o = a["oneri"]
                 isaret = {"degerli": "✅", "sinirda": "🟡", "pas": "⛔"}[o["karar"]]

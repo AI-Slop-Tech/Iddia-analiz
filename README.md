@@ -64,6 +64,13 @@ Koyu temalı, tek sayfalık modern panel; dört bölümden oluşur:
   en iyi piyasa oranına göre değer sırasına dizer (✅/🟡/⛔ + güven yıldızı +
   "N benzer maç"). Her maçın **🔬 Detay**'ında kitapçı oranları panosu
   (en yüksek oran yeşil işaretli) ve tam analiz raporu açılır.
+- **📋 Tahmin Tablosu** — seçilen günün *tüm* maçları klasik tahmin matrisi
+  düzeninde: İY 0.5 / İY 1.5 / MS 1.5 / 2.5 / 3.5 Alt-Üst, KG, İY-2Y-MS skor
+  tahminleri ve İY/MS sonuçları. Renk yönü, koyuluk ve yüzde güveni gösterir.
+  İY tahminleri, ligdeki gollerin ilk yarıya düşen payı (arşivdeki gerçek İY
+  skorlarından ölçülür, tipik ~%45) ile gol beklentisinin bölüştürülmesinden
+  türetilir. Maç detayının altında aynı kolonlarla **benzer oranlı geçmiş
+  maçların gerçekleşenleri** listelenir — skor bazlı eşleştirme.
 - **📈 Oran Analizi** — takımdan bağımsız: 1X2 oranını girin, geçmişte benzer
   oranla açılan tüm maçların gerçek dağılımını, gol/üst-alt/KG eğilimlerini,
   en sık skorları, örnek maçları ve orana göre beklenen değer sinyalini görün.
@@ -82,16 +89,19 @@ listelenmiştir.
 
 | Komut | Açıklama |
 |---|---|
-| `guncelle [--ligler T1 E0 ...] [--sezon 11] [--yenile]` | Veri indir/güncelle. Varsayılan: T1 E0 SP1 D1 I1 F1, son 10 yıl + bu sezon |
+| `guncelle [--ligler T1 E0 ...] [--sezon 11] [--yenile]` | Veri indir/güncelle. Varsayılan: 22 ligin tamamı, son 10 yıl + bu sezon |
 | `analiz --ev X --dep Y [--oran 1 X 2] [--gemini] [--tolerans 0.02]` | Maç analizi ve rapor |
 | `bulten [--tara] [--lig T1] [--yenile]` | Önümüzdeki günlerin maçlarını oranlarıyla listele; `--tara` her maça öneri ekler |
 | `takimlar [--lig T1]` | Veri setindeki resmi takım adları (● = güncel takım) |
 | `durum` | İndirilen veri setinin özeti |
 | `web [--port 8000] [--host 127.0.0.1]` | Modern web panelini başlat |
 
-Desteklenen ligler: `T1` Süper Lig, `E0` Premier League, `E1` Championship,
-`SP1` La Liga, `D1` Bundesliga, `I1` Serie A, `F1` Ligue 1, `N1` Eredivisie,
-`P1` Primeira Liga, `B1` Belçika, `G1` Yunanistan, `SC0` İskoçya.
+Desteklenen ligler (22): Türkiye Süper Lig (`T1`); İngiltere'nin 5 katmanı
+(`E0`-`E3`, `EC`); İskoçya'nın 4 katmanı (`SC0`-`SC3`); Almanya, İtalya,
+İspanya ve Fransa'nın 2'şer katmanı (`D1/D2`, `I1/I2`, `SP1/SP2`, `F1/F2`);
+Hollanda `N1`, Belçika `B1`, Portekiz `P1`, Yunanistan `G1`. Varsayılan
+`guncelle` hepsini indirir (~77 bin maç) — böylece haftalık fikstürde görünen
+her maçın hem geçmişi hem oran kalıbı örneklemi hazır olur.
 
 ## Örnek çıktı (gerçek veriyle)
 

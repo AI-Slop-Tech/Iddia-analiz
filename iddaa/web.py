@@ -77,6 +77,10 @@ def _kalip_json(k: dict | None) -> dict | None:
                 "dep": o["dep"],
                 "skor": o["skor"],
                 "oranlar": [round(x, 2) for x in o["oranlar"]],
+                "hucre": (
+                    analiz.gercek_hucreler(o["fthg"], o["ftag"], o["hthg"], o["htag"])
+                    if "fthg" in o else None
+                ),
             }
             for o in k.get("ornekler", [])
         ],
@@ -383,6 +387,7 @@ def uygulama_olustur():
                 df, r["HomeTeam"], r["AwayTeam"],
                 oranlar=tuple(oranlar), elo=_DURUM["elo"],
                 ust_alt=tuple(ust_alt) if ust_alt else None,
+                lig_ipucu=r["Div"],
             )
             o = a["oneri"]
             en_iyi = _en_iyi_oran(r, o["secim"], maks)
@@ -408,6 +413,50 @@ def uygulama_olustur():
         sonuclar.sort(key=lambda x: x["ev_max"], reverse=True)
         return jsonify(sonuclar)
 
+    def _hucreler_json(h: dict) -> dict:
+        cikti = {}
+        for anahtar, deger in h.items():
+            if isinstance(deger, dict):
+                cikti[anahtar] = {"sec": deger["sec"], "p": float(deger["p"])}
+            else:
+                cikti[anahtar] = deger
+        return cikti
+
+    @app.post("/api/tahmin-tablosu")
+    def tahmin_tablosu():
+        try:
+            df = _df()
+        except FileNotFoundError:
+            return jsonify({"hata": "Önce veriyi güncelleyin."}), 503
+        govde = request.get_json(silent=True) or {}
+        tarih = str(govde.get("tarih", ""))
+        try:
+            fik, _kitapcilar = _fikstur()
+        except Exception as hata:  # noqa: BLE001
+            return jsonify({"hata": f"Fikstür alınamadı: {hata}"}), 502
+        hedef = fik[fik["Tarih"].dt.strftime("%d.%m.%Y") == tarih]
+
+        satirlar = []
+        for idx, r in hedef.iterrows():
+            oranlar, _maks, _ust_alt = _fikstur_oranlari(r)
+            poisson = analiz.poisson_tahmini(df, r["HomeTeam"], r["AwayTeam"], lig_ipucu=r["Div"])
+            kalip = analiz.oran_kalibi(df, tuple(oranlar)) if oranlar else None
+            hucreler = analiz.tahmin_hucreleri(poisson, kalip)
+            satirlar.append(
+                {
+                    "id": int(idx),
+                    "saat": r["Tarih"].strftime("%H:%M"),
+                    "lig": r["Div"],
+                    "ev": r["HomeTeam"],
+                    "dep": r["AwayTeam"],
+                    "oranlar": oranlar,
+                    "kalip_n": int(kalip["n"]) if kalip else 0,
+                    "uyari": bool(poisson["uyarilar"]),
+                    "hucreler": _hucreler_json(hucreler),
+                }
+            )
+        return jsonify(satirlar)
+
     @app.get("/api/mac-detay")
     def mac_detay():
         try:
@@ -430,8 +479,11 @@ def uygulama_olustur():
             oranlar=tuple(oranlar) if oranlar else None,
             elo=_DURUM["elo"],
             ust_alt=tuple(ust_alt) if ust_alt else None,
+            lig_ipucu=r["Div"],
+            ornek_sayisi=12,
         )
         j = _mac_json(a)
+        j["tahmin"] = _hucreler_json(analiz.tahmin_hucreleri(a["poisson"], a["kalip"]))
         if j["deger"]:
             model_p = a["deger"]["model_p"]
             for satir in j["deger"]["satirlar"]:

@@ -45,18 +45,29 @@ LIGLER = {
     "T1": "Türkiye Süper Lig",
     "E0": "İngiltere Premier League",
     "E1": "İngiltere Championship",
+    "E2": "İngiltere League One",
+    "E3": "İngiltere League Two",
+    "EC": "İngiltere National League",
+    "SC0": "İskoçya Premiership",
+    "SC1": "İskoçya Championship",
+    "SC2": "İskoçya League One",
+    "SC3": "İskoçya League Two",
     "SP1": "İspanya La Liga",
+    "SP2": "İspanya La Liga 2",
     "D1": "Almanya Bundesliga",
+    "D2": "Almanya 2. Bundesliga",
     "I1": "İtalya Serie A",
+    "I2": "İtalya Serie B",
     "F1": "Fransa Ligue 1",
+    "F2": "Fransa Ligue 2",
     "N1": "Hollanda Eredivisie",
     "P1": "Portekiz Primeira Liga",
     "B1": "Belçika Pro League",
     "G1": "Yunanistan Süper Lig",
-    "SC0": "İskoçya Premiership",
 }
 
-VARSAYILAN_LIGLER = ["T1", "E0", "SP1", "D1", "I1", "F1"]
+# Varsayılan: tüm ligler — fikstürdeki her maçın 10 yıllık geçmişi bulunsun diye
+VARSAYILAN_LIGLER = list(LIGLER)
 
 # Oran kolonları için öncelik sırası: Bet365 -> Pinnacle -> piyasa ortalaması -> diğerleri.
 # Eski sezon dosyalarında kolon adları farklı olabildiği için zincir uzun tutuldu.
@@ -195,6 +206,9 @@ def veriyi_yukle(ligler: list[str] | None = None) -> pd.DataFrame:
         df = df.dropna(subset=["Tarih", "FTHG", "FTAG", "FTR"])
         df["FTHG"] = df["FTHG"].astype(int)
         df["FTAG"] = df["FTAG"].astype(int)
+        # ilk yarı skorları (çok eski dosyalarda olmayabilir -> NaN kalır)
+        for k in ("HTHG", "HTAG"):
+            df[k] = pd.to_numeric(df[k], errors="coerce") if k in df.columns else float("nan")
 
         df["oran_ev"] = _ilk_dolu_kolon(df, _EV_ORAN)
         df["oran_berabere"] = _ilk_dolu_kolon(df, _BERABERE_ORAN)
@@ -204,6 +218,7 @@ def veriyi_yukle(ligler: list[str] | None = None) -> pd.DataFrame:
 
     kolonlar = [
         "Div", "Sezon", "Tarih", "HomeTeam", "AwayTeam", "FTHG", "FTAG", "FTR",
+        "HTHG", "HTAG",
         "oran_ev", "oran_berabere", "oran_dep", "oran_ust25", "oran_alt25",
     ]
     return df[kolonlar].sort_values("Tarih").reset_index(drop=True)
