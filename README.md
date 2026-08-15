@@ -9,10 +9,12 @@ Sistem dört bağımsız sinyal üretir ve bunları tek bir öneriye bağlar:
 
 | Sinyal | Ne yapar |
 |---|---|
+| 📅 **Bülten** | Önümüzdeki günlerin fikstürü **otomatik** çekilir — Bet365, Betfair, Bwin, Paddy Power, SkyBet, BetVictor… oranları + piyasa ortalaması ve en yüksek oranla |
 | 📊 **Form** | İki takımın son 10 maçı + saha bazlı form (evinde/deplasmanda) |
 | 🔁 **H2H** | İki takımın birbirine karşı tüm geçmişi (gol, üst/alt, KG eğilimleri) |
 | 📈 **Oran kalıbı** | Bugünkü orana benzer oranla açılmış **geçmiş 10 yılın tüm maçlarında** gerçekte ne olduğu — "aynı oranlar geçmişte ne getirdi?" |
 | 🎯 **Poisson modeli** | Zaman ağırlıklı hücum/savunma güçlerinden gol beklentisi, skor olasılık matrisi, MS/Alt-Üst/KG olasılıkları |
+| ♟ **Elo reytingi** | Tüm arşivden hesaplanan takım güç reytingi; öneri güven yıldızına katkı verir |
 
 Üstüne **değer (value) analizi**: modelin olasılığı, oranın içerdiği (marjdan
 arındırılmış) olasılıkla karşılaştırılır. Pozitif beklenen değer yoksa sistem
@@ -55,14 +57,19 @@ Takım adlarında Türkçe karakter ve kısaltma serbesttir: `başakşehir`,
 python tahmin.py web          # http://127.0.0.1:8000
 ```
 
-Koyu temalı, tek sayfalık modern panel; üç ayrı bölümden oluşur:
+Koyu temalı, tek sayfalık modern panel; dört bölümden oluşur:
 
+- **📅 Bu Hafta** — fikstür ve çok kitapçılı oranlar otomatik gelir, günler
+  pill'lerle gezilir. **⚡ Günü Tara** günün tüm maçlarını arşivle eşleştirip
+  en iyi piyasa oranına göre değer sırasına dizer (✅/🟡/⛔ + güven yıldızı +
+  "N benzer maç"). Her maçın **🔬 Detay**'ında kitapçı oranları panosu
+  (en yüksek oran yeşil işaretli) ve tam analiz raporu açılır.
 - **📈 Oran Analizi** — takımdan bağımsız: 1X2 oranını girin, geçmişte benzer
   oranla açılan tüm maçların gerçek dağılımını, gol/üst-alt/KG eğilimlerini,
   en sık skorları, örnek maçları ve orana göre beklenen değer sinyalini görün.
 - **🎯 Takım Analizi** — iki takımı seçin (oran girmek isteğe bağlı): form
-  serileri, aralarındaki maçlar, Poisson tahmini; oran girilirse oran kalıbı,
-  değer tablosu ve yıldızlı öneri banner'ı eklenir.
+  serileri, aralarındaki maçlar, Elo, Poisson tahmini; oran girilirse oran
+  kalıbı, değer tablosu ve yıldızlı öneri banner'ı eklenir.
 - **🕰 Geçmiş Maçlar** — eski maçları açılış oranlarıyla listeleyin;
   "📈 bu oranı analiz et" düğmesi o maçın oranını Oran Analizi'ne taşır.
 
@@ -77,6 +84,7 @@ listelenmiştir.
 |---|---|
 | `guncelle [--ligler T1 E0 ...] [--sezon 11] [--yenile]` | Veri indir/güncelle. Varsayılan: T1 E0 SP1 D1 I1 F1, son 10 yıl + bu sezon |
 | `analiz --ev X --dep Y [--oran 1 X 2] [--gemini] [--tolerans 0.02]` | Maç analizi ve rapor |
+| `bulten [--tara] [--lig T1] [--yenile]` | Önümüzdeki günlerin maçlarını oranlarıyla listele; `--tara` her maça öneri ekler |
 | `takimlar [--lig T1]` | Veri setindeki resmi takım adları (● = güncel takım) |
 | `durum` | İndirilen veri setinin özeti |
 | `web [--port 8000] [--host 127.0.0.1]` | Modern web panelini başlat |
@@ -129,15 +137,24 @@ KG ve en olası skor olasılıkları türetilir. Bu, profesyonel oran yapıcıla
 da temel aldığı klasik yaklaşımdır.
 
 **Değer (value) ve Kelly.** Model olasılığı `p`, oran `o` için beklenen değer
-`EV = p·o − 1`. Model, Poisson ile oran kalıbının karışımıdır (kalıp örneklemi
-büyüdükçe ağırlığı %50'ye kadar çıkar). EV ≥ %4 ise "değerli", %1-4 arası
-"sınırda", altı "pas". Önerilen kasa payı çeyrek Kelly ile hesaplanır ve %5
+`EV = p·o − 1`. Model üç bileşenin karışımıdır: **%35 piyasa** (marjdan
+arındırılmış oran — piyasa uzun vadede en iyi tekil tahmincidir, karışıma
+katmak aşırı özgüveni ve sahte değer sinyallerini azaltır), **%0-25 oran
+kalıbı** (örneklem büyüdükçe artar, 200+ maçta tavan) ve **kalan pay Poisson**.
+Üst/Alt 2.5 oranı varsa aynı karışım o pazar için de kurulur. EV ≥ %4 ise
+"değerli", %1-4 arası "sınırda", altı "pas". Bültende sıralama, seçimin
+**piyasadaki en yüksek oranıyla** hesaplanan EV'ye göredir (değerli bahis
+en iyi orandan oynanır). Önerilen kasa payı çeyrek Kelly ile hesaplanır ve %5
 ile sınırlanır. **Uzun vadede para kazandıran şey doğru tahmin değil, pozitif
 beklenen değerli oranları oynamaktır** — sistem bu yüzden çoğu maçta "pas" der.
 
-**Güven yıldızı (1-5).** Poisson zirvesi, kalıp zirvesi ve form yönü aynı
-seçimi işaret ettikçe ve EV büyüdükçe yıldız artar; veri az olan takımlarda
-(yeni çıkan takımlar gibi) bir yıldız düşülür.
+**Elo reytingi.** Tüm arşiv kronolojik gezilerek her takım için Elo hesaplanır
+(K=20, ev avantajı 60 puan, başlangıç 1500). Raporda gösterilir ve güven
+yıldızına sinyal olarak katılır.
+
+**Güven yıldızı (1-5).** Poisson zirvesi, kalıp zirvesi, form yönü ve Elo yönü
+aynı seçimi işaret ettikçe ve EV büyüdükçe yıldız artar; veri az olan
+takımlarda (yeni çıkan takımlar gibi) bir yıldız düşülür.
 
 ## Gemini AI yorumu (opsiyonel)
 
@@ -152,12 +169,16 @@ maç yorumu, en güçlü 3 sinyal, güven notlu kupon önerileri ve uzak durulac
 seçenekler yazdırılır. Prompt `iddaa/gemini_yorum.py` içinde — dilediğiniz gibi
 özelleştirin.
 
-## Güncel oranları nereden alacağım?
+## Güncel oranları nereden alıyor?
 
-Sistem *tarihsel* oranları otomatik indirir; oynanmamış maçın *bültendeki*
-oranını ise Nesine/Bilyoner/iddaa bülteninden bakıp `--oran` ile elle
-girersiniz (10 saniyelik iş). Bülten sitelerini otomatik kazımak hem kullanım
-şartlarına aykırı hem de kırılgan olduğu için bilinçli olarak eklenmedi.
+Hem *tarihsel* oranlar hem de *önümüzdeki günlerin* fikstür oranları
+football-data.co.uk'dan otomatik indirilir. Fikstürde Bet365, Betfair,
+Betfair Borsası, Bwin, Paddy Power, SkyBet, BetVictor gibi uluslararası
+kitapçıların açılış oranları ile piyasa ortalaması ve en yüksek oran bulunur;
+panel bunları maç başına karşılaştırmalı gösterir. Türkiye bülteni (Nesine
+vb.) farklıysa oranı Oran Analizi / Takım Analizi sekmesine elle girip aynı
+analizi o oranla da alabilirsiniz — bülten sitelerini kazımak kullanım
+şartlarına aykırı ve kırılgan olduğu için bilinçli olarak eklenmedi.
 
 ## Sınırlar ve yol haritası
 

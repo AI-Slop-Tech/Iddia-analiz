@@ -66,8 +66,12 @@ def _cmd_analiz(args: argparse.Namespace) -> int:
     if oranlar and (min(oranlar) <= 1.0):
         print("Hata: oranlar 1.00'den büyük olmalı (sıra: MS1 MS0 MS2).")
         return 1
+    ust_alt = tuple(args.alt_ust) if args.alt_ust else None
 
-    sonuc = analiz.mac_analizi(df, ev, dep, oranlar=oranlar, tolerans=args.tolerans)
+    sonuc = analiz.mac_analizi(
+        df, ev, dep, oranlar=oranlar, tolerans=args.tolerans,
+        elo=analiz.elo_hesapla(df), ust_alt=ust_alt,
+    )
     lig_adi = veri.LIGLER.get(sonuc["poisson"]["lig"], sonuc["poisson"]["lig"])
     metin = rapor.rapor_olustur(sonuc, lig_adi=lig_adi)
     print(metin)
@@ -84,6 +88,45 @@ def _cmd_analiz(args: argparse.Namespace) -> int:
         except Exception as hata:  # noqa: BLE001 - AI katmanı çökerse rapor yine de verilmiş olur
             print(f"Gemini yorumu alınamadı: {hata}")
             return 1
+    return 0
+
+
+def _cmd_bulten(args: argparse.Namespace) -> int:
+    df = veri.veriyi_yukle()
+    fik, _ = veri.fikstur_yukle(ligler=list(df["Div"].unique()), yenile=args.yenile)
+    if args.lig:
+        fik = fik[fik["Div"] == args.lig]
+    if fik.empty:
+        print("Fikstürde uygun maç yok.")
+        return 0
+
+    elo = analiz.elo_hesapla(df) if args.tara else None
+    for gun, grup in fik.groupby(fik["Tarih"].dt.date):
+        print(f"\n📅 {gun.strftime('%d.%m.%Y')} — {len(grup)} maç")
+        print("─" * 74)
+        for s in grup.itertuples():
+            oran_metni = (
+                f"{s.oran_ev:>5.2f} {s.oran_berabere:>5.2f} {s.oran_dep:>5.2f}"
+                if not pd.isna(s.oran_ev) else "  oran yok  "
+            )
+            print(f"  {s.Tarih:%H:%M}  {s.Div:<4} {s.HomeTeam} - {s.AwayTeam:<22} {oran_metni}")
+            if args.tara and not pd.isna(s.oran_ev):
+                ust_alt = None
+                if not (pd.isna(s.oran_ust25) or pd.isna(s.oran_alt25)):
+                    ust_alt = (float(s.oran_ust25), float(s.oran_alt25))
+                a = analiz.mac_analizi(
+                    df, s.HomeTeam, s.AwayTeam,
+                    oranlar=(float(s.oran_ev), float(s.oran_berabere), float(s.oran_dep)),
+                    elo=elo, ust_alt=ust_alt,
+                )
+                o = a["oneri"]
+                isaret = {"degerli": "✅", "sinirda": "🟡", "pas": "⛔"}[o["karar"]]
+                print(
+                    f"         {isaret} {rapor.SECIM_AD.get(o['secim'], o['secim'])}"
+                    f" @ {o['oran']:.2f}  EV {o['ev'] * 100:+.1f}%"
+                    f"  {'★' * o['yildiz']}{'☆' * (5 - o['yildiz'])}"
+                )
+    print("\nAyrıntılı rapor için: python tahmin.py analiz --ev ... --dep ... --oran ...")
     return 0
 
 
@@ -130,9 +173,16 @@ def arg_ayristirici() -> argparse.ArgumentParser:
     a.add_argument("--ev", required=True, help="Ev sahibi takım")
     a.add_argument("--dep", required=True, help="Deplasman takımı")
     a.add_argument("--oran", nargs=3, type=float, metavar=("MS1", "MS0", "MS2"), help="Bültendeki 1X2 oranları")
+    a.add_argument("--alt-ust", nargs=2, type=float, metavar=("UST", "ALT"), help="Üst/Alt 2.5 oranları (opsiyonel)")
     a.add_argument("--tolerans", type=float, default=0.02, help="Oran kalıbı benzerlik toleransı (varsayılan 0.02)")
     a.add_argument("--gemini", action="store_true", help="Rapora Gemini AI yorumu ekle (GEMINI_API_KEY gerekir)")
     a.set_defaults(fn=_cmd_analiz)
+
+    b = alt.add_parser("bulten", help="Önümüzdeki günlerin maçlarını oranlarıyla listele")
+    b.add_argument("--tara", action="store_true", help="Her maçı analiz edip öneri ekle")
+    b.add_argument("--lig", help="Tek lige filtrele (ör. T1)")
+    b.add_argument("--yenile", action="store_true", help="Fikstür önbelleğini yok say")
+    b.set_defaults(fn=_cmd_bulten)
 
     w = alt.add_parser("web", help="Modern web arayüzünü başlat")
     w.add_argument("--host", default="127.0.0.1", help="Dinlenecek adres (varsayılan 127.0.0.1)")

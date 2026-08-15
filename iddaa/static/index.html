@@ -22,7 +22,6 @@
   }
   .sarici{max-width:1080px;margin:0 auto;padding:0 20px 60px}
 
-  /* ---------- üst bar ---------- */
   header{position:sticky;top:0;z-index:20;background:#0a0f1cd9;backdrop-filter:blur(10px);border-bottom:1px solid var(--cizgi)}
   .ust{max-width:1080px;margin:0 auto;padding:14px 20px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
   .logo{font-size:22px;font-weight:800;letter-spacing:.2px;display:flex;align-items:center;gap:10px}
@@ -32,7 +31,6 @@
   .chip{background:var(--kart);border:1px solid var(--cizgi);border-radius:999px;padding:5px 12px;font-size:12.5px;color:var(--soluk)}
   .chip b{color:var(--metin)}
 
-  /* ---------- sekmeler ---------- */
   nav{display:flex;gap:8px;margin:26px 0 22px;flex-wrap:wrap}
   .sekme{
     border:1px solid var(--cizgi);background:var(--kart);color:var(--soluk);
@@ -45,7 +43,6 @@
   section.aktif{display:block;animation:gel .25s ease}
   @keyframes gel{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 
-  /* ---------- kartlar & formlar ---------- */
   .kart{background:var(--kart);border:1px solid var(--cizgi);border-radius:var(--radius);padding:22px;margin-bottom:18px}
   .kart h2{font-size:17px;margin-bottom:4px}
   .kart .alt-baslik{color:var(--soluk);font-size:13.5px;margin-bottom:16px}
@@ -75,7 +72,6 @@
   .mini-btn:hover{border-color:var(--mavi)}
   .not{color:var(--cok-soluk);font-size:12.5px;margin-top:10px}
 
-  /* ---------- sonuç bileşenleri ---------- */
   .izgara{display:grid;grid-template-columns:1fr 1fr;gap:18px}
   @media(max-width:760px){.izgara{grid-template-columns:1fr}.durum-chipler{margin-left:0}}
   .bar-satir{display:grid;grid-template-columns:110px 1fr 110px;gap:12px;align-items:center;margin:9px 0}
@@ -107,13 +103,45 @@
 
   .banner{border-radius:var(--radius);padding:18px 22px;margin-bottom:18px;border:1px solid;font-size:15px}
   .banner .buyuk{font-size:17px;font-weight:800}
-  .banner.degerli{background:#052e2210;border-color:#0d9488;background:linear-gradient(135deg,#064e3b33,#0f172a00)}
+  .banner.degerli{border-color:#0d9488;background:linear-gradient(135deg,#064e3b33,#0f172a00)}
   .banner.sinirda{background:linear-gradient(135deg,#78350f2e,#0f172a00);border-color:#b45309}
   .banner.pas{background:linear-gradient(135deg,#33415533,#0f172a00);border-color:#475569}
   .yildizlar{color:var(--sari);letter-spacing:2px}
   .ev-poz{color:var(--yesil);font-weight:800}
   .ev-neg{color:var(--kirmizi);font-weight:700}
   .ipucu{font-size:12.5px;color:var(--cok-soluk)}
+
+  /* bülten */
+  .gun-pilleri{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+  .gun-pil{
+    border:1px solid var(--cizgi);background:var(--kart);color:var(--soluk);cursor:pointer;
+    border-radius:12px;padding:9px 16px;font-size:13.5px;font-weight:700;text-align:center;
+  }
+  .gun-pil small{display:block;font-weight:600;color:var(--cok-soluk);font-size:11px}
+  .gun-pil.aktif{background:var(--grad);color:#04121f;border-color:transparent}
+  .gun-pil.aktif small{color:#04121fb0}
+  .mac-satir{
+    display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+    background:var(--kart);border:1px solid var(--cizgi);border-radius:14px;
+    padding:13px 16px;margin-bottom:10px;
+  }
+  .mac-satir .saat{font-weight:800;color:var(--soluk);width:48px}
+  .mac-satir .lig-chip{background:var(--kart-ic);border:1px solid var(--cizgi);border-radius:8px;padding:3px 8px;font-size:11.5px;color:var(--cok-soluk);font-weight:700}
+  .mac-satir .takimlar{font-weight:700;flex:1;min-width:200px}
+  .mac-satir .oran-trio{display:flex;gap:6px}
+  .oran-kutu{background:var(--kart-ic);border:1px solid var(--cizgi);border-radius:8px;padding:5px 9px;font-size:13px;font-weight:700;min-width:52px;text-align:center}
+  .oran-kutu small{display:block;font-weight:600;font-size:10px;color:var(--cok-soluk)}
+  .one-cikan{
+    display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+    padding:11px 14px;border-radius:12px;margin-bottom:8px;
+    background:var(--kart-ic);border:1px solid var(--cizgi);
+  }
+  .one-cikan.degerli{border-color:#0d9488}
+  .one-cikan.sinirda{border-color:#b45309}
+  .one-cikan .buyukev{font-weight:800;min-width:76px;text-align:right}
+  .kitapci-tablo td.eniyi{color:var(--yesil);font-weight:800}
+  .detay-panel{margin:-2px 0 12px;padding:16px;border:1px solid var(--cizgi);border-top:none;border-radius:0 0 14px 14px;background:#0c1424}
+  .yukleniyor{color:var(--soluk);padding:20px;text-align:center}
 
   .bos-durum{text-align:center;padding:70px 20px}
   .bos-durum .dev{font-size:52px;margin-bottom:14px}
@@ -144,13 +172,33 @@
 
 <div class="sarici">
   <nav>
-    <button class="sekme aktif" data-s="oran">📈 Oran Analizi</button>
+    <button class="sekme aktif" data-s="hafta">📅 Bu Hafta</button>
+    <button class="sekme" data-s="oran">📈 Oran Analizi</button>
     <button class="sekme" data-s="takim">🎯 Takım Analizi</button>
     <button class="sekme" data-s="gecmis">🕰 Geçmiş Maçlar</button>
   </nav>
 
+  <!-- ============ BU HAFTA ============ -->
+  <section id="s-hafta" class="aktif">
+    <div class="kart">
+      <h2>📅 Bu Haftanın Maçları</h2>
+      <div class="alt-baslik">
+        Fikstür ve oranlar otomatik çekilir (Bet365, Betfair, Bwin, Paddy Power, SkyBet, BetVictor… + piyasa ortalaması ve en yüksek oran).
+        <b>⚡ Günü Tara</b>, günün tüm maçlarını arşivle eşleştirip değer sırasına dizer.
+      </div>
+      <div class="form-satir">
+        <div class="alan"><label>Lig</label><select id="h-lig" onchange="gunCiz()"><option value="">Tümü</option></select></div>
+        <button class="btn" id="btn-tara" onclick="gunTara()">⚡ Günü Tara</button>
+        <button class="btn ikincil" onclick="haftaYukle(true)">↻ Fikstürü Yenile</button>
+      </div>
+    </div>
+    <div class="gun-pilleri" id="gun-pilleri"></div>
+    <div id="one-cikanlar"></div>
+    <div id="hafta-liste"></div>
+  </section>
+
   <!-- ============ ORAN ANALİZİ ============ -->
-  <section id="s-oran" class="aktif">
+  <section id="s-oran">
     <div class="kart">
       <h2>📈 Oran Analizi</h2>
       <div class="alt-baslik">Takımdan bağımsız: bu oranlarla açılan geçmiş maçlarda gerçekte ne oldu? Bültenden ya da eski bir maçtan 1X2 oranlarını girin.</div>
@@ -172,7 +220,7 @@
   <section id="s-takim">
     <div class="kart">
       <h2>🎯 Takım Analizi</h2>
-      <div class="alt-baslik">Form + aralarındaki maçlar + Poisson gol modeli. Oranları da girerseniz oran kalıbı, değer analizi ve öneri eklenir.</div>
+      <div class="alt-baslik">Form + aralarındaki maçlar + Elo + Poisson gol modeli. Oranları da girerseniz oran kalıbı, değer analizi ve öneri eklenir.</div>
       <div class="form-satir">
         <div class="alan"><label>Ev sahibi</label><input class="takim" id="t-ev" list="takim-listesi" placeholder="ör. Galatasaray"></div>
         <div class="alan"><label>Deplasman</label><input class="takim" id="t-dep" list="takim-listesi" placeholder="ör. Fenerbahçe"></div>
@@ -204,7 +252,7 @@
 
   <footer>
     ℹ Bu sistem istatistiksel bir modeldir; kazanç garantisi yoktur, hiçbir çıktı bahis tavsiyesi değildir. 18+ | Sorumlu oyun.<br>
-    Veri: football-data.co.uk — son 10 yıl + güncel sezon, açılış oranlarıyla.
+    Veri: football-data.co.uk — son 10 yıl + güncel sezon + haftalık fikstür, çok kitapçılı açılış oranlarıyla.
   </footer>
 </div>
 
@@ -215,7 +263,11 @@ const $ = s => document.querySelector(s);
 const esc = t => String(t).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const pct = p => '%' + Math.round(p * 100);
 const pct1 = p => '%' + (p * 100).toFixed(1);
-const SECIM_AD = {MS1:'MS 1 (ev sahibi)', MS0:'MS 0 (beraberlik)', MS2:'MS 2 (deplasman)'};
+const SECIM_AD = {
+  MS1:'MS 1 (ev sahibi)', MS0:'MS 0 (beraberlik)', MS2:'MS 2 (deplasman)',
+  'ÜST 2.5':'Üst 2.5 gol', 'ALT 2.5':'Alt 2.5 gol'
+};
+const KARAR_ISARET = {degerli:'✅', sinirda:'🟡', pas:'⛔'};
 
 function bildir(mesaj, hata=false){
   const b = $('#bildirim');
@@ -233,14 +285,12 @@ async function api(yol, govde){
   return j;
 }
 
-/* ---------- sekmeler ---------- */
 document.querySelectorAll('.sekme').forEach(b => b.onclick = () => sekmeAc(b.dataset.s));
 function sekmeAc(ad){
   document.querySelectorAll('.sekme').forEach(x => x.classList.toggle('aktif', x.dataset.s === ad));
-  document.querySelectorAll('section').forEach(x => x.classList.toggle('aktif', x.id === 's' + '-' + ad));
+  document.querySelectorAll('section').forEach(x => x.classList.toggle('aktif', x.id === 's-' + ad));
 }
 
-/* ---------- ortak bileşenler ---------- */
 function barSatir(etiket, p, renk, sagEk=''){
   return `<div class="bar-satir">
     <span class="etiket">${etiket}</span>
@@ -252,26 +302,29 @@ function rozet(ad, deger){ return `<span class="rozet">${ad}: <b>${deger}</b></s
 function seriHTML(seri){
   return '<span class="seri">' + [...seri].map(h => `<i class="s-${h}">${h}</i>`).join('') + '</span>';
 }
+function yildizHTML(n){ return `<span class="yildizlar">${'★'.repeat(n)}${'☆'.repeat(5-n)}</span>`; }
 
 /* ---------- başlangıç ---------- */
-let TAKIMLAR = [];
+let TAKIMLAR = [], HAFTA = null, AKTIF_GUN = null, TARAMALAR = {};
 async function baslat(){
   try{
     const d = await api('/api/durum');
     if(d.veri_yok){
       $('#durum-chipler').innerHTML = '<span class="chip">veri yok</span>';
-      ['oran','takim','gecmis'].forEach(s => $(`#s-${s}`).insertAdjacentHTML('afterbegin',
-        s === 'oran' ? `<div class="kart bos-durum"><div class="dev">📦</div>
-          <p>Henüz maç verisi indirilmemiş. Tek tıkla son 10 yılın skor + oran arşivini indirin (~1 dk).</p>
-          <button class="btn" onclick="veriGuncelle()">🔄 Veriyi İndir</button></div>` : ''));
+      $('#s-hafta').insertAdjacentHTML('afterbegin', `<div class="kart bos-durum"><div class="dev">📦</div>
+        <p>Henüz maç verisi indirilmemiş. Tek tıkla son 10 yılın skor + oran arşivini indirin (~1 dk).</p>
+        <button class="btn" onclick="veriGuncelle()">🔄 Veriyi İndir</button></div>`);
       return;
     }
     $('#durum-chipler').innerHTML =
       rozet('Maç', d.toplam_mac.toLocaleString('tr-TR')) +
       rozet('Arşiv', d.ilk_tarih.slice(-4) + '–' + d.son_tarih.slice(-4)) +
       rozet('Oran kapsamı', pct1(d.oran_kapsami));
-    const ligSec = $('#g-lig');
-    d.ligler.forEach(l => ligSec.insertAdjacentHTML('beforeend', `<option value="${esc(l.kod)}">${esc(l.ad)}</option>`));
+    d.ligler.forEach(l => {
+      $('#g-lig').insertAdjacentHTML('beforeend', `<option value="${esc(l.kod)}">${esc(l.ad)}</option>`);
+      $('#h-lig').insertAdjacentHTML('beforeend', `<option value="${esc(l.kod)}">${esc(l.ad)}</option>`);
+    });
+    haftaYukle(false);
     TAKIMLAR = await api('/api/takimlar');
     const dl = $('#takim-listesi');
     dl.innerHTML = TAKIMLAR.filter(t => t.aktif).map(t => `<option value="${esc(t.ad)}">`).join('') +
@@ -290,7 +343,133 @@ async function veriGuncelle(){
   }catch(h){ bildir(h.message, true); b.disabled = false; b.textContent = '🔄 Veriyi Güncelle'; }
 }
 
-/* ---------- 1) ORAN ANALİZİ ---------- */
+/* ---------- BU HAFTA ---------- */
+async function haftaYukle(yenile){
+  $('#hafta-liste').innerHTML = '<div class="yukleniyor">⏳ Fikstür ve oranlar alınıyor…</div>';
+  try{
+    HAFTA = await api('/api/bulten' + (yenile ? '?yenile=1' : ''));
+    TARAMALAR = {};
+    if(!HAFTA.gunler.length){
+      $('#gun-pilleri').innerHTML = '';
+      $('#hafta-liste').innerHTML = `<div class="kart bos-durum"><div class="dev">🤷</div><p>Fikstürde yaklaşan maç bulunamadı.</p></div>`;
+      return;
+    }
+    AKTIF_GUN = HAFTA.gunler[0].tarih;
+    pilCiz(); gunCiz();
+    if(yenile) bildir('Fikstür yenilendi.');
+  }catch(h){
+    $('#hafta-liste').innerHTML = `<div class="kart bos-durum"><div class="dev">⚠️</div><p>${esc(h.message)}</p>
+      <button class="btn" onclick="haftaYukle(true)">Tekrar Dene</button></div>`;
+  }
+}
+
+function pilCiz(){
+  $('#gun-pilleri').innerHTML = HAFTA.gunler.map(g =>
+    `<button class="gun-pil ${g.tarih === AKTIF_GUN ? 'aktif' : ''}" onclick="gunSec('${g.tarih}')">
+      ${g.tarih.slice(0,5)} <small>${g.gun_adi} · ${g.maclar.length} maç</small></button>`).join('');
+}
+function gunSec(t){ AKTIF_GUN = t; pilCiz(); gunCiz(); }
+
+function aktifGunMaclari(){
+  const g = HAFTA.gunler.find(x => x.tarih === AKTIF_GUN);
+  if(!g) return [];
+  const lig = $('#h-lig').value;
+  return g.maclar.filter(m => !lig || m.lig === lig);
+}
+
+function gunCiz(){
+  if(!HAFTA) return;
+  const maclar = aktifGunMaclari();
+  oneCikanCiz();
+  if(!maclar.length){
+    $('#hafta-liste').innerHTML = `<div class="kart bos-durum"><div class="dev">🤷</div><p>Bu gün için (seçili ligde) maç yok.</p></div>`;
+    return;
+  }
+  $('#hafta-liste').innerHTML = maclar.map(m => `
+    <div class="mac-satir" id="mac-${m.id}">
+      <span class="saat">${m.saat}</span>
+      <span class="lig-chip" title="${esc(m.lig_adi)}">${esc(m.lig)}</span>
+      <span class="takimlar">${esc(m.ev)} – ${esc(m.dep)}</span>
+      ${m.oranlar ? `<span class="oran-trio">
+        <span class="oran-kutu"><small>1</small>${m.oranlar[0].toFixed(2)}</span>
+        <span class="oran-kutu"><small>X</small>${m.oranlar[1].toFixed(2)}</span>
+        <span class="oran-kutu"><small>2</small>${m.oranlar[2].toFixed(2)}</span>
+      </span>` : '<span class="ipucu">oran yok</span>'}
+      ${m.ust_alt ? `<span class="ipucu">Ü/A: ${m.ust_alt[0].toFixed(2)} / ${m.ust_alt[1].toFixed(2)}</span>` : ''}
+      <button class="mini-btn" onclick="detayToggle(${m.id})">🔬 Detay</button>
+    </div>
+    <div id="detay-${m.id}"></div>`).join('');
+}
+
+async function gunTara(){
+  if(!AKTIF_GUN){ bildir('Önce bir gün seçin.', true); return; }
+  const b = $('#btn-tara'); b.disabled = true; b.textContent = '⏳ Taranıyor…';
+  try{
+    TARAMALAR[AKTIF_GUN] = await api('/api/bulten-tara', {tarih: AKTIF_GUN});
+    oneCikanCiz();
+    bildir(`${TARAMALAR[AKTIF_GUN].length} maç tarandı ve değer sırasına dizildi.`);
+  }catch(h){ bildir(h.message, true); }
+  b.disabled = false; b.textContent = '⚡ Günü Tara';
+}
+
+function oneCikanCiz(){
+  const sonuc = TARAMALAR[AKTIF_GUN];
+  if(!sonuc){ $('#one-cikanlar').innerHTML = ''; return; }
+  const lig = $('#h-lig').value;
+  const liste = sonuc.filter(m => !lig || m.lig === lig);
+  $('#one-cikanlar').innerHTML = `<div class="kart">
+    <h2>⚡ Günün Taraması <span class="ipucu">(en iyi piyasa oranına göre değer sırasıyla)</span></h2>
+    <div class="alt-baslik">✅ değerli · 🟡 sınırda · ⛔ değer yok — yıldız, sinyallerin (Poisson, kalıp, form, Elo) aynı yöne bakma derecesi</div>
+    ${liste.map(m => `
+      <div class="one-cikan ${m.karar}">
+        <span>${KARAR_ISARET[m.karar]}</span>
+        <span class="ipucu">${m.saat} · ${esc(m.lig)}</span>
+        <span style="font-weight:700;flex:1;min-width:170px">${esc(m.ev)} – ${esc(m.dep)}</span>
+        <span>${SECIM_AD[m.secim] || esc(m.secim)} @ <b>${(m.en_iyi_oran || m.oran).toFixed(2)}</b></span>
+        <span class="ipucu">${m.kalip_n ? m.kalip_n + ' benzer maç' : ''}</span>
+        ${yildizHTML(m.yildiz)}
+        <span class="buyukev ${m.ev_max >= 0 ? 'ev-poz' : 'ev-neg'}">${(m.ev_max*100).toFixed(1)}%</span>
+        <button class="mini-btn" onclick="detayToggle(${m.id}, true)">🔬 Detay</button>
+      </div>`).join('')}
+  </div>`;
+}
+
+let ACIK_DETAY = null;
+async function detayToggle(id, kaydir){
+  const kutu = $('#detay-' + id);
+  if(!kutu){ return; }
+  if(ACIK_DETAY === id){ kutu.innerHTML = ''; ACIK_DETAY = null; return; }
+  if(ACIK_DETAY !== null){ const eski = $('#detay-' + ACIK_DETAY); if(eski) eski.innerHTML = ''; }
+  ACIK_DETAY = id;
+  if(kaydir){ const satir = $('#mac-' + id); if(satir) satir.scrollIntoView({behavior:'smooth', block:'center'}); }
+  kutu.innerHTML = '<div class="detay-panel yukleniyor">⏳ Maç analiz ediliyor…</div>';
+  try{
+    const s = await api('/api/mac-detay?id=' + id);
+    kutu.innerHTML = `<div class="detay-panel">${kitapciHTML(s)}${takimSonucHTML(s)}</div>`;
+  }catch(h){
+    kutu.innerHTML = `<div class="detay-panel"><span class="ev-neg">${esc(h.message)}</span></div>`;
+  }
+}
+
+function kitapciHTML(s){
+  const f = s.fikstur;
+  if(!f || !Object.keys(f.kitapcilar || {}).length) return '';
+  const adlar = Object.keys(f.kitapcilar);
+  const enIyi = [0,1,2].map(i => Math.max(...adlar.map(a => f.kitapcilar[a][i])));
+  const satir = (ad, o) => `<tr><td>${esc(ad)}</td>${o.map((x,i) =>
+    `<td class="sag ${Math.abs(x - enIyi[i]) < 1e-9 ? 'eniyi' : ''}">${x.toFixed(2)}</td>`).join('')}</tr>`;
+  return `<div class="kart">
+    <h2>🏦 Kitapçı Oranları <span class="ipucu">${f.tarih} ${f.saat} — yeşil: o sonuç için piyasadaki en yüksek oran</span></h2>
+    <table class="kitapci-tablo">
+      <tr><th>Kitapçı</th><th class="sag">1</th><th class="sag">X</th><th class="sag">2</th></tr>
+      ${adlar.map(a => satir(a, f.kitapcilar[a])).join('')}
+      ${f.maks ? `<tr><td><b>En iyi (Max)</b></td>${f.maks.map(x => `<td class="sag eniyi">${x.toFixed(2)}</td>`).join('')}</tr>` : ''}
+    </table>
+    ${f.ust_alt ? `<div class="rozetler">${rozet('Üst 2.5', f.ust_alt[0].toFixed(2))}${rozet('Alt 2.5', f.ust_alt[1].toFixed(2))}</div>` : ''}
+  </div>`;
+}
+
+/* ---------- ORAN ANALİZİ ---------- */
 function oranPrefill(o){
   sekmeAc('oran');
   $('#o1').value = o[0]; $('#o0').value = o[1]; $('#o2').value = o[2];
@@ -353,7 +532,7 @@ function oranSonucHTML(s){
   </div>`;
 }
 
-/* ---------- 2) TAKIM ANALİZİ ---------- */
+/* ---------- TAKIM ANALİZİ ---------- */
 async function takimAnaliz(){
   const ev = $('#t-ev').value.trim(), dep = $('#t-dep').value.trim();
   if(!ev || !dep){ bildir('İki takımı da girin.', true); return; }
@@ -386,12 +565,12 @@ function takimSonucHTML(s){
   let html = '';
 
   if(s.oneri){
-    const o = s.oneri, y = '★'.repeat(o.yildiz) + '☆'.repeat(5 - o.yildiz);
+    const o = s.oneri, y = yildizHTML(o.yildiz);
     const govde = {
-      degerli: `<div class="buyuk">✅ DEĞERLİ BAHİS: ${SECIM_AD[o.secim]} @ ${o.oran.toFixed(2)}</div>
-                Beklenen değer <b class="ev-poz">+${(o.ev*100).toFixed(1)}%</b> · Önerilen kasa payı (çeyrek Kelly): %${(o.kelly*100).toFixed(1)} · Güven: <span class="yildizlar">${y}</span>`,
-      sinirda: `<div class="buyuk">🟡 SINIRDA: ${SECIM_AD[o.secim]} @ ${o.oran.toFixed(2)}</div>
-                Beklenen değer +${(o.ev*100).toFixed(1)}% — küçük avantaj var ama hata payının içinde. Güven: <span class="yildizlar">${y}</span>`,
+      degerli: `<div class="buyuk">✅ DEĞERLİ BAHİS: ${SECIM_AD[o.secim] || esc(o.secim)} @ ${o.oran.toFixed(2)}</div>
+                Beklenen değer <b class="ev-poz">+${(o.ev*100).toFixed(1)}%</b> · Önerilen kasa payı (çeyrek Kelly): %${(o.kelly*100).toFixed(1)} · Güven: ${y}`,
+      sinirda: `<div class="buyuk">🟡 SINIRDA: ${SECIM_AD[o.secim] || esc(o.secim)} @ ${o.oran.toFixed(2)}</div>
+                Beklenen değer +${(o.ev*100).toFixed(1)}% — küçük avantaj var ama hata payının içinde. Güven: ${y}`,
       pas: `<div class="buyuk">⛔ DEĞER YOK — pas geçin</div>
             En iyi seçim bile ${(o.ev*100).toFixed(1)}% beklenen değerde. Değer yoksa bahis de yok; profesyonel karar budur.`
     }[o.karar];
@@ -418,9 +597,12 @@ function takimSonucHTML(s){
   }
 
   const p = s.poisson;
+  const eloMetni = s.elo
+    ? ` &nbsp;·&nbsp; Elo: <b>${s.elo.ev}</b> – <b>${s.elo.dep}</b> (fark ${s.elo.fark > 0 ? '+' : ''}${s.elo.fark})`
+    : '';
   html += `<div class="kart">
     <h2>🎯 Poisson Model Tahmini</h2>
-    <div class="alt-baslik">Zaman ağırlıklı güçlerle gol beklentisi: <b>${esc(s.ev)} ${p.lambda_ev}</b> – <b>${p.lambda_dep} ${esc(s.dep)}</b> &nbsp;·&nbsp; ${esc(s.lig_adi)}</div>
+    <div class="alt-baslik">Zaman ağırlıklı güçlerle gol beklentisi: <b>${esc(s.ev)} ${p.lambda_ev}</b> – <b>${p.lambda_dep} ${esc(s.dep)}</b> &nbsp;·&nbsp; ${esc(s.lig_adi)}${eloMetni}</div>
     ${barSatir('MS 1', p.ms1, 'b-yesil')}
     ${barSatir('MS 0', p.ms0, 'b-sari')}
     ${barSatir('MS 2', p.ms2, 'b-mavi')}
@@ -446,19 +628,23 @@ function takimSonucHTML(s){
 
   if(s.deger){
     const d = s.deger;
+    const maxVar = d.satirlar.some(x => x.oran_max);
     html += `<div class="kart">
       <h2>💰 Değer Analizi</h2>
-      <div class="alt-baslik">Model karışımı: %${Math.round((1-d.w_kalip)*100)} Poisson + %${Math.round(d.w_kalip*100)} oran kalıbı · Bahisçi marjı ${pct1(d.marj)}</div>
+      <div class="alt-baslik">Model karışımı: %${Math.round((1-d.w_kalip-(d.w_piyasa||0))*100)} Poisson + %${Math.round(d.w_kalip*100)} oran kalıbı + %${Math.round((d.w_piyasa||0)*100)} piyasa · Bahisçi marjı ${pct1(d.marj)}</div>
       <table>
-        <tr><th>Seçim</th><th class="sag">Oran</th><th class="sag">Piyasa</th><th class="sag">Model</th><th class="sag">Beklenen değer</th></tr>
+        <tr><th>Seçim</th><th class="sag">Oran</th><th class="sag">Piyasa</th><th class="sag">Model</th><th class="sag">Beklenen değer</th>${maxVar ? '<th class="sag">En iyi oran</th><th class="sag">EV (en iyi)</th>' : ''}</tr>
         ${d.satirlar.map(x => `<tr>
-          <td>${SECIM_AD[x.secim]}</td>
+          <td>${SECIM_AD[x.secim] || esc(x.secim)}</td>
           <td class="sag">${x.oran.toFixed(2)}</td>
           <td class="sag">${pct(x.piyasa)}</td>
           <td class="sag">${pct(x.model)}</td>
           <td class="sag ${x.ev >= 0 ? 'ev-poz' : 'ev-neg'}">${(x.ev*100).toFixed(1)}% ${x.ev >= 0.04 ? '✅' : (x.ev >= 0.01 ? '🟡' : '')}</td>
+          ${maxVar ? `<td class="sag">${x.oran_max ? x.oran_max.toFixed(2) : '—'}</td>
+          <td class="sag ${(x.ev_max||x.ev) >= 0 ? 'ev-poz' : 'ev-neg'}">${x.ev_max !== undefined ? (x.ev_max*100).toFixed(1) + '%' : '—'}</td>` : ''}
         </tr>`).join('')}
       </table>
+      ${maxVar ? '<div class="not">"En iyi oran" = piyasadaki en yüksek oran; değerli bahis oynanacaksa bu orandan oynanır.</div>' : ''}
     </div>`;
   }else{
     html += `<div class="not" style="margin-top:-6px">İpucu: 1X2 oranlarını da girerseniz oran kalıbı, değer analizi ve öneri eklenir.</div>`;
@@ -466,7 +652,7 @@ function takimSonucHTML(s){
   return html;
 }
 
-/* ---------- 3) GEÇMİŞ MAÇLAR ---------- */
+/* ---------- GEÇMİŞ MAÇLAR ---------- */
 async function gecmisYukle(){
   const b = $('#btn-gecmis'); b.disabled = true;
   try{

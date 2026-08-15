@@ -19,13 +19,20 @@ import pandas as pd
 
 from . import analiz, veri
 
-_DURUM: dict = {"df": None}
+_DURUM: dict = {"df": None, "elo": None, "fikstur": None, "kitapcilar": []}
+
+GUN_ADLARI = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"]
 
 
 def _df(zorla: bool = False) -> pd.DataFrame:
     if _DURUM["df"] is None or zorla:
         _DURUM["df"] = veri.veriyi_yukle()
+        _DURUM["elo"] = analiz.elo_hesapla(_DURUM["df"])
     return _DURUM["df"]
+
+
+def _num(x, basamak: int = 2):
+    return None if pd.isna(x) else round(float(x), basamak)
 
 
 def _t(ts: pd.Timestamp) -> str:
@@ -101,6 +108,10 @@ def _mac_json(a: dict) -> dict:
             "uyarilar": p["uyarilar"],
         },
         "kalip": _kalip_json(a["kalip"]),
+        "elo": (
+            {"ev": round(a["elo"]["ev"]), "dep": round(a["elo"]["dep"]), "fark": round(a["elo"]["fark"])}
+            if a.get("elo") else None
+        ),
         "deger": None,
         "oneri": None,
     }
@@ -128,6 +139,7 @@ def _mac_json(a: dict) -> dict:
         sonuc["deger"] = {
             "marj": float(d["marj"]),
             "w_kalip": float(d["w_kalip"]),
+            "w_piyasa": float(d.get("w_piyasa", 0.0)),
             "satirlar": [
                 {
                     "secim": s["secim"],
@@ -274,8 +286,168 @@ def uygulama_olustur():
                 return jsonify({"hata": "Oranlar geçersiz: üçü de 1.00'den büyük olmalı."}), 400
 
         tolerans = min(max(float(govde.get("tolerans", 0.02)), 0.005), 0.10)
-        a = analiz.mac_analizi(df, ev, dep, oranlar=oranlar, tolerans=tolerans)
+        a = analiz.mac_analizi(df, ev, dep, oranlar=oranlar, tolerans=tolerans, elo=_DURUM["elo"])
         return jsonify(_mac_json(a))
+
+    def _fikstur(yenile: bool = False):
+        df = _df()
+        if _DURUM["fikstur"] is None or yenile:
+            fik, kitapcilar = veri.fikstur_yukle(ligler=list(df["Div"].unique()), yenile=yenile)
+            _DURUM["fikstur"], _DURUM["kitapcilar"] = fik, kitapcilar
+        return _DURUM["fikstur"], _DURUM["kitapcilar"]
+
+    def _fikstur_oranlari(r):
+        """Satırdan (analiz, en iyi, üst/alt) oran üçlülerini çıkarır."""
+        oranlar = [_num(r["oran_ev"]), _num(r["oran_berabere"]), _num(r["oran_dep"])]
+        if any(x is None for x in oranlar):
+            oranlar = None
+        maks = [_num(r["oran_max_ev"]), _num(r["oran_max_berabere"]), _num(r["oran_max_dep"])]
+        if any(x is None for x in maks):
+            maks = None
+        ust_alt = [_num(r["oran_ust25"]), _num(r["oran_alt25"])]
+        if any(x is None for x in ust_alt):
+            ust_alt = None
+        return oranlar, maks, ust_alt
+
+    def _mac_ozeti(idx, r, kitapcilar):
+        oranlar, maks, ust_alt = _fikstur_oranlari(r)
+        kitapci = {}
+        for p in kitapcilar:
+            uclu = [_num(r.get(f"{p}H")), _num(r.get(f"{p}D")), _num(r.get(f"{p}A"))]
+            if all(x is not None for x in uclu):
+                kitapci[veri.KITAPCI_ADLARI[p]] = uclu
+        return {
+            "id": int(idx),
+            "saat": r["Tarih"].strftime("%H:%M"),
+            "lig": r["Div"],
+            "lig_adi": veri.LIGLER.get(r["Div"], r["Div"]),
+            "ev": r["HomeTeam"],
+            "dep": r["AwayTeam"],
+            "oranlar": oranlar,
+            "maks": maks,
+            "ust_alt": ust_alt,
+            "kitapcilar": kitapci,
+        }
+
+    @app.get("/api/bulten")
+    def bulten():
+        try:
+            _df()
+        except FileNotFoundError:
+            return jsonify({"hata": "Önce veriyi güncelleyin."}), 503
+        try:
+            fik, kitapcilar = _fikstur(yenile=request.args.get("yenile") == "1")
+        except Exception as hata:  # noqa: BLE001
+            return jsonify({"hata": f"Fikstür alınamadı: {hata}"}), 502
+        gunler = []
+        for gun, grup in fik.groupby(fik["Tarih"].dt.date):
+            gunler.append(
+                {
+                    "tarih": gun.strftime("%d.%m.%Y"),
+                    "gun_adi": GUN_ADLARI[gun.weekday()],
+                    "maclar": [_mac_ozeti(i, r, kitapcilar) for i, r in grup.iterrows()],
+                }
+            )
+        return jsonify({"gunler": gunler})
+
+    def _en_iyi_oran(r, secim, maks):
+        if secim == "MS1":
+            return maks[0] if maks else None
+        if secim == "MS0":
+            return maks[1] if maks else None
+        if secim == "MS2":
+            return maks[2] if maks else None
+        kolon = "Max>2.5" if secim.startswith("ÜST") else "Max<2.5"
+        return _num(r.get(kolon))
+
+    @app.post("/api/bulten-tara")
+    def bulten_tara():
+        try:
+            df = _df()
+        except FileNotFoundError:
+            return jsonify({"hata": "Önce veriyi güncelleyin."}), 503
+        govde = request.get_json(silent=True) or {}
+        tarih = str(govde.get("tarih", ""))
+        try:
+            fik, _kitapcilar = _fikstur()
+        except Exception as hata:  # noqa: BLE001
+            return jsonify({"hata": f"Fikstür alınamadı: {hata}"}), 502
+        hedef = fik[fik["Tarih"].dt.strftime("%d.%m.%Y") == tarih]
+
+        sonuclar = []
+        for idx, r in hedef.iterrows():
+            oranlar, maks, ust_alt = _fikstur_oranlari(r)
+            if not oranlar:
+                continue
+            a = analiz.mac_analizi(
+                df, r["HomeTeam"], r["AwayTeam"],
+                oranlar=tuple(oranlar), elo=_DURUM["elo"],
+                ust_alt=tuple(ust_alt) if ust_alt else None,
+            )
+            o = a["oneri"]
+            en_iyi = _en_iyi_oran(r, o["secim"], maks)
+            model_p = a["deger"]["model_p"].get(o["secim"], 0.0)
+            ev_max = model_p * en_iyi - 1.0 if en_iyi else o["ev"]
+            sonuclar.append(
+                {
+                    "id": int(idx),
+                    "saat": r["Tarih"].strftime("%H:%M"),
+                    "lig": r["Div"],
+                    "ev": r["HomeTeam"],
+                    "dep": r["AwayTeam"],
+                    "secim": o["secim"],
+                    "oran": float(o["oran"]),
+                    "en_iyi_oran": en_iyi,
+                    "ev_degeri": float(o["ev"]),
+                    "ev_max": float(ev_max),
+                    "yildiz": int(o["yildiz"]),
+                    "karar": o["karar"],
+                    "kalip_n": int(a["kalip"]["n"]) if a["kalip"] else 0,
+                }
+            )
+        sonuclar.sort(key=lambda x: x["ev_max"], reverse=True)
+        return jsonify(sonuclar)
+
+    @app.get("/api/mac-detay")
+    def mac_detay():
+        try:
+            df = _df()
+        except FileNotFoundError:
+            return jsonify({"hata": "Önce veriyi güncelleyin."}), 503
+        try:
+            fik, kitapcilar = _fikstur()
+        except Exception as hata:  # noqa: BLE001
+            return jsonify({"hata": f"Fikstür alınamadı: {hata}"}), 502
+        try:
+            idx = int(request.args.get("id", -1))
+            r = fik.loc[idx]
+        except (ValueError, KeyError):
+            return jsonify({"hata": "Maç bulunamadı; bülteni yenileyin."}), 404
+
+        oranlar, maks, ust_alt = _fikstur_oranlari(r)
+        a = analiz.mac_analizi(
+            df, r["HomeTeam"], r["AwayTeam"],
+            oranlar=tuple(oranlar) if oranlar else None,
+            elo=_DURUM["elo"],
+            ust_alt=tuple(ust_alt) if ust_alt else None,
+        )
+        j = _mac_json(a)
+        if j["deger"]:
+            model_p = a["deger"]["model_p"]
+            for satir in j["deger"]["satirlar"]:
+                en_iyi = _en_iyi_oran(r, satir["secim"], maks)
+                if en_iyi:
+                    satir["oran_max"] = en_iyi
+                    satir["ev_max"] = model_p[satir["secim"]] * en_iyi - 1.0
+        ozet = _mac_ozeti(idx, r, kitapcilar)
+        j["fikstur"] = {
+            "tarih": r["Tarih"].strftime("%d.%m.%Y"),
+            "saat": ozet["saat"],
+            "kitapcilar": ozet["kitapcilar"],
+            "maks": ozet["maks"],
+            "ust_alt": ozet["ust_alt"],
+        }
+        return jsonify(j)
 
     @app.get("/api/gecmis-maclar")
     def gecmis_maclar():

@@ -11,6 +11,7 @@ import difflib
 import glob
 import os
 import re
+import time
 import warnings
 
 import pandas as pd
@@ -20,6 +21,25 @@ VERI_KLASORU = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data"
 )
 KAYNAK_URL = "https://www.football-data.co.uk/mmz4281/{sezon}/{lig}.csv"
+FIKSTUR_URL = "https://www.football-data.co.uk/fixtures.csv"
+FIKSTUR_TTL_SANIYE = 6 * 3600  # fikstür dosyası en fazla 6 saatte bir tazelenir
+
+# fixtures.csv / sezon dosyalarındaki kitapçı kolon önekleri -> görünen ad
+KITAPCI_ADLARI = {
+    "B365": "Bet365",
+    "PS": "Pinnacle",
+    "WH": "William Hill",
+    "BW": "Bwin",
+    "IW": "Interwetten",
+    "VC": "BetVictor",
+    "BV": "BetVictor",
+    "PP": "Paddy Power",
+    "SKB": "SkyBet",
+    "BFD": "Betfair",
+    "BFE": "Betfair Borsa",
+    "1XB": "1xBet",
+    "LB": "Ladbrokes",
+}
 
 LIGLER = {
     "T1": "Türkiye Süper Lig",
@@ -225,6 +245,80 @@ def takim_bul(df: pd.DataFrame, isim: str) -> str:
         f"'{isim}' takımı veri setinde bulunamadı.{ek} "
         f"Tüm isimler için: python tahmin.py takimlar"
     )
+
+
+def fikstur_indir(yenile: bool = False) -> str:
+    """Önümüzdeki günlerin maçlarını (çok kitapçılı oranlarla) indirir, 6 saat önbellekler."""
+    os.makedirs(VERI_KLASORU, exist_ok=True)
+    hedef = os.path.join(VERI_KLASORU, "fixtures.csv")
+    taze = (
+        os.path.exists(hedef)
+        and not yenile
+        and time.time() - os.path.getmtime(hedef) < FIKSTUR_TTL_SANIYE
+    )
+    if not taze:
+        yanit = requests.get(FIKSTUR_URL, timeout=30, headers={"User-Agent": "iddaa-analiz/1.0"})
+        if yanit.status_code != 200 or b"Div" not in yanit.content[:200]:
+            if os.path.exists(hedef):  # eski kopya varsa onunla devam et
+                return hedef
+            raise RuntimeError(f"Fikstür indirilemedi (HTTP {yanit.status_code})")
+        with open(hedef, "wb") as f:
+            f.write(yanit.content)
+    return hedef
+
+
+def fikstur_yukle(ligler: list[str] | None = None,
+                  yenile: bool = False) -> tuple[pd.DataFrame, list[str]]:
+    """Fikstürü normalize eder; (DataFrame, mevcut kitapçı önekleri) döndürür.
+
+    Birleşik kolonlar: oran_ev/berabere/dep (analiz için piyasa ortalaması,
+    yoksa Bet365), oran_max_* (piyasadaki en yüksek oran), oran_ust25/alt25.
+    Kitapçı bazlı ham kolonlar ({önek}H/D/A) ayrıca korunur.
+    """
+    yol = fikstur_indir(yenile=yenile)
+    f = _tek_dosya_oku(yol)
+    if f is None or "Div" not in f.columns:
+        raise RuntimeError("Fikstür dosyası okunamadı.")
+    f = f.dropna(subset=["Div", "Date", "HomeTeam", "AwayTeam"]).copy()
+    if ligler:
+        f = f[f["Div"].isin(ligler)]
+
+    ham = pd.to_datetime(
+        f["Date"].astype(str) + " " + f.get("Time", pd.Series("", index=f.index)).fillna("12:00").astype(str),
+        dayfirst=True, errors="coerce", format="mixed",
+    )
+    try:  # kaynak saatleri İngiltere saatidir; Türkiye saatine çevir
+        f["Tarih"] = (
+            ham.dt.tz_localize("Europe/London", nonexistent="shift_forward", ambiguous=True)
+            .dt.tz_convert("Europe/Istanbul")
+            .dt.tz_localize(None)
+        )
+    except Exception:  # tz veritabanı yoksa kaba +2 saat
+        f["Tarih"] = ham + pd.Timedelta(hours=2)
+    f = f.dropna(subset=["Tarih"])
+
+    mevcut_kitapcilar = [
+        p for p in KITAPCI_ADLARI
+        if {f"{p}H", f"{p}D", f"{p}A"} <= set(f.columns)
+    ]
+    for p in mevcut_kitapcilar:
+        for k in ("H", "D", "A"):
+            f[f"{p}{k}"] = pd.to_numeric(f[f"{p}{k}"], errors="coerce")
+
+    # analiz oranı: piyasa ortalaması en sağlıklısı; yoksa Bet365, o da yoksa Max
+    f["oran_ev"] = _ilk_dolu_kolon(f, ["AvgH", "B365H", "MaxH"])
+    f["oran_berabere"] = _ilk_dolu_kolon(f, ["AvgD", "B365D", "MaxD"])
+    f["oran_dep"] = _ilk_dolu_kolon(f, ["AvgA", "B365A", "MaxA"])
+    # en iyi (en yüksek) piyasa oranı: Max kolonu, yoksa kitapçıların satır maksimumu
+    for uc, kolon in (("ev", "H"), ("berabere", "D"), ("dep", "A")):
+        kaynaklar = [f"{p}{kolon}" for p in mevcut_kitapcilar]
+        satir_maks = f[kaynaklar].max(axis=1) if kaynaklar else pd.Series(float("nan"), index=f.index)
+        f[f"oran_max_{uc}"] = pd.to_numeric(f.get(f"Max{kolon}"), errors="coerce").fillna(satir_maks)
+    f["oran_ust25"] = _ilk_dolu_kolon(f, ["Avg>2.5", "B365>2.5", "Max>2.5"])
+    f["oran_alt25"] = _ilk_dolu_kolon(f, ["Avg<2.5", "B365<2.5", "Max<2.5"])
+
+    f = f.sort_values("Tarih").reset_index(drop=True)
+    return f, mevcut_kitapcilar
 
 
 def takim_listesi(df: pd.DataFrame, lig: str | None = None) -> pd.DataFrame:

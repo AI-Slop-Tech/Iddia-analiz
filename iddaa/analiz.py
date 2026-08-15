@@ -271,68 +271,117 @@ def oran_kalibi(df: pd.DataFrame, oranlar: tuple[float, float, float],
     }
 
 
+# ----------------------------------------------------------------- 5) Elo
+
+def elo_hesapla(df: pd.DataFrame, k: float = 20.0, ev_avantaji: float = 60.0) -> dict[str, float]:
+    """Tüm arşivi kronolojik gezerek takım Elo reytinglerini üretir (başlangıç 1500)."""
+    r: dict[str, float] = {}
+    for s in df.sort_values("Tarih").itertuples():
+        ra, rb = r.get(s.HomeTeam, 1500.0), r.get(s.AwayTeam, 1500.0)
+        beklenen = 1.0 / (1.0 + 10 ** (-((ra + ev_avantaji) - rb) / 400.0))
+        skor = 1.0 if s.FTR == "H" else (0.5 if s.FTR == "D" else 0.0)
+        r[s.HomeTeam] = ra + k * (skor - beklenen)
+        r[s.AwayTeam] = rb - k * (skor - beklenen)
+    return r
+
+
 # ------------------------------------------------------------ değer + öneri
 
+W_PIYASA = 0.35  # model karışımında piyasa (marj arındırılmış oran) payı
+
+
 def deger_analizi(oranlar: tuple[float, float, float], poisson: dict,
-                  kalip: dict | None) -> dict:
+                  kalip: dict | None,
+                  ust_alt: tuple[float, float] | None = None) -> dict:
     """Model olasılığı ile oranın içerdiği olasılığı karşılaştırır (value bet).
 
-    Model olasılığı: Poisson + oran kalıbı karışımı. Kalıp örneklemi büyüdükçe
-    ağırlığı artar (200+ maçta %50'ye ulaşır); kalıp yoksa saf Poisson kullanılır.
+    Model karışımı üç bileşenlidir:
+      piyasa %35 (bahis piyasası uzun vadede en iyi tekil tahmincidir; modele
+      karıştırmak aşırı özgüveni ve sahte 'değer' sinyallerini azaltır)
+      + oran kalıbı %0-25 (örneklem büyüdükçe artar, 200+ maçta tavana ulaşır)
+      + Poisson kalan pay.
+    ust_alt verilirse Üst/Alt 2.5 pazarı için de değer satırları eklenir.
     """
     o = dict(zip(("MS1", "MS0", "MS2"), oranlar))
     p_poisson = {"MS1": poisson["ms1"], "MS0": poisson["ms0"], "MS2": poisson["ms2"]}
+    a1, a0, a2 = adil_olasilik(*oranlar)
+    p_adil = {"MS1": a1, "MS0": a0, "MS2": a2}
 
     w_kalip = 0.0
     if kalip and kalip["n"] >= 30:
-        w_kalip = min(kalip["n"] / 200.0, 1.0) * 0.5
+        w_kalip = min(kalip["n"] / 200.0, 1.0) * 0.25
+    w_poisson = 1.0 - W_PIYASA - w_kalip
     p_kalip = {"MS1": kalip["ms1"], "MS0": kalip["ms0"], "MS2": kalip["ms2"]} if kalip else p_poisson
 
-    model = {k: (1 - w_kalip) * p_poisson[k] + w_kalip * p_kalip[k] for k in o}
+    model = {
+        k: w_poisson * p_poisson[k] + w_kalip * p_kalip[k] + W_PIYASA * p_adil[k] for k in o
+    }
     norm = sum(model.values())
     model = {k: v / norm for k, v in model.items()}
 
-    q = {k: 1 / v for k, v in o.items()}
-    marj = sum(q.values()) - 1.0
-    adil = {k: v / sum(q.values()) for k, v in q.items()}
+    marj = sum(1 / v for v in o.values()) - 1.0
 
-    satirlar = []
-    for k in ("MS1", "MS0", "MS2"):
-        ev_degeri = model[k] * o[k] - 1.0
-        tam_kelly = max(0.0, (model[k] * o[k] - 1.0) / (o[k] - 1.0)) if o[k] > 1 else 0.0
-        satirlar.append(
-            {
-                "secim": k,
-                "oran": o[k],
-                "piyasa": adil[k],
-                "model": model[k],
-                "ev": ev_degeri,
-                "kelly": min(tam_kelly / 4.0, 0.05),  # çeyrek Kelly, %5 kasa tavanı
-            }
-        )
+    def _satir(secim: str, oran: float, piyasa_p: float, model_p: float) -> dict:
+        ev_degeri = model_p * oran - 1.0
+        tam_kelly = max(0.0, ev_degeri / (oran - 1.0)) if oran > 1 else 0.0
+        return {
+            "secim": secim,
+            "oran": oran,
+            "piyasa": piyasa_p,
+            "model": model_p,
+            "ev": ev_degeri,
+            "kelly": min(tam_kelly / 4.0, 0.05),  # çeyrek Kelly, %5 kasa tavanı
+        }
 
-    return {"satirlar": satirlar, "marj": marj, "w_kalip": w_kalip}
+    satirlar = [_satir(k, o[k], p_adil[k], model[k]) for k in ("MS1", "MS0", "MS2")]
+    model_p = dict(model)
+
+    if ust_alt and min(ust_alt) > 1.0:
+        o_ust, o_alt = ust_alt
+        q_u, q_a = 1 / o_ust, 1 / o_alt
+        adil_ust = q_u / (q_u + q_a)
+        kalip_ust = kalip["ust25"] if kalip else poisson["ust25"]
+        m_ust = w_poisson * poisson["ust25"] + w_kalip * kalip_ust + W_PIYASA * adil_ust
+        satirlar.append(_satir("ÜST 2.5", o_ust, adil_ust, m_ust))
+        satirlar.append(_satir("ALT 2.5", o_alt, 1 - adil_ust, 1 - m_ust))
+        model_p["ÜST 2.5"] = m_ust
+        model_p["ALT 2.5"] = 1 - m_ust
+
+    return {
+        "satirlar": satirlar,
+        "marj": marj,
+        "w_kalip": w_kalip,
+        "w_piyasa": W_PIYASA,
+        "model_p": model_p,
+    }
 
 
 def oneri_uret(deger: dict, poisson: dict, kalip: dict | None,
-               form_ev: dict, form_dep: dict) -> dict:
-    """Sinyalleri tek bir karara bağlar: seçim, güven yıldızı, gerekçe."""
+               form_ev: dict, form_dep: dict, elo_farki: float | None = None) -> dict:
+    """Sinyalleri tek bir karara bağlar: seçim, güven yıldızı, karar."""
     en_iyi = max(deger["satirlar"], key=lambda s: s["ev"])
     secim = en_iyi["secim"]
 
-    poisson_zirve = max(["ms1", "ms0", "ms2"], key=lambda k: poisson[k]).upper()
-
     yildiz = 1
-    if poisson_zirve == secim:
-        yildiz += 1
-    if kalip:
-        kalip_zirve = max(["ms1", "ms0", "ms2"], key=lambda k: kalip[k]).upper()
-        if kalip_zirve == secim:
+    if secim in ("MS1", "MS0", "MS2"):
+        if max(["ms1", "ms0", "ms2"], key=lambda k: poisson[k]).upper() == secim:
             yildiz += 1
-    puan_farki = form_ev["puan"] - form_dep["puan"]
-    form_yonu = "MS1" if puan_farki >= 3 else ("MS2" if puan_farki <= -3 else "MS0")
-    if form_yonu == secim:
-        yildiz += 1
+        if kalip and max(["ms1", "ms0", "ms2"], key=lambda k: kalip[k]).upper() == secim:
+            yildiz += 1
+        puan_farki = form_ev["puan"] - form_dep["puan"]
+        form_yonu = "MS1" if puan_farki >= 3 else ("MS2" if puan_farki <= -3 else "MS0")
+        if form_yonu == secim:
+            yildiz += 1
+        if elo_farki is not None:
+            elo_yonu = "MS1" if elo_farki >= 50 else ("MS2" if elo_farki <= -50 else "MS0")
+            if elo_yonu == secim:
+                yildiz += 1
+    else:  # ÜST 2.5 / ALT 2.5
+        ust_secildi = secim.startswith("ÜST")
+        if (poisson["ust25"] > 0.53) == ust_secildi and abs(poisson["ust25"] - 0.5) > 0.03:
+            yildiz += 1
+        if kalip and (kalip["ust25"] > 0.53) == ust_secildi and abs(kalip["ust25"] - 0.5) > 0.03:
+            yildiz += 1
     if en_iyi["ev"] >= 0.05:
         yildiz += 1
     if poisson["uyarilar"]:
@@ -358,7 +407,9 @@ def oneri_uret(deger: dict, poisson: dict, kalip: dict | None,
 
 def mac_analizi(df: pd.DataFrame, ev: str, dep: str,
                 oranlar: tuple[float, float, float] | None = None,
-                tolerans: float = 0.02) -> dict:
+                tolerans: float = 0.02,
+                elo: dict[str, float] | None = None,
+                ust_alt: tuple[float, float] | None = None) -> dict:
     """Tüm analiz adımlarını çalıştırıp tek sözlükte toplar (rapor girdisi)."""
     sonuc = {
         "ev": ev,
@@ -370,14 +421,20 @@ def mac_analizi(df: pd.DataFrame, ev: str, dep: str,
         "form_dep_saha": form_analizi(df, dep, n=5, saha="dep"),
         "h2h": h2h_analizi(df, ev, dep),
         "poisson": poisson_tahmini(df, ev, dep),
+        "elo": None,
         "kalip": None,
         "deger": None,
         "oneri": None,
     }
+    elo_farki = None
+    if elo and ev in elo and dep in elo:
+        elo_farki = elo[ev] - elo[dep]
+        sonuc["elo"] = {"ev": elo[ev], "dep": elo[dep], "fark": elo_farki}
     if oranlar:
         sonuc["kalip"] = oran_kalibi(df, oranlar, tolerans=tolerans)
-        sonuc["deger"] = deger_analizi(oranlar, sonuc["poisson"], sonuc["kalip"])
+        sonuc["deger"] = deger_analizi(oranlar, sonuc["poisson"], sonuc["kalip"], ust_alt=ust_alt)
         sonuc["oneri"] = oneri_uret(
-            sonuc["deger"], sonuc["poisson"], sonuc["kalip"], sonuc["form_ev"], sonuc["form_dep"]
+            sonuc["deger"], sonuc["poisson"], sonuc["kalip"],
+            sonuc["form_ev"], sonuc["form_dep"], elo_farki=elo_farki,
         )
     return sonuc

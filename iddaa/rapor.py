@@ -3,7 +3,13 @@
 from __future__ import annotations
 
 GENISLIK = 66
-SECIM_AD = {"MS1": "MS 1 (ev sahibi)", "MS0": "MS 0 (beraberlik)", "MS2": "MS 2 (deplasman)"}
+SECIM_AD = {
+    "MS1": "MS 1 (ev sahibi)",
+    "MS0": "MS 0 (beraberlik)",
+    "MS2": "MS 2 (deplasman)",
+    "ÜST 2.5": "Üst 2.5 gol",
+    "ALT 2.5": "Alt 2.5 gol",
+}
 
 
 def _bar(p: float, genislik: int = 22) -> str:
@@ -105,6 +111,12 @@ def rapor_olustur(a: dict, lig_adi: str = "") -> str:
         f"   |   KG Var: {_yuzde(p['kg_var'])}"
     )
     s.append("  En olası skorlar: " + "  ".join(f"{skor} ({_yuzde(pr)})" for skor, pr in p["skorlar"][:5]))
+    if a.get("elo"):
+        e = a["elo"]
+        s.append(
+            f"  Elo reytingi: {ev} {e['ev']:.0f}  -  {e['dep']:.0f} {dep}"
+            f"   (fark {e['fark']:+.0f})"
+        )
     for u in p["uyarilar"]:
         s.append(f"  ⚠ {u}")
 
@@ -112,15 +124,18 @@ def rapor_olustur(a: dict, lig_adi: str = "") -> str:
     if a["deger"]:
         d = a["deger"]
         s.append(_baslik("💰 DEĞER ANALİZİ  (model olasılığı vs oranın içerdiği olasılık)"))
+        w_poisson = 1 - d["w_kalip"] - d.get("w_piyasa", 0)
         s.append(
-            f"  Model karışımı: %{(1 - d['w_kalip']) * 100:.0f} Poisson + %{d['w_kalip'] * 100:.0f} oran kalıbı"
+            f"  Model karışımı: %{w_poisson * 100:.0f} Poisson"
+            f" + %{d['w_kalip'] * 100:.0f} oran kalıbı"
+            f" + %{d.get('w_piyasa', 0) * 100:.0f} piyasa"
             f"   |   Bahisçi marjı: %{d['marj'] * 100:.1f}"
         )
-        s.append("    Seçim   Oran    Piyasa    Model     Beklenen değer")
+        s.append("    Seçim      Oran    Piyasa    Model     Beklenen değer")
         for satir in d["satirlar"]:
             isaret = "✅" if satir["ev"] >= 0.04 else ("🟡" if satir["ev"] >= 0.01 else "  ")
             s.append(
-                f"    {satir['secim']:<6}{satir['oran']:>5.2f}"
+                f"    {satir['secim']:<9}{satir['oran']:>5.2f}"
                 f"   {_yuzde(satir['piyasa']):>5}    {_yuzde(satir['model']):>5}"
                 f"     {satir['ev'] * 100:+6.1f}%  {isaret}"
             )
