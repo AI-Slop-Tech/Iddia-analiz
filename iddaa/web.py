@@ -17,7 +17,7 @@ import os
 
 import pandas as pd
 
-from . import analiz, veri
+from . import analiz, backtest, veri
 
 _DURUM: dict = {"df": None, "elo": None, "fikstur": None, "kitapcilar": []}
 
@@ -500,6 +500,23 @@ def uygulama_olustur():
             "ust_alt": ozet["ust_alt"],
         }
         return jsonify(j)
+
+    @app.post("/api/backtest")
+    def backtest_calistir():
+        try:
+            df = _df()
+        except FileNotFoundError:
+            return jsonify({"hata": "Önce veriyi güncelleyin."}), 503
+        govde = request.get_json(silent=True) or {}
+        sezon = min(max(int(govde.get("sezon", 3)), 1), 6)
+        lig = govde.get("lig") or None
+        if lig and lig not in set(df["Div"].unique()):
+            return jsonify({"hata": f"'{lig}' için veri yok."}), 400
+        esik = min(max(float(govde.get("esik", 0.04)), 0.0), 0.15)
+        sonuc = backtest.backtest_calistir(df, sezon_sayisi=sezon, lig=lig, esik=esik)
+        if "hata" in sonuc:
+            return jsonify(sonuc), 400
+        return jsonify(sonuc)
 
     @app.get("/api/gecmis-maclar")
     def gecmis_maclar():

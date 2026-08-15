@@ -130,6 +130,54 @@ def _cmd_bulten(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_backtest(args: argparse.Namespace) -> int:
+    from . import backtest
+
+    df = veri.veriyi_yukle()
+    if args.lig and args.lig not in df["Div"].unique():
+        print(f"'{args.lig}' için veri yok. Geçerli ligler: {', '.join(sorted(df['Div'].unique()))}")
+        return 1
+    print(
+        f"🧪 Backtest: son {args.sezon} sezon, "
+        f"{veri.LIGLER.get(args.lig, args.lig) if args.lig else 'tüm ligler'}, "
+        f"eşik +%{args.esik * 100:.0f} — hesaplanıyor (~10-30 sn)..."
+    )
+    maks_oran = None if args.maks_oran == 0 else args.maks_oran
+    r = backtest.backtest_calistir(
+        df, sezon_sayisi=args.sezon, lig=args.lig, esik=args.esik, maks_oran=maks_oran
+    )
+    if "hata" in r:
+        print(f"Hata: {r['hata']}")
+        return 1
+
+    o, p = r["ozet"], r["parametreler"]
+    print(f"\nTest dönemi   : {', '.join(p['sezonlar'])} sezonları — {p['test_mac']} maç değerlendirildi")
+    print(f"Oynanan bahis : {o['bahis']}  (eşik +%{p['esik'] * 100:.0f} üzeri değer)")
+    if o["bahis"]:
+        print(f"İsabet        : %{o['isabet'] * 100:.1f}   |   Ortalama oran: {o['ort_oran']:.2f}")
+        print(f"Açılış oranıyla   : {o['kar']:+8.1f} birim  →  ROI %{o['roi'] * 100:+.2f}")
+        print(f"En iyi oranla     : {o['kar_maks']:+8.1f} birim  →  ROI %{o['roi_maks'] * 100:+.2f}"
+              "   (aynı kuponlar, piyasadaki en yüksek orandan)")
+        print(f"Maks. düşüş   : {o['maks_dusus']:.1f} birim")
+    t = r["taban"]
+    print(f"\nKıyas ({t['mac']} maç): hep ev sahibi %{t['ms1_roi'] * 100:+.1f} ROI, "
+          f"hep favori %{t['favori_roi'] * 100:+.1f} ROI")
+
+    print("\nEşik-ROI tablosu (aynı koşu, farklı eşikler):")
+    print("  Eşik    Bahis   İsabet    ROI(açılış)   ROI(en iyi)")
+    for e in r["esik_tablosu"]:
+        if e["bahis"]:
+            print(
+                f"  +%{e['esik'] * 100:<5.0f}{e['bahis']:>6}   %{e['isabet'] * 100:>5.1f}"
+                f"   %{e['roi'] * 100:+8.2f}   %{e['roi_maks'] * 100:+8.2f}"
+            )
+
+    print("\nSeçim kırılımı:")
+    for k in r["secim_kirilim"]:
+        print(f"  {k['ad']:<8} {k['bahis']:>5} bahis   isabet %{k['isabet'] * 100:>5.1f}   ROI %{k['roi'] * 100:+6.2f}")
+    return 0
+
+
 def _cmd_web(args: argparse.Namespace) -> int:
     try:
         from .web import calistir
@@ -183,6 +231,14 @@ def arg_ayristirici() -> argparse.ArgumentParser:
     b.add_argument("--lig", help="Tek lige filtrele (ör. T1)")
     b.add_argument("--yenile", action="store_true", help="Fikstür önbelleğini yok say")
     b.set_defaults(fn=_cmd_bulten)
+
+    bt = alt.add_parser("backtest", help="Stratejiyi geçmiş sezonlarda test et (ROI raporu)")
+    bt.add_argument("--sezon", type=int, default=3, help="Son kaç sezon test edilsin (varsayılan 3)")
+    bt.add_argument("--lig", help="Tek lige daralt (ör. T1); boşsa tüm ligler")
+    bt.add_argument("--esik", type=float, default=0.04, help="Bahis eşiği: beklenen değer (varsayılan 0.04)")
+    bt.add_argument("--maks-oran", type=float, default=3.60,
+                    help="Sürpriz oran filtresi: bu oranın üstü oynanmaz (varsayılan 3.60, 0 = kapalı)")
+    bt.set_defaults(fn=_cmd_backtest)
 
     w = alt.add_parser("web", help="Modern web arayüzünü başlat")
     w.add_argument("--host", default="127.0.0.1", help="Dinlenecek adres (varsayılan 127.0.0.1)")

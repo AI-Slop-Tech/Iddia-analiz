@@ -79,6 +79,9 @@ Koyu temalı, tek sayfalık modern panel; dört bölümden oluşur:
   kalıbı, değer tablosu ve yıldızlı öneri banner'ı eklenir.
 - **🕰 Geçmiş Maçlar** — eski maçları açılış oranlarıyla listeleyin;
   "📈 bu oranı analiz et" düğmesi o maçın oranını Oran Analizi'ne taşır.
+- **🧪 Backtest** — stratejinin geçmiş karnesi: çift senaryolu ROI
+  (açılış / en iyi oran), bakiye eğrisi, eşik-ROI tablosu, seçim/lig/sezon
+  kırılımları.
 
 Veri hiç indirilmemişse panel tek tıkla indirme önerir; üstteki
 **Veriyi Güncelle** düğmesi arşivi tazeler. Arayüz `iddaa/static/index.html`
@@ -94,6 +97,7 @@ listelenmiştir.
 | `bulten [--tara] [--lig T1] [--yenile]` | Önümüzdeki günlerin maçlarını oranlarıyla listele; `--tara` her maça öneri ekler |
 | `takimlar [--lig T1]` | Veri setindeki resmi takım adları (● = güncel takım) |
 | `durum` | İndirilen veri setinin özeti |
+| `backtest [--sezon 3] [--lig T1] [--esik 0.04] [--maks-oran 3.60]` | Stratejiyi geçmişte test et: ROI, eşik tablosu, kırılımlar |
 | `web [--port 8000] [--host 127.0.0.1]` | Modern web panelini başlat |
 
 Desteklenen ligler (22): Türkiye Süper Lig (`T1`); İngiltere'nin 5 katmanı
@@ -166,6 +170,38 @@ yıldızına sinyal olarak katılır.
 aynı seçimi işaret ettikçe ve EV büyüdükçe yıldız artar; veri az olan
 takımlarda (yeni çıkan takımlar gibi) bir yıldız düşülür.
 
+## 🧪 Backtest — sistemin karnesi (dürüst sonuçlar)
+
+```bash
+python tahmin.py backtest --sezon 3            # tüm ligler
+python tahmin.py backtest --lig T1 --esik 0.04 # tek lig
+```
+veya panelde **🧪 Backtest** sekmesi.
+
+Nasıl çalışır: maçlar kronolojik gezilir; her maç **yalnızca kendinden önceki
+verilerle** değerlendirilir (bakış sızıntısı yok), canlı modelle birebir aynı
+karışım kullanılır, eşiği aşan seçime düz 1 birim oynanır, 3.60 üzeri oranlar
+sürpriz filtresine takılır. İki senaryo raporlanır: açılış oranıyla ve aynı
+kuponlar piyasadaki **en iyi** oranla.
+
+Örnek koşu (son 3 sezon, 22 lig, 15.063 maç, 5.254 bahis, eşik +%4):
+
+| Strateji | ROI |
+|---|---|
+| Sistem — açılış oranıyla | **-%8.2** |
+| Sistem — en iyi oranla | **-%5.4** |
+| Her maç ev sahibi | -%7.9 |
+| Her maç favori | -%5.5 |
+
+**Bu negatif sonuç bir hata değil, backtest'in görevi.** Herkese açık veriyle
+kurulan bir modelin açılış oranlarında ~%6'lık bahisçi marjını yenememesi
+literatürle uyumludur. Sürpriz filtresi olmadan ROI -%12'ydi — filtre tek
+başına 4 puan kazandırdı. Sistemin gerçek değeri: sahte "değer" sinyallerini
+süzmesi, değersiz maçta **PAS** demesi, en iyi oranı göstererek marj kaybını
+azaltması ve her değişikliğin etkisini bu sekmede ölçülebilir kılması. Uzun
+vadede artı ROI, ancak piyasada henüz fiyatlanmamış bilgiyle (erken oran,
+sakatlık/kadro istihbaratı) ve en iyi oran disipliniyle mümkündür.
+
 ## Gemini AI yorumu (opsiyonel)
 
 Sistem Gemini olmadan da tam çalışır. Yorum katmanı için:
@@ -195,9 +231,9 @@ analizi o oranla da alabilirsiniz — bülten sitelerini kazımak kullanım
 - Model sakatlık/ceza, kadro değeri, hakem, hava, motivasyon (küme düşme,
   şampiyonluk) gibi faktörleri **görmez** — Gemini yorumu bile yalnızca verilen
   istatistiklere dayanır. Nihai karar her zaman sizindir.
-- Fikir listesi: Dixon-Coles düzeltmesi, Elo reytingleri, xG verisi entegrasyonu,
-  geçmişe dönük strateji testi (backtest + ROI), Streamlit web arayüzü,
-  alt ligler ve kupa maçları.
+- Fikir listesi: Dixon-Coles düzeltmesi, xG verisi entegrasyonu, kupon takibi
+  (oynanan kuponların gerçek sonuçlarla izlenmesi), kapanış oranı analizi,
+  kupa/milli ara maçları.
 
 ## ⚠️ Sorumlu oyun
 

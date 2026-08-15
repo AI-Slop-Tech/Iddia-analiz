@@ -216,10 +216,26 @@ def veriyi_yukle(ligler: list[str] | None = None) -> pd.DataFrame:
         df["oran_ust25"] = _ilk_dolu_kolon(df, _UST25_ORAN)
         df["oran_alt25"] = _ilk_dolu_kolon(df, _ALT25_ORAN)
 
+        # o maç için kayıtlı kitapçıların EN YÜKSEK oranı (backtest'te "en iyi
+        # orandan oynasaydık" senaryosu için; BbMx = eski dosyalardaki piyasa maks.)
+        def _satir_maks(kolonlar):
+            mevcut = [k for k in kolonlar if k in df.columns]
+            if not mevcut:
+                return df["oran_ev"] * float("nan")
+            return df[mevcut].apply(pd.to_numeric, errors="coerce").max(axis=1)
+
+        df["oran_ev_maks"] = _satir_maks(_EV_ORAN + ["BbMxH"])
+        df["oran_berabere_maks"] = _satir_maks(_BERABERE_ORAN + ["BbMxD"])
+        df["oran_dep_maks"] = _satir_maks(_DEP_ORAN + ["BbMxA"])
+        df["oran_ust25_maks"] = _satir_maks(_UST25_ORAN + ["BbMx>2.5"])
+        df["oran_alt25_maks"] = _satir_maks(_ALT25_ORAN + ["BbMx<2.5"])
+
     kolonlar = [
         "Div", "Sezon", "Tarih", "HomeTeam", "AwayTeam", "FTHG", "FTAG", "FTR",
         "HTHG", "HTAG",
         "oran_ev", "oran_berabere", "oran_dep", "oran_ust25", "oran_alt25",
+        "oran_ev_maks", "oran_berabere_maks", "oran_dep_maks",
+        "oran_ust25_maks", "oran_alt25_maks",
     ]
     return df[kolonlar].sort_values("Tarih").reset_index(drop=True)
 

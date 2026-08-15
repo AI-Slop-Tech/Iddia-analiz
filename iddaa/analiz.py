@@ -402,7 +402,10 @@ def elo_hesapla(df: pd.DataFrame, k: float = 20.0, ev_avantaji: float = 60.0) ->
 
 # ------------------------------------------------------------ değer + öneri
 
-W_PIYASA = 0.35  # model karışımında piyasa (marj arındırılmış oran) payı
+W_PIYASA = 0.35     # model karışımında piyasa (marj arındırılmış oran) payı
+ORAN_TAVANI = 3.60  # sürpriz oran filtresi: bu oranın üstü öneriye giremez
+                    # (yüksek oranların sistematik pahalı fiyatlandığı — favorite-longshot
+                    # bias — hem literatürde hem kendi backtest'imizde doğrulandı)
 
 
 def deger_analizi(oranlar: tuple[float, float, float], poisson: dict,
@@ -474,7 +477,9 @@ def deger_analizi(oranlar: tuple[float, float, float], poisson: dict,
 def oneri_uret(deger: dict, poisson: dict, kalip: dict | None,
                form_ev: dict, form_dep: dict, elo_farki: float | None = None) -> dict:
     """Sinyalleri tek bir karara bağlar: seçim, güven yıldızı, karar."""
-    en_iyi = max(deger["satirlar"], key=lambda s: s["ev"])
+    adaylar = [s for s in deger["satirlar"] if s["oran"] <= ORAN_TAVANI]
+    surpriz_filtresi = not adaylar
+    en_iyi = max(adaylar or deger["satirlar"], key=lambda s: s["ev"])
     secim = en_iyi["secim"]
 
     yildiz = 1
@@ -509,6 +514,8 @@ def oneri_uret(deger: dict, poisson: dict, kalip: dict | None,
         karar = "sinirda"
     else:
         karar = "pas"
+    if surpriz_filtresi:
+        karar = "pas"  # tüm adaylar oran tavanının üstünde: longshot tuzağı, oynanmaz
 
     return {
         "secim": secim,
