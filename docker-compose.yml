@@ -1,0 +1,36 @@
+# İddaa Analiz Sistemi — Coolify uyumlu compose dosyası
+#
+# Coolify'da: bu repo'yu "Docker Compose" kaynağı olarak ekleyin, alan adını
+# iddaa servisinin 8000 portuna yönlendirin (port `expose` ile içeride açık;
+# dışarıya yayını Coolify'ın proxy'si yapar).
+#
+# İlk açılışta panel "Veriyi İndir" butonunu gösterir (~2-3 dk, 22 ligin
+# 10 yıllık arşivi); veri kalıcı volume'da saklanır, yeniden başlatmada kaybolmaz.
+
+services:
+  iddaa:
+    build: .
+    container_name: iddaa-analiz
+    restart: unless-stopped
+    expose:
+      - "8000"
+    # Coolify kullanmadan (örn. yerel sunucuda) doğrudan erişmek isterseniz
+    # yukarıdaki expose yerine şunu açın:
+    # ports:
+    #   - "8000:8000"
+    environment:
+      # Gemini yorumu isteğe bağlıdır; anahtarı Coolify'ın Environment
+      # Variables ekranından verin (boş kalabilir, sistem onsuz da çalışır).
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash}
+    volumes:
+      - iddaa-veri:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/durum', timeout=8)"]
+      interval: 30s
+      timeout: 10s
+      start_period: 40s
+      retries: 3
+
+volumes:
+  iddaa-veri:
