@@ -14,21 +14,59 @@ Uç noktalar:
 from __future__ import annotations
 
 import os
+import threading
+import time
 
 import pandas as pd
 
+from . import __version__ as SURUM
 from . import analiz, backtest, veri
 
-_DURUM: dict = {"df": None, "elo": None, "fikstur": None, "kitapcilar": []}
+_DURUM: dict = {
+    "df": None, "elo": None, "fikstur": None, "kitapcilar": [],
+    "fikstur_zaman": 0.0, "arsiv_zaman": 0.0,
+}
+_BAKIM = {"basladi": False}
 
 GUN_ADLARI = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"]
+
+FIKSTUR_BELLEK_TTL = 15 * 60      # bellekteki fikstür en geç 15 dk'da bir yeniden okunur
+ARSIV_YENILEME_ARALIGI = 24 * 3600  # güncel sezon arşivi günde bir tazelenir
+BAKIM_PERIYODU = 15 * 60
 
 
 def _df(zorla: bool = False) -> pd.DataFrame:
     if _DURUM["df"] is None or zorla:
         _DURUM["df"] = veri.veriyi_yukle()
         _DURUM["elo"] = analiz.elo_hesapla(_DURUM["df"])
+        _DURUM["arsiv_zaman"] = time.time()
     return _DURUM["df"]
+
+
+def _bakim_dongusu() -> None:
+    """Arka plan bakımı: gün ilerledikçe takvim ve arşiv kendiliğinden tazelenir.
+
+    - Fikstür: bellek kopyası periyodik yeniden okunur (dosya indirme zaten
+      6 saatlik TTL'e uyar); geçmiş günler otomatik düşer.
+    - Arşiv: günde bir kez güncel sezon dosyaları indirilip veri + Elo
+      yeniden yüklenir (eski sezonlar önbellekte olduğundan hızlıdır).
+    """
+    while True:
+        time.sleep(BAKIM_PERIYODU)
+        try:
+            if _DURUM["df"] is not None and time.time() - _DURUM["arsiv_zaman"] > ARSIV_YENILEME_ARALIGI:
+                veri.indir()
+                _df(zorla=True)
+                _DURUM["fikstur"] = None  # yeni veriyle yeniden okunsun
+        except Exception:  # noqa: BLE001 - bakım hatası servisi düşürmesin
+            pass
+        try:
+            if _DURUM["df"] is not None:
+                fik, kitapcilar = veri.fikstur_yukle(ligler=list(_DURUM["df"]["Div"].unique()))
+                _DURUM["fikstur"], _DURUM["kitapcilar"] = fik, kitapcilar
+                _DURUM["fikstur_zaman"] = time.time()
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def _num(x, basamak: int = 2):
@@ -184,6 +222,10 @@ def _oranlari_dogrula(ham) -> tuple[float, float, float] | None:
 def uygulama_olustur():
     from flask import Flask, jsonify, request
 
+    if not _BAKIM["basladi"]:
+        _BAKIM["basladi"] = True
+        threading.Thread(target=_bakim_dongusu, daemon=True, name="iddaa-bakim").start()
+
     app = Flask(
         __name__,
         static_folder=os.path.join(os.path.dirname(os.path.abspath(__file__)), "static"),
@@ -207,6 +249,8 @@ def uygulama_olustur():
                 "ilk_tarih": _t(df["Tarih"].min()),
                 "son_tarih": _t(df["Tarih"].max()),
                 "oran_kapsami": round(float(df["oran_ev"].notna().mean()), 3),
+                "surum": SURUM,
+                "veri_zamani": time.strftime("%d.%m %H:%M", time.localtime(_DURUM["arsiv_zaman"])),
                 "ligler": [
                     {"kod": lig, "ad": veri.LIGLER.get(lig, lig), "mac": int(adet)}
                     for lig, adet in df["Div"].value_counts().items()
@@ -293,11 +337,15 @@ def uygulama_olustur():
         a = analiz.mac_analizi(df, ev, dep, oranlar=oranlar, tolerans=tolerans, elo=_DURUM["elo"])
         return jsonify(_mac_json(a))
 
-    def _fikstur(yenile: bool = False):
+    def _fikstur(yenile: bool = False, bellek_ttl: bool = False):
+        """bellek_ttl=True: listeleme çağrıları için TTL dolduysa yeniden oku.
+        Detay/tarama çağrıları mevcut kopyayı kullanır ki satır id'leri kaymasın."""
         df = _df()
-        if _DURUM["fikstur"] is None or yenile:
+        bayat = bellek_ttl and time.time() - _DURUM["fikstur_zaman"] > FIKSTUR_BELLEK_TTL
+        if _DURUM["fikstur"] is None or yenile or bayat:
             fik, kitapcilar = veri.fikstur_yukle(ligler=list(df["Div"].unique()), yenile=yenile)
             _DURUM["fikstur"], _DURUM["kitapcilar"] = fik, kitapcilar
+            _DURUM["fikstur_zaman"] = time.time()
         return _DURUM["fikstur"], _DURUM["kitapcilar"]
 
     def _fikstur_oranlari(r):
@@ -340,19 +388,32 @@ def uygulama_olustur():
         except FileNotFoundError:
             return jsonify({"hata": "Önce veriyi güncelleyin."}), 503
         try:
-            fik, kitapcilar = _fikstur(yenile=request.args.get("yenile") == "1")
+            fik, kitapcilar = _fikstur(yenile=request.args.get("yenile") == "1", bellek_ttl=True)
         except Exception as hata:  # noqa: BLE001
             return jsonify({"hata": f"Fikstür alınamadı: {hata}"}), 502
+        simdi = veri.simdi_tr()
         gunler = []
         for gun, grup in fik.groupby(fik["Tarih"].dt.date):
+            maclar = []
+            for i, r in grup.iterrows():
+                m = _mac_ozeti(i, r, kitapcilar)
+                m["basladi"] = bool(r["Tarih"] <= simdi)
+                maclar.append(m)
             gunler.append(
                 {
                     "tarih": gun.strftime("%d.%m.%Y"),
                     "gun_adi": GUN_ADLARI[gun.weekday()],
-                    "maclar": [_mac_ozeti(i, r, kitapcilar) for i, r in grup.iterrows()],
+                    "maclar": maclar,
                 }
             )
-        return jsonify({"gunler": gunler})
+        return jsonify(
+            {
+                "gunler": gunler,
+                "bugun": simdi.strftime("%d.%m.%Y"),
+                "simdi": simdi.strftime("%H:%M"),
+                "guncelleme": time.strftime("%H:%M", time.localtime(_DURUM["fikstur_zaman"])),
+            }
+        )
 
     def _en_iyi_oran(r, secim, maks):
         if secim == "MS1":

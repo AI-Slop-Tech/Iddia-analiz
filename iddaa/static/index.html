@@ -147,6 +147,40 @@
   .bos-durum .dev{font-size:52px;margin-bottom:14px}
   .bos-durum p{color:var(--soluk);margin:8px 0 22px}
 
+  /* iskelet yükleme animasyonu */
+  .iskelet{background:var(--kart);border:1px solid var(--cizgi);border-radius:14px;height:58px;margin-bottom:10px;position:relative;overflow:hidden}
+  .iskelet::after{
+    content:"";position:absolute;inset:0;
+    background:linear-gradient(90deg,transparent,#ffffff0a,transparent);
+    animation:parla 1.3s infinite;
+  }
+  @keyframes parla{from{transform:translateX(-100%)}to{transform:translateX(100%)}}
+
+  .chip-basladi{
+    background:#7f1d1d55;border:1px solid #b91c1c;color:#fca5a5;
+    border-radius:999px;padding:3px 9px;font-size:11px;font-weight:800;white-space:nowrap;
+  }
+  .mac-satir.oynandi{opacity:.72}
+  .mac-satir{transition:border-color .15s}
+  .mac-satir:hover{border-color:#2c3d63}
+
+  /* mobil uyum */
+  @media(max-width:640px){
+    .sarici{padding:0 12px 40px}
+    .ust{padding:10px 14px;gap:8px}
+    .logo{font-size:19px}
+    nav{gap:6px;margin:18px 0 16px}
+    .sekme{padding:9px 14px;font-size:13px}
+    .kart{padding:15px}
+    .mac-satir{padding:11px 12px;gap:8px}
+    .mac-satir .takimlar{flex:1 1 100%;order:-1}
+    .mac-satir .saat{width:auto}
+    .bar-satir{grid-template-columns:84px 1fr 64px;gap:8px}
+    .one-cikan .buyukev{min-width:auto}
+    table{font-size:12.5px}
+    input.takim{width:100%}
+  }
+
   #bildirim{
     position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(120px);
     background:#111a2e;border:1px solid var(--cizgi);color:var(--metin);
@@ -298,7 +332,8 @@
 
   <footer>
     ℹ Bu sistem istatistiksel bir modeldir; kazanç garantisi yoktur, hiçbir çıktı bahis tavsiyesi değildir. 18+ | Sorumlu oyun.<br>
-    Veri: football-data.co.uk — son 10 yıl + güncel sezon + haftalık fikstür, çok kitapçılı açılış oranlarıyla.
+    Veri: football-data.co.uk — son 10 yıl + güncel sezon + haftalık fikstür, çok kitapçılı açılış oranlarıyla.<br>
+    <span id="surum-notu"></span>
   </footer>
 </div>
 
@@ -366,6 +401,8 @@ async function baslat(){
       rozet('Maç', d.toplam_mac.toLocaleString('tr-TR')) +
       rozet('Arşiv', d.ilk_tarih.slice(-4) + '–' + d.son_tarih.slice(-4)) +
       rozet('Oran kapsamı', pct1(d.oran_kapsami));
+    $('#surum-notu').textContent =
+      `İddaa Analiz v${d.surum} · veri yüklemesi: ${d.veri_zamani} · fikstür ve arşiv otomatik tazelenir`;
     d.ligler.forEach(l => {
       $('#g-lig').insertAdjacentHTML('beforeend', `<option value="${esc(l.kod)}">${esc(l.ad)}</option>`);
       $('#h-lig').insertAdjacentHTML('beforeend', `<option value="${esc(l.kod)}">${esc(l.ad)}</option>`);
@@ -392,30 +429,49 @@ async function veriGuncelle(){
 }
 
 /* ---------- BU HAFTA ---------- */
-async function haftaYukle(yenile){
-  $('#hafta-liste').innerHTML = '<div class="yukleniyor">⏳ Fikstür ve oranlar alınıyor…</div>';
+function gunEtiket(g){
+  if(!HAFTA || !HAFTA.bugun) return g.gun_adi;
+  const ayrik = t => { const [gg, aa, yy] = t.split('.').map(Number); return new Date(yy, aa - 1, gg); };
+  const fark = Math.round((ayrik(g.tarih) - ayrik(HAFTA.bugun)) / 86400000);
+  return fark === 0 ? 'Bugün' : (fark === 1 ? 'Yarın' : g.gun_adi);
+}
+
+function _gunSecimiKoru(){
+  const tarihler = HAFTA.gunler.map(g => g.tarih);
+  if(!tarihler.includes(AKTIF_GUN))
+    AKTIF_GUN = tarihler.includes(HAFTA.bugun) ? HAFTA.bugun : tarihler[0];
+  if(!tarihler.includes(AKTIF_TABLO_GUN))
+    AKTIF_TABLO_GUN = tarihler.includes(HAFTA.bugun) ? HAFTA.bugun : tarihler[0];
+}
+
+async function haftaYukle(yenile, sessiz){
+  if(!sessiz)
+    $('#hafta-liste').innerHTML = '<div class="iskelet"></div>'.repeat(6);
   try{
     HAFTA = await api('/api/bulten' + (yenile ? '?yenile=1' : ''));
-    TARAMALAR = {};
+    if(!sessiz) TARAMALAR = {};
     if(!HAFTA.gunler.length){
       $('#gun-pilleri').innerHTML = '';
       $('#hafta-liste').innerHTML = `<div class="kart bos-durum"><div class="dev">🤷</div><p>Fikstürde yaklaşan maç bulunamadı.</p></div>`;
       return;
     }
-    AKTIF_GUN = HAFTA.gunler[0].tarih;
-    AKTIF_TABLO_GUN = HAFTA.gunler[0].tarih;
+    _gunSecimiKoru();
     pilCiz(); gunCiz(); tabloPilCiz();
     if(yenile) bildir('Fikstür yenilendi.');
   }catch(h){
+    if(sessiz) return;  // arka plan yenilemesi sessizce pes eder, mevcut görünüm kalır
     $('#hafta-liste').innerHTML = `<div class="kart bos-durum"><div class="dev">⚠️</div><p>${esc(h.message)}</p>
       <button class="btn" onclick="haftaYukle(true)">Tekrar Dene</button></div>`;
   }
 }
 
+// açık sekme gün ilerledikçe kendini tazeler (10 dk'da bir, sessizce)
+setInterval(() => { if(HAFTA) haftaYukle(false, true); }, 10 * 60 * 1000);
+
 function pilCiz(){
   $('#gun-pilleri').innerHTML = HAFTA.gunler.map(g =>
     `<button class="gun-pil ${g.tarih === AKTIF_GUN ? 'aktif' : ''}" onclick="gunSec('${g.tarih}')">
-      ${g.tarih.slice(0,5)} <small>${g.gun_adi} · ${g.maclar.length} maç</small></button>`).join('');
+      ${g.tarih.slice(0,5)} <small>${gunEtiket(g)} · ${g.maclar.length} maç</small></button>`).join('');
 }
 function gunSec(t){ AKTIF_GUN = t; pilCiz(); gunCiz(); }
 
@@ -435,10 +491,11 @@ function gunCiz(){
     return;
   }
   $('#hafta-liste').innerHTML = maclar.map(m => `
-    <div class="mac-satir" id="mac-${m.id}">
+    <div class="mac-satir ${m.basladi ? 'oynandi' : ''}" id="mac-${m.id}">
       <span class="saat">${m.saat}</span>
       <span class="lig-chip" title="${esc(m.lig_adi)}">${esc(m.lig)}</span>
       <span class="takimlar">${esc(m.ev)} – ${esc(m.dep)}</span>
+      ${m.basladi ? '<span class="chip-basladi">▶ başladı</span>' : ''}
       ${m.oranlar ? `<span class="oran-trio">
         <span class="oran-kutu"><small>1</small>${m.oranlar[0].toFixed(2)}</span>
         <span class="oran-kutu"><small>X</small>${m.oranlar[1].toFixed(2)}</span>
@@ -547,7 +604,7 @@ function tabloPilCiz(){
   if(!HAFTA) return;
   $('#tablo-pilleri').innerHTML = HAFTA.gunler.map(g =>
     `<button class="gun-pil ${g.tarih === AKTIF_TABLO_GUN ? 'aktif' : ''}" onclick="tabloGunSec('${g.tarih}')">
-      ${g.tarih.slice(0,5)} <small>${g.gun_adi} · ${g.maclar.length} maç</small></button>`).join('');
+      ${g.tarih.slice(0,5)} <small>${gunEtiket(g)} · ${g.maclar.length} maç</small></button>`).join('');
 }
 function tabloGunSec(t){ AKTIF_TABLO_GUN = t; tabloPilCiz(); tabloCiz(); }
 
