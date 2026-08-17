@@ -34,6 +34,9 @@ pip install -r requirements.txt        # pandas + requests, hepsi bu
 ## Hızlı başlangıç
 
 ```bash
+# 0) Veri kaynağına erişimi test et — Türkiye'den engelli, vekil gerekir
+python tahmin.py baglanti           # ayrıntı: "Erişim sorunu (Türkiye)"
+
 # 1) Veriyi indir (ilk seferde ~1 dk; sonrası önbellekten)
 python tahmin.py guncelle
 
@@ -103,6 +106,7 @@ içindedir (bağımlılıksız, tek dosya, mobil uyumlu); JSON API uçları
 | `bulten [--tara] [--lig T1] [--yenile]` | Önümüzdeki günlerin maçlarını oranlarıyla listele; `--tara` her maça öneri ekler |
 | `takimlar [--lig T1]` | Veri setindeki resmi takım adları (● = güncel takım) |
 | `durum` | İndirilen veri setinin özeti |
+| `baglanti` | Veri kaynağına erişimi ve vekil ayarını test et ([Erişim sorunu](#erişim-sorunu-türkiye)) |
 | `backtest [--sezon 3] [--lig T1] [--esik 0.04] [--maks-oran 3.60]` | Stratejiyi geçmişte test et: ROI, eşik tablosu, kırılımlar |
 | `web [--port 8000] [--host 127.0.0.1]` | Modern web panelini başlat |
 
@@ -231,6 +235,99 @@ panel bunları maç başına karşılaştırmalı gösterir. Türkiye bülteni (
 vb.) farklıysa oranı Oran Analizi / Takım Analizi sekmesine elle girip aynı
 analizi o oranla da alabilirsiniz — bülten sitelerini kazımak kullanım
 şartlarına aykırı ve kırılgan olduğu için bilinçli olarak eklenmedi.
+
+> Kaynak Türkiye'den erişime kapalıdır; sunucunuz Türkiye'deyse
+> [Erişim sorunu (Türkiye)](#erişim-sorunu-türkiye) bölümüne bakın.
+
+## Erişim sorunu (Türkiye)
+
+`football-data.co.uk` bahis oranı yayınladığı için **Türkiye'den erişime
+kapalıdır**. Türkiye'deki bir makineden `guncelle` çalıştırırsanız bağlantı
+hatası alırsınız. Önce nerede olduğunuzu test edin:
+
+```bash
+python tahmin.py baglanti
+```
+
+`✅ erişim var` çıkıyorsa yapacak bir şey yok. `❌ erişilemedi` çıkıyorsa
+aşağıdaki üç yoldan birini seçin.
+
+**Neden yerel bir ayna yetmiyor?** Denendi, olmuyor: GitHub'daki iki ayna
+(`footballcsv/cache.footballdata`, `datasets/football-datasets`) CSV'leri
+yeniden biçimlendirirken **tüm kitapçı oran kolonlarını atıyor** — geriye
+`Date, Team 1, FT, HT, Team 2` kalıyor. Bu projenin tamamı oranlar üzerine
+kurulu olduğu için aynalar kullanılamaz. Dahası `fixtures.csv` (önümüzdeki
+maçlar + güncel oranlar, günlük değişir) **hiçbir yerde aynalanmıyor**;
+bülten ve tarama özellikleri onsuz çalışmaz. Yani kaynağa gerçekten erişmek
+gerekiyor.
+
+### 1. Sunucuyu yurt dışında çalıştırın (en basit)
+
+Coolify/VPS'iniz Türkiye dışındaysa (Hetzner, DigitalOcean, Contabo...)
+hiçbir ayar gerekmez. İnen dosyalar kalıcı volume'de (`/app/data`)
+önbelleklenir; eski sezonlar bir daha indirilmez, yalnızca güncel sezon ve
+fikstür tazelenir. Panele Türkiye'den erişmenizde sorun yoktur — engel
+yalnızca sunucudan kaynağa giden trafiği ilgilendirir.
+
+### 2. `IDDAA_PROXY` — HTTP/SOCKS5 vekil
+
+```bash
+export IDDAA_PROXY="http://kullanici:parola@vekil.example.com:8080"
+# SOCKS5 için:  pip install "requests[socks]"
+export IDDAA_PROXY="socks5h://127.0.0.1:1080"
+
+python tahmin.py baglanti   # ayarı doğrulayın
+python tahmin.py guncelle
+```
+
+Yalnızca veri kaynağına giden istekler bu vekilden geçer. Değişken boşsa
+sistemin standart `HTTP_PROXY` / `HTTPS_PROXY` değişkenleri geçerli olmaya
+devam eder; `IDDAA_PROXY` tanımlıysa onları ezer. Adresteki parola log ve
+API çıktılarında `***` ile maskelenir.
+
+### 3. `IDDAA_KAYNAK_TABAN` — kendi ters vekiliniz (ücretsiz)
+
+Vekil satın almak istemiyorsanız, ücretsiz bir Cloudflare Worker kaynağın
+önüne geçici bir tampon olarak konabilir. Worker kodu:
+
+```js
+export default {
+  async fetch(request) {
+    const url = new URL(request.url);
+    const hedef = "https://www.football-data.co.uk" + url.pathname + url.search;
+    const yanit = await fetch(hedef, { headers: { "User-Agent": "iddaa-analiz/1.0" } });
+    return new Response(yanit.body, {
+      status: yanit.status,
+      headers: { "Content-Type": yanit.headers.get("Content-Type") || "text/csv" },
+    });
+  },
+};
+```
+
+Ardından:
+
+```bash
+export IDDAA_KAYNAK_TABAN="https://iddaa-veri.hesabiniz.workers.dev"
+python tahmin.py baglanti
+```
+
+`workers.dev` alan adı Türkiye'den erişilebilir ve ücretsiz kotası
+(günlük 100.000 istek) bu projenin ihtiyacının çok üstündedir — ilk kurulumda
+~242, sonrasında günde birkaç istek yapılır.
+
+### Docker / Coolify
+
+Her iki değişken de `docker-compose.yml` içinde tanımlıdır; değeri Coolify'ın
+**Environment Variables** ekranından verin, servisi yeniden başlatın. Panelden
+`GET /api/baglanti` ile de test edebilirsiniz.
+
+### Erişim yokken ne olur?
+
+`guncelle` 242 dosyayı tek tek denemek yerine ilk başarısız denemeden sonra
+(3 tekrar, üstel bekleme) **erken durur** ve ne yapmanız gerektiğini yazar.
+O ana kadar inen dosyalar diskte kalır; erişim sağlanınca `guncelle` kaldığı
+yerden devam eder. Fikstürde ağ kapalıysa, elde eski bir kopya varsa panel
+onunla çalışmaya devam eder.
 
 ## Sınırlar ve yol haritası
 

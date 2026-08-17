@@ -23,6 +23,15 @@ services:
       # Variables ekranından verin (boş kalabilir, sistem onsuz da çalışır).
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash}
+      # Veri kaynağı (football-data.co.uk) Türkiye'den erişime kapalıdır.
+      # Sunucunuz Türkiye'deyse aşağıdakilerden BİRİNİ doldurun; sunucu yurt
+      # dışındaysa ikisi de boş kalabilir. Ayrıntı: README > Erişim sorunu.
+      #   IDDAA_PROXY        : HTTP/SOCKS5 vekil
+      #                        http://kullanici:parola@vekil.example.com:8080
+      #   IDDAA_KAYNAK_TABAN : kendi ters vekiliniz (ör. Cloudflare Worker)
+      #                        https://iddaa-veri.hesabiniz.workers.dev
+      - IDDAA_PROXY=${IDDAA_PROXY:-}
+      - IDDAA_KAYNAK_TABAN=${IDDAA_KAYNAK_TABAN:-}
     volumes:
       - iddaa-veri:/app/data
     healthcheck:
