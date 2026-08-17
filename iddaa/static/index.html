@@ -208,6 +208,7 @@
   <nav>
     <button class="sekme aktif" data-s="hafta">📅 Bu Hafta</button>
     <button class="sekme" data-s="tablo">📋 Tahmin Tablosu</button>
+    <button class="sekme" data-s="sonuc">📊 Sonuçlar</button>
     <button class="sekme" data-s="oran">📈 Oran Analizi</button>
     <button class="sekme" data-s="takim">🎯 Takım Analizi</button>
     <button class="sekme" data-s="gecmis">🕰 Geçmiş Maçlar</button>
@@ -249,6 +250,30 @@
       </div>
     </div>
     <div id="tablo-sonuc"></div>
+  </section>
+
+  <!-- ============ SONUÇLAR ============ -->
+  <section id="s-sonuc">
+    <div class="kart">
+      <h2>📊 Sonuçlar & Tahmin Karnesi</h2>
+      <div class="alt-baslik">
+        Oynanan maçların skorları, ilk yarı sonuçları ve maç istatistikleri (şut, korner, kart).
+        Günü Tara / Tahmin Tablosu çalıştırdıkça tahminler <b>maç başlamadan</b> günlüğe kaydedilir;
+        maç bitince burada gerçek skorla karşılaştırılıp sistemin karnesi çıkar.
+        Sonuçlar, kaynak arşivi güncelledikçe gelir (kaynak skorları haftada birkaç kez toplu işler, 1-2 gün gecikme normaldir; arşiv günde bir otomatik tazelenir).
+      </div>
+      <div class="form-satir">
+        <div class="alan"><label>Dönem</label><select id="snc-gun">
+          <option value="1">Bugün</option><option value="3">Son 3 gün</option>
+          <option value="7">Son 7 gün</option><option value="14" selected>Son 14 gün</option>
+          <option value="30">Son 30 gün</option>
+        </select></div>
+        <div class="alan"><label>Lig</label><select id="snc-lig"><option value="">Tümü</option></select></div>
+        <button class="btn" id="btn-sonuc" onclick="sonuclarYukle()">Listele</button>
+      </div>
+    </div>
+    <div id="sonuc-karne"></div>
+    <div id="sonuc-liste"></div>
   </section>
 
   <!-- ============ ORAN ANALİZİ ============ -->
@@ -408,7 +433,9 @@ async function baslat(){
       $('#h-lig').insertAdjacentHTML('beforeend', `<option value="${esc(l.kod)}">${esc(l.ad)}</option>`);
       $('#tablo-lig').insertAdjacentHTML('beforeend', `<option value="${esc(l.kod)}">${esc(l.ad)}</option>`);
       $('#bt-lig').insertAdjacentHTML('beforeend', `<option value="${esc(l.kod)}">${esc(l.ad)}</option>`);
+      $('#snc-lig').insertAdjacentHTML('beforeend', `<option value="${esc(l.kod)}">${esc(l.ad)}</option>`);
     });
+    sonuclarYukle(true);
     haftaYukle(false);
     TAKIMLAR = await api('/api/takimlar');
     const dl = $('#takim-listesi');
@@ -851,6 +878,80 @@ function takimSonucHTML(s){
     html += `<div class="not" style="margin-top:-6px">İpucu: 1X2 oranlarını da girerseniz oran kalıbı, değer analizi ve öneri eklenir.</div>`;
   }
   return html;
+}
+
+/* ---------- SONUÇLAR ---------- */
+function miniChip(metin, renkKodu){
+  const renk = HUCRE_RENK[renkKodu] || '96,165,250';
+  return `<span style="background:rgba(${renk},.30);border-radius:7px;padding:3px 8px;font-size:12px;font-weight:800;white-space:nowrap">${esc(metin)}</span>`;
+}
+
+function tahminOzetHTML(t){
+  if(!t) return '<span class="ipucu">kayıtlı tahmin yok</span>';
+  const parcalar = [];
+  if(t.secim){
+    const isaret = t.tuttu === true ? '✅' : (t.tuttu === false ? '❌' : '⏳');
+    parcalar.push(`<span class="rozet">🤖 ${SECIM_AD[t.secim] || esc(t.secim)}${t.oran ? ' @' + Number(t.oran).toFixed(2) : ''} ${isaret}</span>`);
+  }
+  const hucre = (ad, dogru) => dogru === undefined ? '' :
+    `<span class="ipucu" style="white-space:nowrap">${ad} ${dogru ? '✓' : '✗'}</span>`;
+  parcalar.push(hucre('MS', t.ms_dogru), hucre('Ü/A', t.ua_dogru), hucre('KG', t.kg_dogru));
+  if(t.ms_skor_tahmin) parcalar.push(`<span class="ipucu">skor tahmini ${esc(t.ms_skor_tahmin)}</span>`);
+  return parcalar.filter(Boolean).join(' ');
+}
+
+async function sonuclarYukle(sessiz){
+  const b = $('#btn-sonuc'); if(!sessiz) b.disabled = true;
+  try{
+    const q = new URLSearchParams({gun: $('#snc-gun').value});
+    if($('#snc-lig').value) q.set('lig', $('#snc-lig').value);
+    const s = await api('/api/sonuclar?' + q);
+    const k = s.karne;
+
+    $('#sonuc-karne').innerHTML = (k.toplam || s.bekleyen) ? `<div class="kart">
+      <h2>🎓 Tahmin Karnesi <span class="ipucu">(yalnız maç öncesi kaydedilen tahminler)</span></h2>
+      <div class="rozetler">
+        ${rozet('Sonuçlanan tahmin', k.toplam)}
+        ${k.ms_n ? rozet('MS isabet', k.ms_dogru + '/' + k.ms_n + ' (' + pct(k.ms_dogru / k.ms_n) + ')') : ''}
+        ${k.ua_n ? rozet('Alt/Üst isabet', k.ua_dogru + '/' + k.ua_n + ' (' + pct(k.ua_dogru / k.ua_n) + ')') : ''}
+        ${k.kg_n ? rozet('KG isabet', k.kg_dogru + '/' + k.kg_n + ' (' + pct(k.kg_dogru / k.kg_n) + ')') : ''}
+        ${k.secim_n ? rozet('Seçim isabeti', k.secim_tutan + '/' + k.secim_n) : ''}
+        ${k.degerli_n ? `<span class="rozet">Değerli seçim P/L: <b class="${k.degerli_kar >= 0 ? 'ev-poz' : 'ev-neg'}">${k.degerli_kar.toFixed(1)} birim</b> (${k.degerli_n} bahis, ROI ${(k.degerli_kar / k.degerli_n * 100).toFixed(1)}%)</span>` : ''}
+        ${s.bekleyen ? rozet('Sonuç bekleyen', s.bekleyen) : ''}
+      </div>
+    </div>` : `<div class="not" style="margin-bottom:14px">🎓 Karne henüz boş — Bu Hafta'da <b>⚡ Günü Tara</b> veya <b>📋 Tahmin Tablosu</b> çalıştırın; tahminler maç başlamadan kaydedilir ve maçlar bitince burada notlanır.</div>`;
+
+    if(!s.satirlar.length){
+      $('#sonuc-liste').innerHTML = `<div class="kart bos-durum"><div class="dev">🗓</div>
+        <p>Bu dönemde arşive işlenmiş maç yok. Arşivdeki son maç: ${esc(s.veri_son)} — kaynak genellikle sonuçları aynı gece/ertesi gün yayınlar.</p></div>`;
+      return;
+    }
+
+    let html = '', sonGun = '';
+    for(const m of s.satirlar){
+      if(m.tarih !== sonGun){
+        sonGun = m.tarih;
+        html += `<div style="margin:16px 0 8px;color:var(--soluk);font-weight:700">📅 ${m.tarih}</div>`;
+      }
+      const ist = m.istatistik ? Object.entries(m.istatistik)
+        .map(([ad, [h, a]]) => `${ad} ${h}-${a}`).join(' · ') : '';
+      html += `<div class="mac-satir">
+        <span class="lig-chip" title="${esc(m.lig_adi)}">${esc(m.lig)}</span>
+        <span class="takimlar">${esc(m.ev)} <b style="font-size:16px">${m.skor}</b> ${esc(m.dep)}
+          ${m.iy_skor ? `<span class="ipucu">(İY ${m.iy_skor})</span>` : ''}</span>
+        <span style="display:flex;gap:6px">
+          ${miniChip('MS ' + m.ms, m.ms)}
+          ${miniChip(m.ust25 ? 'Üst 2.5' : 'Alt 2.5', m.ust25 ? 'Ü' : 'A')}
+          ${miniChip(m.kg ? 'KG Var' : 'KG Yok', m.kg ? 'Var' : 'Yok')}
+        </span>
+        <span style="flex:1"></span>
+        ${tahminOzetHTML(m.tahmin)}
+        ${ist ? `<span class="ipucu" style="flex-basis:100%">${esc(ist)}</span>` : ''}
+      </div>`;
+    }
+    $('#sonuc-liste').innerHTML = html;
+  }catch(h){ if(!sessiz) bildir(h.message, true); }
+  b.disabled = false;
 }
 
 /* ---------- BACKTEST ---------- */
