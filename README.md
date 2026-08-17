@@ -80,6 +80,15 @@ Koyu temalı, tek sayfalık modern panel; dört bölümden oluşur:
 - **🎯 Takım Analizi** — iki takımı seçin (oran girmek isteğe bağlı): form
   serileri, aralarındaki maçlar, Elo, Poisson tahmini; oran girilirse oran
   kalıbı, değer tablosu ve yıldızlı öneri banner'ı eklenir.
+- **📊 Sonuçlar & Tahmin Karnesi** — oynanan maçların skoru, ilk yarı skoru,
+  gerçekleşen 1X2/Alt-Üst/KG rozetleri ve maç istatistikleri (şut, isabetli
+  şut, korner, kart). Günü Tara ve Tahmin Tablosu, tahminlerini **maç
+  başlamadan** `data/tahminler.json` günlüğüne kaydeder; maç bitince burada
+  gerçek skorla notlanır: MS/Ü-A/KG isabet oranları ve değerli seçimlerin
+  gerçek kar/zararı — sistemin ileriye dönük, hilesiz karnesi. (Kaynak,
+  skorları haftada birkaç kez toplu işler; 1-2 gün gecikme normaldir.
+  Canlı skor yayını yoktur — canlı servisler API anahtarı gerektirir,
+  yol haritasındadır.)
 - **🕰 Geçmiş Maçlar** — eski maçları açılış oranlarıyla listeleyin;
   "📈 bu oranı analiz et" düğmesi o maçın oranını Oran Analizi'ne taşır.
 - **🧪 Backtest** — stratejinin geçmiş karnesi: çift senaryolu ROI

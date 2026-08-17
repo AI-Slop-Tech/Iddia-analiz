@@ -21,7 +21,7 @@ import time
 import pandas as pd
 
 from . import __version__ as SURUM
-from . import analiz, backtest, veri
+from . import analiz, backtest, kayit, veri
 
 _DURUM: dict = {
     "df": None, "elo": None, "fikstur": None, "kitapcilar": [],
@@ -447,8 +447,9 @@ def uygulama_olustur():
         except Exception as hata:  # noqa: BLE001
             return jsonify({"hata": f"Fikstür alınamadı: {hata}"}), 502
         hedef = fik[fik["Tarih"].dt.strftime("%d.%m.%Y") == tarih]
+        simdi = veri.simdi_tr()
 
-        sonuclar = []
+        sonuclar, gunluk_kayitlar = [], []
         for idx, r in hedef.iterrows():
             oranlar, maks, ust_alt = _fikstur_oranlari(r)
             if not oranlar:
@@ -480,6 +481,24 @@ def uygulama_olustur():
                     "kalip_n": int(a["kalip"]["n"]) if a["kalip"] else 0,
                 }
             )
+            if r["Tarih"] > simdi:  # karne dürüstlüğü: yalnız başlamamış maç kaydedilir
+                gunluk_kayitlar.append(
+                    {
+                        "tarih": r["Tarih"].strftime("%d.%m.%Y"),
+                        "saat": r["Tarih"].strftime("%H:%M"),
+                        "lig": r["Div"],
+                        "ev": r["HomeTeam"],
+                        "dep": r["AwayTeam"],
+                        "secim": o["secim"],
+                        "oran": float(o["oran"]),
+                        "en_iyi_oran": en_iyi,
+                        "ev_degeri": float(o["ev"]),
+                        "yildiz": int(o["yildiz"]),
+                        "karar": o["karar"],
+                        "kayit_zamani": simdi.strftime("%d.%m.%Y %H:%M"),
+                    }
+                )
+        kayit.kaydet(gunluk_kayitlar)
         sonuclar.sort(key=lambda x: x["ev_max"], reverse=True)
         return jsonify(sonuclar)
 
@@ -506,12 +525,14 @@ def uygulama_olustur():
             return jsonify({"hata": f"Fikstür alınamadı: {hata}"}), 502
         hedef = fik[fik["Tarih"].dt.strftime("%d.%m.%Y") == tarih]
 
-        satirlar = []
+        satirlar, gunluk_kayitlar = [], []
+        simdi = veri.simdi_tr()
         for idx, r in hedef.iterrows():
             oranlar, _maks, _ust_alt = _fikstur_oranlari(r)
             poisson = analiz.poisson_tahmini(df, r["HomeTeam"], r["AwayTeam"], lig_ipucu=r["Div"])
             kalip = analiz.oran_kalibi(df, tuple(oranlar)) if oranlar else None
             hucreler = analiz.tahmin_hucreleri(poisson, kalip)
+            h = _hucreler_json(hucreler)
             satirlar.append(
                 {
                     "id": int(idx),
@@ -522,9 +543,26 @@ def uygulama_olustur():
                     "oranlar": oranlar,
                     "kalip_n": int(kalip["n"]) if kalip else 0,
                     "uyari": bool(poisson["uyarilar"]),
-                    "hucreler": _hucreler_json(hucreler),
+                    "hucreler": h,
                 }
             )
+            if r["Tarih"] > simdi:
+                gunluk_kayitlar.append(
+                    {
+                        "tarih": r["Tarih"].strftime("%d.%m.%Y"),
+                        "saat": r["Tarih"].strftime("%H:%M"),
+                        "lig": r["Div"],
+                        "ev": r["HomeTeam"],
+                        "dep": r["AwayTeam"],
+                        "ms_sonuc_sec": h["ms_sonuc"]["sec"],
+                        "iy_sonuc_sec": h["iy_sonuc"]["sec"],
+                        "ms25_sec": h["ms25"]["sec"],
+                        "kg_sec": h["kg"]["sec"],
+                        "ms_skor_tahmin": h["ms_skor"],
+                        "kayit_zamani": simdi.strftime("%d.%m.%Y %H:%M"),
+                    }
+                )
+        kayit.kaydet(gunluk_kayitlar)
         return jsonify(satirlar)
 
     @app.get("/api/mac-detay")
@@ -570,6 +608,107 @@ def uygulama_olustur():
             "ust_alt": ozet["ust_alt"],
         }
         return jsonify(j)
+
+    @app.get("/api/sonuclar")
+    def sonuclar():
+        """Son günlerin oynanmış maçları (skor + istatistik) ve tahmin karnesi."""
+        try:
+            df = _df()
+        except FileNotFoundError:
+            return jsonify({"hata": "Önce veriyi güncelleyin."}), 503
+        gun = min(max(int(request.args.get("gun", 7)), 1), 60)
+        lig = request.args.get("lig", "").strip()
+        simdi = veri.simdi_tr()
+        baslangic = simdi.normalize() - pd.Timedelta(days=gun - 1)
+
+        m = df[df["Tarih"] >= baslangic]
+        if lig:
+            m = m[m["Div"] == lig]
+        m = m.sort_values("Tarih", ascending=False).head(400)
+        gunluk = kayit.yukle()
+
+        def _secim_tuttu(secim: str | None, r) -> bool | None:
+            if not secim:
+                return None
+            toplam = int(r.FTHG) + int(r.FTAG)
+            return {
+                "MS1": r.FTR == "H", "MS0": r.FTR == "D", "MS2": r.FTR == "A",
+                "ÜST 2.5": toplam > 2.5, "ALT 2.5": toplam < 2.5,
+            }.get(secim)
+
+        satirlar = []
+        karne = {"toplam": 0, "ms_dogru": 0, "ms_n": 0, "ua_dogru": 0, "ua_n": 0,
+                 "kg_dogru": 0, "kg_n": 0, "secim_tutan": 0, "secim_n": 0,
+                 "degerli_kar": 0.0, "degerli_n": 0}
+        for r in m.itertuples():
+            anahtar = f"{r.Tarih.strftime('%d.%m.%Y')}|{r.HomeTeam}|{r.AwayTeam}"
+            t = gunluk.get(anahtar)
+            toplam_gol = int(r.FTHG) + int(r.FTAG)
+            gercek_ms = "1" if r.FTR == "H" else ("X" if r.FTR == "D" else "2")
+
+            tahmin = None
+            if t:
+                karne["toplam"] += 1
+                tahmin = dict(t)
+                if t.get("ms_sonuc_sec"):
+                    karne["ms_n"] += 1
+                    tahmin["ms_dogru"] = t["ms_sonuc_sec"] == gercek_ms
+                    karne["ms_dogru"] += int(tahmin["ms_dogru"])
+                if t.get("ms25_sec"):
+                    karne["ua_n"] += 1
+                    tahmin["ua_dogru"] = (t["ms25_sec"] == "Ü") == (toplam_gol > 2.5)
+                    karne["ua_dogru"] += int(tahmin["ua_dogru"])
+                if t.get("kg_sec"):
+                    karne["kg_n"] += 1
+                    tahmin["kg_dogru"] = (t["kg_sec"] == "Var") == (r.FTHG > 0 and r.FTAG > 0)
+                    karne["kg_dogru"] += int(tahmin["kg_dogru"])
+                tuttu = _secim_tuttu(t.get("secim"), r)
+                if tuttu is not None:
+                    karne["secim_n"] += 1
+                    karne["secim_tutan"] += int(tuttu)
+                    tahmin["tuttu"] = tuttu
+                    if t.get("karar") == "degerli":
+                        karne["degerli_n"] += 1
+                        karne["degerli_kar"] += (float(t["oran"]) - 1.0) if tuttu else -1.0
+
+            istatistik = {}
+            for ad, (hk, ak) in (
+                ("şut", ("HS", "AS")), ("isabetli", ("HST", "AST")),
+                ("korner", ("HC", "AC")), ("sarı", ("HY", "AY")), ("kırmızı", ("HR", "AR")),
+            ):
+                hv, av = getattr(r, hk), getattr(r, ak)
+                if not (pd.isna(hv) or pd.isna(av)):
+                    istatistik[ad] = [int(hv), int(av)]
+
+            satirlar.append(
+                {
+                    "tarih": r.Tarih.strftime("%d.%m.%Y"),
+                    "lig": r.Div,
+                    "lig_adi": veri.LIGLER.get(r.Div, r.Div),
+                    "ev": r.HomeTeam,
+                    "dep": r.AwayTeam,
+                    "skor": f"{int(r.FTHG)}-{int(r.FTAG)}",
+                    "iy_skor": None if pd.isna(r.HTHG) else f"{int(r.HTHG)}-{int(r.HTAG)}",
+                    "ms": gercek_ms,
+                    "ust25": toplam_gol > 2.5,
+                    "kg": bool(r.FTHG > 0 and r.FTAG > 0),
+                    "istatistik": istatistik or None,
+                    "tahmin": tahmin,
+                }
+            )
+
+        # sonucu henüz arşive düşmemiş (bekleyen) kayıtlı tahminler
+        eslesen = {f"{s['tarih']}|{s['ev']}|{s['dep']}" for s in satirlar}
+        bekleyen = sum(1 for a in gunluk if a not in eslesen)
+
+        return jsonify(
+            {
+                "satirlar": satirlar,
+                "karne": karne,
+                "bekleyen": bekleyen,
+                "veri_son": _t(df["Tarih"].max()),
+            }
+        )
 
     @app.post("/api/backtest")
     def backtest_calistir():

@@ -166,6 +166,9 @@ def baglanti_testi(zaman_asimi: int = 15) -> dict:
             sonuc["ipucu"] = ERISIM_IPUCU
     return sonuc
 
+# oynanmış maç istatistikleri: şut, isabetli şut, korner, sarı/kırmızı kart
+ISTATISTIK_KOLONLARI = ["HS", "AS", "HST", "AST", "HC", "AC", "HY", "AY", "HR", "AR"]
+
 # fixtures.csv / sezon dosyalarındaki kitapçı kolon önekleri -> görünen ad
 KITAPCI_ADLARI = {
     "B365": "Bet365",
@@ -352,8 +355,9 @@ def veriyi_yukle(ligler: list[str] | None = None) -> pd.DataFrame:
         df = df.dropna(subset=["Tarih", "FTHG", "FTAG", "FTR"])
         df["FTHG"] = df["FTHG"].astype(int)
         df["FTAG"] = df["FTAG"].astype(int)
-        # ilk yarı skorları (çok eski dosyalarda olmayabilir -> NaN kalır)
-        for k in ("HTHG", "HTAG"):
+        # ilk yarı skorları ve maç istatistikleri (şut, isabetli şut, korner,
+        # kart) — eski dosyalarda olmayabilir -> NaN kalır
+        for k in ("HTHG", "HTAG", *ISTATISTIK_KOLONLARI):
             df[k] = pd.to_numeric(df[k], errors="coerce") if k in df.columns else float("nan")
 
         df["oran_ev"] = _ilk_dolu_kolon(df, _EV_ORAN)
@@ -378,7 +382,7 @@ def veriyi_yukle(ligler: list[str] | None = None) -> pd.DataFrame:
 
     kolonlar = [
         "Div", "Sezon", "Tarih", "HomeTeam", "AwayTeam", "FTHG", "FTAG", "FTR",
-        "HTHG", "HTAG",
+        "HTHG", "HTAG", *ISTATISTIK_KOLONLARI,
         "oran_ev", "oran_berabere", "oran_dep", "oran_ust25", "oran_alt25",
         "oran_ev_maks", "oran_berabere_maks", "oran_dep_maks",
         "oran_ust25_maks", "oran_alt25_maks",
