@@ -424,6 +424,16 @@ def takim_bul(df: pd.DataFrame, isim: str) -> str:
     )
 
 
+def simdi_tr() -> pd.Timestamp:
+    """Türkiye saatiyle şu an (saat dilimi bilgisiz Timestamp)."""
+    try:
+        from zoneinfo import ZoneInfo
+
+        return pd.Timestamp.now(tz=ZoneInfo("Europe/Istanbul")).tz_localize(None)
+    except Exception:  # tz veritabanı yoksa sistem saatiyle yetin
+        return pd.Timestamp.now()
+
+
 def fikstur_indir(yenile: bool = False) -> str:
     """Önümüzdeki günlerin maçlarını (çok kitapçılı oranlarla) indirir, 6 saat önbellekler."""
     os.makedirs(VERI_KLASORU, exist_ok=True)
@@ -450,12 +460,15 @@ def fikstur_indir(yenile: bool = False) -> str:
 
 
 def fikstur_yukle(ligler: list[str] | None = None,
-                  yenile: bool = False) -> tuple[pd.DataFrame, list[str]]:
+                  yenile: bool = False,
+                  gecmisi_at: bool = True) -> tuple[pd.DataFrame, list[str]]:
     """Fikstürü normalize eder; (DataFrame, mevcut kitapçı önekleri) döndürür.
 
     Birleşik kolonlar: oran_ev/berabere/dep (analiz için piyasa ortalaması,
     yoksa Bet365), oran_max_* (piyasadaki en yüksek oran), oran_ust25/alt25.
     Kitapçı bazlı ham kolonlar ({önek}H/D/A) ayrıca korunur.
+    gecmisi_at: bugünden önceki günler takvimden düşürülür (gün ilerledikçe
+    takvim kendiliğinden kayar; bugünün oynanmış maçları listede kalır).
     """
     yol = fikstur_indir(yenile=yenile)
     f = _tek_dosya_oku(yol)
@@ -498,6 +511,9 @@ def fikstur_yukle(ligler: list[str] | None = None,
         f[f"oran_max_{uc}"] = pd.to_numeric(f.get(f"Max{kolon}"), errors="coerce").fillna(satir_maks)
     f["oran_ust25"] = _ilk_dolu_kolon(f, ["Avg>2.5", "B365>2.5", "Max>2.5"])
     f["oran_alt25"] = _ilk_dolu_kolon(f, ["Avg<2.5", "B365<2.5", "Max<2.5"])
+
+    if gecmisi_at:
+        f = f[f["Tarih"] >= simdi_tr().normalize()]
 
     f = f.sort_values("Tarih").reset_index(drop=True)
     return f, mevcut_kitapcilar

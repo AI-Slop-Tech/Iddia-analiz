@@ -86,10 +86,16 @@ Koyu temalı, tek sayfalık modern panel; dört bölümden oluşur:
   (açılış / en iyi oran), bakiye eğrisi, eşik-ROI tablosu, seçim/lig/sezon
   kırılımları.
 
+**Takvim ve veriler kendiliğinden güncellenir:** gün ilerledikçe geçmiş günler
+takvimden düşer, günün pili "Bugün/Yarın" olarak etiketlenir, başlama saati
+geçen maçlar "▶ başladı" işareti alır. Sunucu arka planda fikstürü en geç
+6 saatte bir, güncel sezon arşivini günde bir kez tazeler; açık kalan sayfa da
+10 dakikada bir sessizce yenilenir — gece yarısı geçse bile panel bayatlamaz.
+
 Veri hiç indirilmemişse panel tek tıkla indirme önerir; üstteki
-**Veriyi Güncelle** düğmesi arşivi tazeler. Arayüz `iddaa/static/index.html`
-içindedir (bağımlılıksız, tek dosya); JSON API uçları `iddaa/web.py` başında
-listelenmiştir.
+**Veriyi Güncelle** düğmesi arşivi elle tazeler. Arayüz `iddaa/static/index.html`
+içindedir (bağımlılıksız, tek dosya, mobil uyumlu); JSON API uçları
+`iddaa/web.py` başında listelenmiştir.
 
 ## Komutlar
 
