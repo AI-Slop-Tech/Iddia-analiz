@@ -382,6 +382,7 @@ def uygulama_olustur():
                 "piyasa_iyms": bool(veri.gizli_anahtar("ODDS_API_IO_KEY", "odds_api_io_key"))
                                or bool(veri.gizli_anahtar("APIFOOTBALL_KEY", "apifootball_key")),
                 "apifootball": bool(veri.gizli_anahtar("APIFOOTBALL_KEY", "apifootball_key")),
+                "oddsapi": bool(veri.gizli_anahtar("ODDS_API_IO_KEY", "odds_api_io_key")),
                 "veri_zamani": time.strftime("%d.%m %H:%M", time.localtime(_DURUM["arsiv_zaman"])),
                 "ligler": [
                     {"kod": lig, "ad": veri.LIGLER.get(lig, lig), "mac": int(adet)}
@@ -728,7 +729,10 @@ def uygulama_olustur():
             oranlar, maks, ust_alt = _fikstur_oranlari(r)
             if not oranlar and time.time() < piyasa_butce:
                 # API füzyonu: bülten oranı yoksa canlı piyasa 1X2'si kullanılır
-                pk = veri.iyms_piyasa(r["HomeTeam"], r["AwayTeam"], r["Div"], r["Tarih"])
+                # (yalnız önbellekten — ağ gecikmesi taramayı yavaşlatmasın;
+                # önbelleği Sürpriz Radarı taraması doldurur)
+                pk = veri.iyms_piyasa(r["HomeTeam"], r["AwayTeam"], r["Div"], r["Tarih"],
+                                      sadece_onbellek=True)
                 if pk and pk.get("ms"):
                     oranlar = pk["ms"]
                     maks = maks or pk.get("ms_maks")
@@ -813,9 +817,10 @@ def uygulama_olustur():
                 continue
             oranlar, _maks, _ust_alt = _fikstur_oranlari(r)
             if not oranlar:
-                pk = veri.iyms_piyasa(r["HomeTeam"], r["AwayTeam"], r["Div"], r["Tarih"])
+                pk = veri.iyms_piyasa(r["HomeTeam"], r["AwayTeam"], r["Div"], r["Tarih"],
+                                      sadece_onbellek=True)
                 if pk and pk.get("ms"):
-                    oranlar = pk["ms"]  # API füzyonu: canlı piyasa 1X2'si
+                    oranlar = pk["ms"]  # API füzyonu: canlı piyasa 1X2'si (önbellekten)
             poisson = analiz.poisson_tahmini(df, r["HomeTeam"], r["AwayTeam"], lig_ipucu=r["Div"])
             kalip = (analiz.oran_kalibi(df, tuple(oranlar), lig_ipucu=r["Div"])
                      if oranlar else None)
@@ -1004,7 +1009,8 @@ def uygulama_olustur():
         oranlar, maks, ust_alt = _fikstur_oranlari(r)
         # API füzyonu: aynı pakette İY/MS + korner + canlı 1X2 gelir; bülten
         # oranı yayınlanmamışsa canlı 1X2 ile tam analiz yapılır.
-        piyasa_k = veri.iyms_piyasa(r["HomeTeam"], r["AwayTeam"], r["Div"], r["Tarih"])
+        piyasa_k = veri.iyms_piyasa(r["HomeTeam"], r["AwayTeam"], r["Div"], r["Tarih"],
+                                    sadece_onbellek=True)
         oran_kaynak = "bulten" if oranlar else None
         if not oranlar and piyasa_k and piyasa_k.get("ms"):
             oranlar, oran_kaynak = piyasa_k["ms"], "canli"

@@ -192,7 +192,9 @@
   @media(max-width:700px){
     .sarici{padding:0 12px calc(92px + env(safe-area-inset-bottom))}
     header{padding-top:env(safe-area-inset-top)}
-    .ust{padding:10px 14px;gap:8px;flex-wrap:nowrap}
+    .ust{padding:10px 14px;gap:8px;flex-wrap:wrap;row-gap:8px}
+    #btn-guncelle{padding:8px 10px;font-size:13px}
+    #btn-ayar,#btn-teshis{padding:8px 10px}
     .logo{font-size:18px}.logo .top{font-size:21px}
     .durum-chipler{display:none}
     #btn-guncelle{margin-left:auto;padding:9px 13px;font-size:12.5px;white-space:nowrap}
@@ -262,10 +264,41 @@
     <div class="durum-chipler" id="durum-chipler">
       <span class="chip">yükleniyor…</span>
     </div>
+    <button class="btn ikincil" id="btn-ayar" onclick="ayarAc()" title="API anahtarları">⚙️</button>
     <button class="btn ikincil" id="btn-teshis" onclick="teshisAc()" title="Sistem tanısı">🩺</button>
     <button class="btn ikincil" id="btn-guncelle" onclick="veriGuncelle()">🔄 Veriyi Güncelle</button>
   </div>
 </header>
+
+<div id="ayar-kaplama" style="display:none;position:fixed;inset:0;background:#000b;z-index:70;overflow:auto;padding:14px"
+     onclick="if(event.target===this)this.style.display='none'">
+  <div class="kart" style="max-width:640px;margin:30px auto">
+    <h2>⚙️ API Anahtarları</h2>
+    <div class="alt-baslik">Anahtarlar sunucunun kalıcı diskinde saklanır ve asla geri gösterilmez.
+      Boş bıraktığınız alan mevcut kaydı <b>değiştirmez</b>; yalnız doldurduklarınız güncellenir.</div>
+    <div class="alan" style="margin-bottom:10px">
+      <label>⭐ API-Football — <b>tek anahtar yeter</b>: 14+ kitapçı İY/MS + 1X2 + korner
+        (ücretsiz: dashboard.api-football.com) <span class="ipucu" id="ay-af-durum"></span></label>
+      <input id="ay-af" type="password" placeholder="API-Football anahtarı" autocomplete="off">
+    </div>
+    <div class="alan" style="margin-bottom:10px">
+      <label>football-data.org — takvim genişletme (ŞL + büyük ligler) <span class="ipucu" id="ay-fd-durum"></span></label>
+      <input id="ay-fd" type="password" placeholder="football-data.org anahtarı" autocomplete="off">
+    </div>
+    <div class="alan" style="margin-bottom:10px">
+      <label>odds-api.io — ek kitapçı takviyesi (opsiyonel) <span class="ipucu" id="ay-oa-durum"></span></label>
+      <input id="ay-oa" type="password" placeholder="odds-api.io anahtarı" autocomplete="off">
+    </div>
+    <div class="alan" style="margin-bottom:14px">
+      <label>Gemini — yazılı analist raporu (opsiyonel) <span class="ipucu" id="ay-gm-durum"></span></label>
+      <input id="ay-gm" type="password" placeholder="Gemini anahtarı" autocomplete="off">
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn" id="btn-ayar-kaydet" onclick="ayarKaydet()">💾 Kaydet</button>
+      <button class="btn ikincil" onclick="$('#ayar-kaplama').style.display='none'">Kapat</button>
+    </div>
+  </div>
+</div>
 
 <div id="teshis-kaplama" style="display:none;position:fixed;inset:0;background:#000b;z-index:70;overflow:auto;padding:14px"
      onclick="if(event.target===this)this.style.display='none'">
@@ -360,24 +393,10 @@
       </div>
       <div class="gun-pilleri" id="sr-pilleri"></div>
       <button class="btn" id="btn-surpriz" onclick="surprizTara()">🎭 Radarı Çalıştır</button>
-      <div id="sr-anahtar" style="display:none;margin-top:12px">
-        <div class="form-satir">
-          <div class="alan" style="flex:1;min-width:220px">
-            <label>🔑 API-Football anahtarı — <b>tek anahtar yeter</b>: 14+ kitapçıdan İY/MS + 1X2 + Alt/Üst + korner
-              (ücretsiz: dashboard.api-football.com, 30 sn)</label>
-            <input id="af-anahtar" type="password" placeholder="API-Football anahtarını buraya yapıştır" autocomplete="off">
-          </div>
-          <button class="btn ikincil" id="btn-oa" onclick="oaAnahtarKaydet()">💾 Kaydet ve Tara</button>
-        </div>
-        <details style="margin-top:6px">
-          <summary class="ipucu" style="cursor:pointer">Gelişmiş: ek kitapçı kaynağı (opsiyonel — gerekmez)</summary>
-          <div class="form-satir" style="margin-top:8px">
-            <div class="alan" style="flex:1;min-width:220px">
-              <label>odds-api.io anahtarı — Bet365 + 1xbet takviyesi</label>
-              <input id="oa-anahtar" type="password" placeholder="odds-api.io anahtarı" autocomplete="off">
-            </div>
-          </div>
-        </details>
+      <div id="sr-anahtar" style="display:none;margin-top:12px" class="not">
+        🔑 Piyasa oranları görünmüyor — başlıktaki <b>⚙️</b> düğmesinden <b>API-Football</b> anahtarınızı
+        ekleyin (tek anahtar yeter; ücretsiz: dashboard.api-football.com), sonra radarı yeniden çalıştırın.
+        <button class="mini-btn" onclick="ayarAc()" style="margin-left:8px">⚙️ Ayarları Aç</button>
       </div>
     </div>
     <div id="surpriz-sonuc"></div>
@@ -1357,23 +1376,37 @@ function srSecimDegisti(i){
   srDeger(i);
 }
 
-async function oaAnahtarKaydet(){
-  const oa = $('#oa-anahtar').value.trim();
-  const af = $('#af-anahtar').value.trim();
-  if(!oa && !af){ bildir('En az bir anahtar yapıştırın.', true); return; }
-  const b = $('#btn-oa'); b.disabled = true; b.textContent = '⏳ Deneniyor…';
+async function ayarAc(){
+  $('#ayar-kaplama').style.display = '';
   try{
-    const govde = {};
-    if(oa) govde.odds_api_io_key = oa;
-    if(af) govde.apifootball_key = af;
-    await api('/api/ayarlar', govde);
-    $('#oa-anahtar').value = ''; $('#af-anahtar').value = '';
-    bildir('Anahtar kaydedildi — piyasa İY/MS oranları çekiliyor…');
-    await surprizTara();
-  }catch(h){
-    bildir(h.message + ' — anahtar kabul edilmiyorsa sunucunuz eski sürümde olabilir: Coolify\'da Redeploy edin, başlıkta v2.16+ yazmalı.', true);
+    const d = await api('/api/durum');
+    const isaret = v => v ? '· ✅ kayıtlı' : '· kayıtlı değil';
+    $('#ay-af-durum').textContent = isaret(d.apifootball);
+    $('#ay-oa-durum').textContent = isaret(d.oddsapi);
+    $('#ay-fd-durum').textContent = isaret(d.dis_kapsam);
+    $('#ay-gm-durum').textContent = isaret(d.gemini);
+  }catch(h){ /* durum gelmezse alanlar yine kullanılabilir */ }
+}
+
+async function ayarKaydet(){
+  const alanlar = {apifootball_key: 'ay-af', football_data_org_key: 'ay-fd',
+                   odds_api_io_key: 'ay-oa', gemini_api_key: 'ay-gm'};
+  const govde = {};
+  for(const [ad, id] of Object.entries(alanlar)){
+    const v = $('#' + id).value;
+    if(v.trim() !== '') govde[ad] = v.trim();
   }
-  b.disabled = false; b.textContent = '💾 Kaydet ve Tara';
+  if(!Object.keys(govde).length){ bildir('Kaydedilecek anahtar girilmedi.', true); return; }
+  const b = $('#btn-ayar-kaydet'); b.disabled = true; b.textContent = '⏳ Kaydediliyor…';
+  try{
+    await api('/api/ayarlar', govde);
+    Object.values(alanlar).forEach(id => { $('#' + id).value = ''; });
+    bildir('Anahtar(lar) kaydedildi ✓ — 🎭 sekmesinde radarı çalıştırın.');
+    ayarAc();
+  }catch(h){
+    bildir(h.message + ' — anahtar kabul edilmiyorsa sunucu eski sürümdedir: Coolify\'da Redeploy edin (başlıkta v2.17+ yazmalı).', true);
+  }
+  b.disabled = false; b.textContent = '💾 Kaydet';
 }
 
 function srDegerHTML(m, i, enIyi){

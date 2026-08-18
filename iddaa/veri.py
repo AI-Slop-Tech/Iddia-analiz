@@ -974,11 +974,13 @@ def _oddsapi_ligler() -> list:
     return ligler
 
 
-def _oddsapi_maclar(slug: str) -> list:
+def _oddsapi_maclar(slug: str, sadece_onbellek: bool = False) -> list:
     onbellek = _oddsapi_onbellek("oddsapi_maclar.json")
     kayit = onbellek.get(slug)
     if kayit and time.time() - kayit.get("zaman", 0) < _ODDSAPI_MAC_TTL:
         return kayit["veri"]
+    if sadece_onbellek:
+        return (kayit or {}).get("veri", [])  # bayatsa bile ağa çıkma
     maclar = _oddsapi_getir("/events", {"sport": "football", "league": slug})
     onbellek[slug] = {"zaman": time.time(), "veri": maclar}
     # eski ligleri buda ki dosya şişmesin
@@ -1100,13 +1102,15 @@ def _oddsapi_oranlari_isle(govde: dict) -> dict | None:
             "ust_alt25": ust_alt25, "ust_alt25_kitapci": ua_kitapci}
 
 
-def _oddsapi_iyms_cek(mac_id: int) -> dict | None:
+def _oddsapi_iyms_cek(mac_id: int, sadece_onbellek: bool = False) -> dict | None:
     onbellek = _oddsapi_onbellek("oddsapi_iyms.json")
     kayit = onbellek.get(str(mac_id))
     taze = kayit and time.time() - kayit.get("zaman", 0) < _ODDSAPI_ORAN_TTL
     eski_bicim = kayit and kayit.get("veri") and "ms" not in kayit["veri"]
     if taze and not eski_bicim:
         return kayit["veri"] or None
+    if sadece_onbellek:
+        return (kayit or {}).get("veri") or None
     govde = _oddsapi_getir("/odds", {"eventId": mac_id, "bookmakers": ODDSAPI_KITAPCILAR})
     sonuc = _oddsapi_oranlari_isle(govde)
     onbellek[str(mac_id)] = {"zaman": time.time(), "veri": sonuc}
@@ -1117,7 +1121,8 @@ def _oddsapi_iyms_cek(mac_id: int) -> dict | None:
     return sonuc
 
 
-def iyms_piyasa(ev: str, dep: str, lig_kodu: str, tarih: pd.Timestamp) -> dict | None:
+def iyms_piyasa(ev: str, dep: str, lig_kodu: str, tarih: pd.Timestamp,
+                sadece_onbellek: bool = False) -> dict | None:
     """Bir bülten maçı için Bet365'in gerçek İY/MS oranları (odds-api.io).
 
     Anahtar yoksa None döner (özellik uykuda). Lig, ada göre eşlenir; maç,
@@ -1149,7 +1154,7 @@ def iyms_piyasa(ev: str, dep: str, lig_kodu: str, tarih: pd.Timestamp) -> dict |
             hedef_utc = pd.Timestamp(tarih) - pd.Timedelta(hours=3)  # TR → UTC
             en_mac, en_puan = None, 0.0
             for lig in adaylar[:5]:
-                for m in _oddsapi_maclar(lig["slug"]):
+                for m in _oddsapi_maclar(lig["slug"], sadece_onbellek=sadece_onbellek):
                     if m.get("status") == "settled":
                         continue
                     try:
@@ -1163,11 +1168,11 @@ def iyms_piyasa(ev: str, dep: str, lig_kodu: str, tarih: pd.Timestamp) -> dict |
                     if puan > en_puan:
                         en_mac, en_puan = m, puan
             if not (en_mac is None or en_puan < 0.5):
-                sonuc = _oddsapi_iyms_cek(int(en_mac["id"]))
+                sonuc = _oddsapi_iyms_cek(int(en_mac["id"]), sadece_onbellek=sadece_onbellek)
 
         # API-Football harmanı: ~15 kitapçı arasında kombo başına EN İYİ fiyat.
         # odds-api hiç eşleşmediyse (ör. ŞL maçları) tek başına da yeterlidir.
-        af = af_iyms(ev, dep, tarih) if af_var else None
+        af = af_iyms(ev, dep, tarih, sadece_onbellek=sadece_onbellek) if af_var else None
         if af:
             if sonuc is None:
                 sonuc = {"kombolar": {}, "kombo_kitapci": {}, "kitapci": None, "guncel": "",
@@ -1253,7 +1258,7 @@ def iy_hasadi() -> dict:
                     key=lambda l: len(str(l.get("name", ""))),
                 )[:2]
                 for lig in adaylar:
-                    for m in _oddsapi_maclar(lig["slug"]):
+                    for m in _oddsapi_maclar(lig["slug"], sadece_onbellek=sadece_onbellek):
                         if m.get("status") != "settled":
                             continue
                         skorlar = m.get("scores") or {}
@@ -1407,12 +1412,14 @@ def _af_getir(yol: str, parametreler: dict):
     return govde
 
 
-def _af_gun_fiksturu(gun: str) -> list:
+def _af_gun_fiksturu(gun: str, sadece_onbellek: bool = False) -> list:
     """Günün tüm dünya fikstürü — TEK istek, 6 saat önbellek. gun: YYYY-MM-DD."""
     onbellek = _oddsapi_onbellek("af_fikstur.json")
     kayit = onbellek.get(gun)
     if kayit and time.time() - kayit.get("zaman", 0) < _AF_GUN_TTL:
         return kayit["veri"]
+    if sadece_onbellek:
+        return (kayit or {}).get("veri", [])
     govde = _af_getir("/fixtures", {"date": gun, "timezone": "UTC"})
     maclar = [
         {
@@ -1430,7 +1437,8 @@ def _af_gun_fiksturu(gun: str) -> list:
     return maclar
 
 
-def af_iyms(ev: str, dep: str, tarih: pd.Timestamp) -> dict | None:
+def af_iyms(ev: str, dep: str, tarih: pd.Timestamp,
+            sadece_onbellek: bool = False) -> dict | None:
     """API-Football'dan İY/MS oranları: TÜM kitapçılar arasında kombo başına en iyi.
 
     Dönen: {"kombolar": {...}, "kombo_kitapci": {...}, "kitapci_sayisi": N} | None
@@ -1448,7 +1456,7 @@ def af_iyms(ev: str, dep: str, tarih: pd.Timestamp) -> dict | None:
         utc_gun = (pd.Timestamp(tarih) - pd.Timedelta(hours=3)).strftime("%Y-%m-%d")
         mac_id, en_puan = None, 0.0
         for gun in (utc_gun,):
-            for m in _af_gun_fiksturu(gun):
+            for m in _af_gun_fiksturu(gun, sadece_onbellek=sadece_onbellek):
                 puan = min(_oddsapi_takim_puani(ev, m.get("ev") or ""),
                            _oddsapi_takim_puani(dep, m.get("dep") or ""))
                 if puan > en_puan:
@@ -1460,6 +1468,8 @@ def af_iyms(ev: str, dep: str, tarih: pd.Timestamp) -> dict | None:
         kayit = onbellek.get(str(mac_id))
         if kayit and time.time() - kayit.get("zaman", 0) < _AF_ORAN_TTL:
             return kayit["veri"] or None
+        if sadece_onbellek:
+            return (kayit or {}).get("veri") or None
 
         govde = _af_getir("/odds", {"fixture": mac_id})
         kombolar: dict[str, float] = {}
