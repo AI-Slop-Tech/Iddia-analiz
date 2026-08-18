@@ -238,6 +238,16 @@ def uygulama_olustur():
         _BAKIM["basladi"] = True
         threading.Thread(target=_bakim_dongusu, daemon=True, name="iddaa-bakim").start()
 
+        # Açılış ısıtması: arşiv arka planda yüklenir ki ilk ziyaretçi ve API
+        # istekleri dakikalarca beklemesin (sağlık kontrolü artık /api/ping'te).
+        def _isit():
+            try:
+                _df()
+            except Exception:  # noqa: BLE001 — veri henüz yoksa panel zaten yönlendirir
+                pass
+
+        threading.Thread(target=_isit, daemon=True, name="iddaa-isitma").start()
+
     app = Flask(
         __name__,
         static_folder=os.path.join(os.path.dirname(os.path.abspath(__file__)), "static"),
@@ -247,6 +257,17 @@ def uygulama_olustur():
     @app.get("/")
     def ana_sayfa():
         return app.send_static_file("index.html")
+
+    @app.get("/api/ping")
+    def ping():
+        """Hafif sağlık ucu: veri yüklemesine DOKUNMAZ.
+
+        /api/durum ilk çağrıda tüm arşivi yükler (1-3 dk sürebilir); sağlık
+        kontrolü ona bağlanınca açılışta konteyner 'unhealthy' sayılıp proxy
+        trafiği kesiyordu. Ping her zaman anında döner.
+        """
+        return jsonify({"tamam": True, "surum": SURUM,
+                        "veri_hazir": _DURUM["df"] is not None})
 
     @app.after_request
     def _onbellek_kapat(yanit):

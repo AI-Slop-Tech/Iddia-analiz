@@ -16,8 +16,8 @@ RUN mkdir -p /app/data
 
 EXPOSE 8000
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/durum', timeout=8)"
+HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/ping', timeout=8)"
 
 # Tek işçi + çoklu thread: bellekte tek veri kopyası tutulur, uzun istekler
 # (veri indirme ~1-3 dk, backtest ~40 sn) diğer sekmeleri kilitlemez.
