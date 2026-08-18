@@ -360,16 +360,24 @@
       </div>
       <div class="gun-pilleri" id="sr-pilleri"></div>
       <button class="btn" id="btn-surpriz" onclick="surprizTara()">🎭 Radarı Çalıştır</button>
-      <div id="sr-anahtar" style="display:none;margin-top:12px" class="form-satir">
-        <div class="alan" style="flex:1;min-width:220px">
-          <label>🔑 odds-api.io anahtarı — Bet365 İY/MS + 1xbet korner (ücretsiz: odds-api.io)</label>
-          <input id="oa-anahtar" type="password" placeholder="odds-api.io anahtarı" autocomplete="off">
+      <div id="sr-anahtar" style="display:none;margin-top:12px">
+        <div class="form-satir">
+          <div class="alan" style="flex:1;min-width:220px">
+            <label>🔑 API-Football anahtarı — <b>tek anahtar yeter</b>: 14+ kitapçıdan İY/MS + 1X2 + Alt/Üst + korner
+              (ücretsiz: dashboard.api-football.com, 30 sn)</label>
+            <input id="af-anahtar" type="password" placeholder="API-Football anahtarını buraya yapıştır" autocomplete="off">
+          </div>
+          <button class="btn ikincil" id="btn-oa" onclick="oaAnahtarKaydet()">💾 Kaydet ve Tara</button>
         </div>
-        <div class="alan" style="flex:1;min-width:220px">
-          <label>🔑 API-Football anahtarı — 14+ kitapçı, ŞL/Avrupa kupası oranları (ücretsiz: dashboard.api-football.com)</label>
-          <input id="af-anahtar" type="password" placeholder="API-Football anahtarı" autocomplete="off">
-        </div>
-        <button class="btn ikincil" id="btn-oa" onclick="oaAnahtarKaydet()">💾 Kaydet ve Tara</button>
+        <details style="margin-top:6px">
+          <summary class="ipucu" style="cursor:pointer">Gelişmiş: ek kitapçı kaynağı (opsiyonel — gerekmez)</summary>
+          <div class="form-satir" style="margin-top:8px">
+            <div class="alan" style="flex:1;min-width:220px">
+              <label>odds-api.io anahtarı — Bet365 + 1xbet takviyesi</label>
+              <input id="oa-anahtar" type="password" placeholder="odds-api.io anahtarı" autocomplete="off">
+            </div>
+          </div>
+        </details>
       </div>
     </div>
     <div id="surpriz-sonuc"></div>
@@ -1362,7 +1370,9 @@ async function oaAnahtarKaydet(){
     $('#oa-anahtar').value = ''; $('#af-anahtar').value = '';
     bildir('Anahtar kaydedildi — piyasa İY/MS oranları çekiliyor…');
     await surprizTara();
-  }catch(h){ bildir(h.message, true); }
+  }catch(h){
+    bildir(h.message + ' — anahtar kabul edilmiyorsa sunucunuz eski sürümde olabilir: Coolify\'da Redeploy edin, başlıkta v2.16+ yazmalı.', true);
+  }
   b.disabled = false; b.textContent = '💾 Kaydet ve Tara';
 }
 

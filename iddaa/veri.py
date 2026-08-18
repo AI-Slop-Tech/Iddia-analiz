@@ -1184,6 +1184,18 @@ def iyms_piyasa(ev: str, dep: str, lig_kodu: str, tarih: pd.Timestamp) -> dict |
             adlar = list(sonuc["kombo_kitapci"].values())
             sonuc["kitapci"] = max(set(adlar), key=adlar.count) if adlar else None
             sonuc["kitapci_sayisi"] = int(af.get("kitapci_sayisi", 0)) + (1 if oa_var else 0)
+            # AF tek anahtar modu: 1X2 / Alt-Üst / korner eksikse AF'den tamamla —
+            # yalnız API-Football anahtarıyla da sistem tam çalışır
+            if not sonuc.get("ms") and af.get("ms"):
+                sonuc["ms"] = af["ms"]
+                sonuc["ms_kitapci"] = af.get("ms_kitapci")
+                sonuc["ms_maks"] = af.get("ms_maks")
+            if not sonuc.get("ust_alt25") and af.get("ust_alt25"):
+                sonuc["ust_alt25"] = af["ust_alt25"]
+                sonuc["ust_alt25_kitapci"] = af.get("ust_alt25_kitapci")
+            if not sonuc.get("korner") and af.get("korner"):
+                sonuc["korner"] = af["korner"]
+                sonuc["korner_kitapci"] = af.get("korner_kitapci")
         return sonuc
     except Exception as hata:  # noqa: BLE001 — ağ/format hataları özelliği durdurmasın
         IYMS_SON_DURUM["hata"] = str(hata)[:200]
@@ -1453,23 +1465,81 @@ def af_iyms(ev: str, dep: str, tarih: pd.Timestamp) -> dict | None:
         kombolar: dict[str, float] = {}
         kitapcilar: dict[str, str] = {}
         kitapci_kumesi: set[str] = set()
+        ms_hepsi: dict[str, list[float]] = {}
+        ua_hepsi: dict[str, list[float]] = {}
+        korner_u: dict[float, tuple[float, str]] = {}
+        korner_a: dict[float, tuple[float, str]] = {}
+
+        def _f(x):
+            try:
+                d = float(x)
+                return d if d > 1 else None
+            except (TypeError, ValueError):
+                return None
+
         for r in govde.get("response", []):
             for b in r.get("bookmakers", []):
                 for bet in b.get("bets", []):
-                    if bet.get("name") not in ("HT/FT Double", "Half Time/Full Time"):
-                        continue
-                    kitapci_kumesi.add(b["name"])
-                    for v in bet.get("values", []):
-                        k = _AF_IYMS_ETIKET.get(str(v.get("value")))
-                        try:
-                            oran = float(v.get("odd"))
-                        except (TypeError, ValueError):
-                            continue
-                        if k and oran > 1 and oran > kombolar.get(k, 0.0):
-                            kombolar[k] = oran
-                            kitapcilar[k] = b["name"]
+                    ad_b = str(bet.get("name", ""))
+                    degerler = bet.get("values", [])
+                    if ad_b in ("HT/FT Double", "Half Time/Full Time"):
+                        kitapci_kumesi.add(b["name"])
+                        for v in degerler:
+                            k = _AF_IYMS_ETIKET.get(str(v.get("value")))
+                            oran = _f(v.get("odd"))
+                            if k and oran and oran > kombolar.get(k, 0.0):
+                                kombolar[k] = oran
+                                kitapcilar[k] = b["name"]
+                    elif ad_b == "Match Winner":
+                        s = {str(v.get("value")): _f(v.get("odd")) for v in degerler}
+                        if s.get("Home") and s.get("Draw") and s.get("Away"):
+                            ms_hepsi[b["name"]] = [round(s["Home"], 2), round(s["Draw"], 2), round(s["Away"], 2)]
+                    elif ad_b == "Goals Over/Under":
+                        s = {str(v.get("value")): _f(v.get("odd")) for v in degerler}
+                        if s.get("Over 2.5") and s.get("Under 2.5"):
+                            ua_hepsi[b["name"]] = [round(s["Over 2.5"], 2), round(s["Under 2.5"], 2)]
+                    elif ("corners over" in ad_b.lower()
+                          and not any(x in ad_b.lower() for x in ("home", "away", "team", "1st", "2nd"))):
+                        for v in degerler:
+                            deger = str(v.get("value", ""))
+                            oran = _f(v.get("odd"))
+                            if not oran or " " not in deger:
+                                continue
+                            yon, _, cizgi_s = deger.partition(" ")
+                            try:
+                                cizgi = float(cizgi_s)
+                            except ValueError:
+                                continue
+                            hedef_k = korner_u if yon == "Over" else (korner_a if yon == "Under" else None)
+                            if hedef_k is not None and oran > hedef_k.get(cizgi, (0.0, ""))[0]:
+                                hedef_k[cizgi] = (oran, b["name"])
+
+        def _tercih_af(sozluk):
+            if not sozluk:
+                return None, None
+            for aday in ("Bet365", "10Bet", "Marathonbet"):
+                if aday in sozluk:
+                    return aday, sozluk[aday]
+            ad = next(iter(sozluk))
+            return ad, sozluk[ad]
+
+        ms_k, ms = _tercih_af(ms_hepsi)
+        ua_k, ua = _tercih_af(ua_hepsi)
+        ms_maks = ([round(max(v[i] for v in ms_hepsi.values()), 2) for i in range(3)]
+                   if ms_hepsi else None)
+        korner = [{"cizgi": c, "ust": korner_u[c][0], "alt": korner_a[c][0]}
+                  for c in sorted(set(korner_u) & set(korner_a))] or None
+        korner_kitapci = None
+        if korner:
+            adlar = [korner_u[s["cizgi"]][1] for s in korner]
+            korner_kitapci = max(set(adlar), key=adlar.count)
+
         sonuc = ({"kombolar": kombolar, "kombo_kitapci": kitapcilar,
-                  "kitapci_sayisi": len(kitapci_kumesi)} if kombolar else None)
+                  "kitapci_sayisi": len(kitapci_kumesi),
+                  "ms": ms, "ms_kitapci": ms_k, "ms_maks": ms_maks,
+                  "ust_alt25": ua, "ust_alt25_kitapci": ua_k,
+                  "korner": korner, "korner_kitapci": korner_kitapci}
+                 if (kombolar or ms or korner) else None)
         onbellek[str(mac_id)] = {"zaman": time.time(), "veri": sonuc}
         for eski in [k for k, v in onbellek.items()
                      if time.time() - v.get("zaman", 0) > 4 * _AF_ORAN_TTL]:
