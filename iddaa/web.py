@@ -110,10 +110,12 @@ def _kalip_json(k: dict | None) -> dict | None:
         "ust25": float(k["ust25"]),
         "kg_var": float(k["kg_var"]),
         "skorlar": [{"skor": s, "adet": int(a), "oran": float(o)} for s, a, o in k["skorlar"]],
+        "ulke": k.get("ulke"),
         "ornekler": [
             {
                 "tarih": _t(o["tarih"]),
                 "lig": o["lig"],
+                "ayni_ulke": bool(o.get("ayni_ulke")),
                 "ev": o["ev"],
                 "dep": o["dep"],
                 "skor": o["skor"],
@@ -770,7 +772,8 @@ def uygulama_olustur():
                 if pk and pk.get("ms"):
                     oranlar = pk["ms"]  # API füzyonu: canlı piyasa 1X2'si
             poisson = analiz.poisson_tahmini(df, r["HomeTeam"], r["AwayTeam"], lig_ipucu=r["Div"])
-            kalip = analiz.oran_kalibi(df, tuple(oranlar)) if oranlar else None
+            kalip = (analiz.oran_kalibi(df, tuple(oranlar), lig_ipucu=r["Div"])
+                     if oranlar else None)
             hucreler = analiz.tahmin_hucreleri(poisson, kalip)
             h = _hucreler_json(hucreler)
             satirlar.append(
@@ -849,7 +852,8 @@ def uygulama_olustur():
                 oranlar, oran_kaynak = piyasa["ms"], "canli"
             # Birebir oran eşleşmesi: geçmiş maçın üç açılış oranı da hedefe
             # ±eşik kadar yakın olmalı (±0.05'ten başlar, örnek yetersizse genişler).
-            birebir = analiz.birebir_oran_maclari(df, tuple(oranlar)) if oranlar else None
+            birebir = (analiz.birebir_oran_maclari(df, tuple(oranlar), lig_ipucu=r["Div"])
+                       if oranlar else None)
             model = None
             if not analizsiz:
                 poisson = analiz.poisson_tahmini(df, r["HomeTeam"], r["AwayTeam"], lig_ipucu=r["Div"])
@@ -922,7 +926,8 @@ def uygulama_olustur():
                     "kalip": (
                         {"esik": birebir["esik"], "n": birebir["n"],
                          "hedef": birebir["hedef"], "ms": birebir["ms"],
-                         "iyms_adil": birebir["hedef_iyms_adil"]}
+                         "iyms_adil": birebir["hedef_iyms_adil"],
+                         "ulke": birebir.get("ulke")}
                         if birebir else None
                     ),
                     "ornekler": birebir["ornekler"] if birebir else [],
@@ -974,7 +979,8 @@ def uygulama_olustur():
         # 🚩 Korner: model beklentisi + birebir oranlı geçmişin korner özeti +
         # piyasa baremi (1xbet/Bet365) ve modele göre beklenen değer.
         korner_model = analiz.korner_beklentisi(df, r["HomeTeam"], r["AwayTeam"], lig_ipucu=r["Div"])
-        birebir = analiz.birebir_oran_maclari(df, tuple(oranlar), ornek_sayisi=0) if oranlar else None
+        birebir = (analiz.birebir_oran_maclari(df, tuple(oranlar), ornek_sayisi=0, lig_ipucu=r["Div"])
+                   if oranlar else None)
         korner_piyasa = None
         if piyasa_k and piyasa_k.get("korner"):
             import math as _m
