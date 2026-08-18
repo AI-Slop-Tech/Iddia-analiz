@@ -858,17 +858,19 @@ def uygulama_olustur():
             piyasa = None
             if time.time() < piyasa_butce_bitis:
                 piyasa = veri.iyms_piyasa(r["HomeTeam"], r["AwayTeam"], r["Div"], r["Tarih"])
-            if piyasa:
+            piyasa_iyms = bool(piyasa and piyasa.get("kombolar"))
+            if piyasa_iyms:
                 for k, kombo in kombolar.items():
                     oran = piyasa["kombolar"].get(k)
                     if oran:
                         kombo["piyasa"] = oran
+                        kombo["kitapci"] = piyasa["kombo_kitapci"].get(k)
                         if kombo["p"]:
                             kombo["ev"] = round(kombo["p"] * oran - 1.0, 3)
 
             olasilikli = any(v["p"] is not None for v in kombolar.values())
             mod = ("model" if model is not None
-                   else ("kalip" if olasilikli else ("piyasa" if piyasa else "liste")))
+                   else ("kalip" if olasilikli else ("piyasa" if piyasa_iyms else "liste")))
             one_cikan = None
             if any(kombolar[k]["p"] is not None for k in SURPRIZ):
                 one_cikan = max(SURPRIZ, key=lambda k: kombolar[k]["p"] or 0.0)
@@ -896,7 +898,7 @@ def uygulama_olustur():
                     "one_cikan": one_cikan,
                     "piyasa": (
                         {"kitapci": piyasa["kitapci"], "guncel": piyasa["guncel"]}
-                        if piyasa else None
+                        if piyasa_iyms else None
                     ),
                     "kalip": (
                         {"esik": birebir["esik"], "n": birebir["n"],
@@ -941,6 +943,38 @@ def uygulama_olustur():
         )
         j = _mac_json(a)
         j["tahmin"] = _hucreler_json(analiz.tahmin_hucreleri(a["poisson"], a["kalip"]))
+
+        # 🚩 Korner: model beklentisi + birebir oranlı geçmişin korner özeti +
+        # piyasa baremi (1xbet/Bet365) ve modele göre beklenen değer.
+        korner_model = analiz.korner_beklentisi(df, r["HomeTeam"], r["AwayTeam"], lig_ipucu=r["Div"])
+        birebir = analiz.birebir_oran_maclari(df, tuple(oranlar), ornek_sayisi=0) if oranlar else None
+        piyasa_k = veri.iyms_piyasa(r["HomeTeam"], r["AwayTeam"], r["Div"], r["Tarih"])
+        korner_piyasa = None
+        if piyasa_k and piyasa_k.get("korner"):
+            import math as _m
+            barem = []
+            for satir in piyasa_k["korner"]:
+                kayit = dict(satir)
+                if korner_model:
+                    toplam = korner_model["toplam"]
+                    p_alt = sum(analiz._poisson_pmf(i, toplam)
+                                for i in range(int(_m.floor(satir["cizgi"])) + 1))
+                    p_ust = 1.0 - p_alt
+                    kayit["p_ust"] = round(p_ust, 3)
+                    kayit["ev_ust"] = round(p_ust * satir["ust"] - 1.0, 3)
+                    kayit["ev_alt"] = round(p_alt * satir["alt"] - 1.0, 3)
+                barem.append(kayit)
+            # modelin beklediği toplamın etrafındaki en anlamlı 7 çizgi
+            if korner_model:
+                barem.sort(key=lambda x: abs(x["cizgi"] - korner_model["toplam"]))
+            korner_piyasa = {"kitapci": piyasa_k.get("korner_kitapci"),
+                             "barem": sorted(barem[:7], key=lambda x: x["cizgi"])}
+        if korner_model or korner_piyasa or (birebir and birebir.get("korner")):
+            j["korner"] = {
+                "model": korner_model,
+                "kalip": birebir.get("korner") if birebir else None,
+                "piyasa": korner_piyasa,
+            }
         if j["deger"]:
             model_p = a["deger"]["model_p"]
             for satir in j["deger"]["satirlar"]:

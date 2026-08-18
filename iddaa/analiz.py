@@ -380,6 +380,71 @@ def iyms_adil_oranlar(oranlar: tuple[float, float, float], iy_pay: float = 0.45,
     return {k: round(1.0 / olasiliklar[k], 1) for k in odak if olasiliklar.get(k, 0) > 1e-6}
 
 
+def _birebir_korner(sec: pd.DataFrame) -> dict | None:
+    """Birebir oranlı örneklemin korner özeti (veri olan alt küme, n≥30)."""
+    if "HC" not in sec.columns or "AC" not in sec.columns:
+        return None
+    k = sec.dropna(subset=["HC", "AC"])
+    if len(k) < 30:
+        return None
+    toplam = k["HC"] + k["AC"]
+    return {"n": int(len(k)), "ort": round(float(toplam.mean()), 1),
+            "ust95": round(float((toplam > 9.5).mean()), 3)}
+
+
+def korner_beklentisi(df: pd.DataFrame, ev: str, dep: str,
+                      lig_ipucu: str | None = None) -> dict | None:
+    """Beklenen korner sayıları: takımların zaman ağırlıklı korner üretim/yeme
+    oranlarından ev-dep kırılımı ve toplam; Üst/Alt olasılıkları Poisson yaklaşımı.
+
+    Not: korner dağılımı Poisson'dan biraz daha oynaktır (aşırı saçılım);
+    olasılıklar yaklaşıktır ve bandın ortası en güvenilir bölgedir.
+    """
+    if "HC" not in df.columns or "AC" not in df.columns:
+        return None
+    D = df.dropna(subset=["HC", "AC"])
+    if len(D) < 200:
+        return None
+    ref = D["Tarih"].max()
+    lig_df = D[D["Div"] == lig_ipucu] if lig_ipucu and (D["Div"] == lig_ipucu).any() else D
+    lig_ev, lig_dep = float(lig_df["HC"].mean()), float(lig_df["AC"].mean())
+
+    def taraf(takim: str, evde: bool) -> tuple[float | None, float | None, int]:
+        sec = D[D["HomeTeam" if evde else "AwayTeam"] == takim]
+        if len(sec) < 4:
+            return None, None, int(len(sec))
+        w = _agirlik(sec["Tarih"], ref)
+        atak = _agirlikli_ort(sec["HC" if evde else "AC"], w, lig_ev if evde else lig_dep)
+        yeme = _agirlikli_ort(sec["AC" if evde else "HC"], w, lig_dep if evde else lig_ev)
+        return atak, yeme, int(len(sec))
+
+    ev_atak, ev_yeme, n_ev = taraf(ev, True)
+    dep_atak, dep_yeme, n_dep = taraf(dep, False)
+    if ev_atak is None and dep_atak is None:
+        return None
+    if ev_atak is None:
+        ev_atak, ev_yeme = lig_ev, lig_dep
+    if dep_atak is None:
+        dep_atak, dep_yeme = lig_dep, lig_ev
+
+    b_ev = max(1.5, min(11.0, (ev_atak + dep_yeme) / 2))
+    b_dep = max(1.0, min(10.0, (dep_atak + ev_yeme) / 2))
+    toplam = b_ev + b_dep
+
+    def ust_olasilik(cizgi: float) -> float:
+        return 1.0 - sum(_poisson_pmf(i, toplam) for i in range(int(math.floor(cizgi)) + 1))
+
+    return {
+        "toplam": round(toplam, 1),
+        "ev": round(b_ev, 1),
+        "dep": round(b_dep, 1),
+        "n_ev": n_ev,
+        "n_dep": n_dep,
+        "lig_ort": round(lig_ev + lig_dep, 1),
+        "ustler": {str(c): round(ust_olasilik(c), 3) for c in (8.5, 9.5, 10.5, 11.5)},
+    }
+
+
 def birebir_oran_maclari(df: pd.DataFrame, oranlar: tuple[float, float, float],
                          esikler: tuple[float, ...] = (0.05, 0.10, 0.15, 0.25),
                          min_mac: int = 25, ornek_sayisi: int = 10) -> dict | None:
@@ -451,6 +516,7 @@ def birebir_oran_maclari(df: pd.DataFrame, oranlar: tuple[float, float, float],
             "0": float((sec["FTR"] == "D").mean()),
             "2": float((sec["FTR"] == "A").mean()),
         },
+        "korner": _birebir_korner(sec),
         "ornekler": ornekler,
     }
 
