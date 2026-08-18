@@ -1206,6 +1206,7 @@ function srCiz(){
       <div class="sr-grid">${SR_SIRA.map(ad => srHucre(ad, m.kombolar[ad], ad === enIyi)).join('')}</div>
       ${tacYorum}
       ${kanit ? `<div class="ipucu" style="margin-bottom:8px">${kanit} Bülteninizde ${enIyi} oranı ${k.adil_oran ? `adil oran ${k.adil_oran}'in` : 'adil oranın'} üzerindeyse matematiksel değer var demektir.</div>` : ''}
+      ${srDegerHTML(m, i, enIyi)}
       <div class="sr-alt">
         ${m.ornekler.length ? `<button class="mini-btn" onclick="srGecmisAc(${i})">📜 Oran Kanıtı</button>` : ''}
         <button class="mini-btn" onclick="srDetay(${m.id}, '${m.tarih}')">🔬 Derin Analiz</button>
@@ -1213,6 +1214,34 @@ function srCiz(){
       ${m.ornekler.length ? srGecmisHTML(m, i) : ''}
     </div>`;
   }).join('');
+}
+
+function srDegerHTML(m, i, enIyi){
+  // İY/MS piyasa oranları ücretsiz kaynaklarda tarihsel olarak yok;
+  // kullanıcı bülten oranını girer, sistem adil oranla kıyaslar.
+  const sec = SR_ODAK.map(ad =>
+    `<option value="${ad}" ${ad === enIyi ? 'selected' : ''}>${ad}</option>`).join('');
+  return `<div class="sr-alt" style="margin-bottom:8px">
+    <span class="ipucu">Bülten İY/MS oranını girin:</span>
+    <select id="sr-sec-${i}" onchange="srDeger(${i})" style="width:auto;padding:8px 10px">${sec}</select>
+    <input id="sr-oran-${i}" type="number" step="0.01" min="1.01" inputmode="decimal"
+      placeholder="ör. 22.50" style="width:100px;padding:8px 10px" oninput="srDeger(${i})">
+    <span id="sr-ev-${i}" class="ipucu"></span>
+  </div>`;
+}
+
+function srDeger(i){
+  const m = (SR_SONUCLAR[AKTIF_SR_GUN] || [])[i]; if(!m) return;
+  const ad = $('#sr-sec-' + i).value;
+  const oran = Number($('#sr-oran-' + i).value);
+  const kutu = $('#sr-ev-' + i);
+  if(!oran || oran <= 1){ kutu.innerHTML = ''; return; }
+  const p = (m.kombolar[ad] || {}).p || 0;
+  if(!p){ kutu.innerHTML = 'olasılık yok'; return; }
+  const ev = p * oran - 1;
+  const hukum = ev >= 0.05 ? '✅ değer var' : (ev >= 0 ? '🟡 sınırda' : '❌ değersiz');
+  kutu.innerHTML = `${ad} adil ${(1/p).toFixed(1)} → beklenen değer ` +
+    `<b class="${ev >= 0 ? 'ev-poz' : 'ev-neg'}">${ev >= 0 ? '+' : ''}${(ev*100).toFixed(1)}%</b> ${hukum}`;
 }
 
 function srGecmisAc(i){
