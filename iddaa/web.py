@@ -256,6 +256,7 @@ def uygulama_olustur():
                 "surum": SURUM,
                 "gemini": bool(veri.gizli_anahtar("GEMINI_API_KEY", "gemini_api_key")),
                 "dis_kapsam": bool(veri.gizli_anahtar("FOOTBALL_DATA_ORG_KEY", "football_data_org_key")),
+                "piyasa_iyms": bool(veri.gizli_anahtar("ODDS_API_IO_KEY", "odds_api_io_key")),
                 "veri_zamani": time.strftime("%d.%m %H:%M", time.localtime(_DURUM["arsiv_zaman"])),
                 "ligler": [
                     {"kod": lig, "ad": veri.LIGLER.get(lig, lig), "mac": int(adet)}
@@ -761,6 +762,15 @@ def uygulama_olustur():
                     "kalip_adet": kalip_adet,
                     "kalip_n": kalip_n,
                 }
+            # Gerçek İY/MS piyasa oranları (odds-api.io anahtarı varsa; yoksa None)
+            piyasa = veri.iyms_piyasa(r["HomeTeam"], r["AwayTeam"], r["Div"], r["Tarih"])
+            if piyasa:
+                for k, kombo in kombolar.items():
+                    oran = piyasa["kombolar"].get(k)
+                    if oran:
+                        kombo["piyasa"] = oran
+                        kombo["ev"] = round(kombo["p"] * oran - 1.0, 3)
+
             one_cikan = max(SURPRIZ, key=lambda k: kombolar[k]["p"])
             satirlar.append(
                 {
@@ -773,6 +783,10 @@ def uygulama_olustur():
                     "oranli": bool(oranlar),
                     "kombolar": kombolar,
                     "one_cikan": one_cikan,
+                    "piyasa": (
+                        {"kitapci": piyasa["kitapci"], "guncel": piyasa["guncel"]}
+                        if piyasa else None
+                    ),
                     "kalip": (
                         {"esik": birebir["esik"], "n": birebir["n"],
                          "hedef": birebir["hedef"], "ms": birebir["ms"],
@@ -840,7 +854,7 @@ def uygulama_olustur():
         """
         govde = request.get_json(silent=True) or {}
         degisti = False
-        for ad in ("football_data_org_key", "gemini_api_key"):
+        for ad in ("football_data_org_key", "gemini_api_key", "odds_api_io_key"):
             if ad in govde:
                 veri.ayar_yaz(ad, str(govde.get(ad) or ""))
                 degisti = True
@@ -857,6 +871,7 @@ def uygulama_olustur():
                 "tamam": True,
                 "gemini": bool(veri.gizli_anahtar("GEMINI_API_KEY", "gemini_api_key")),
                 "dis_kapsam": bool(veri.gizli_anahtar("FOOTBALL_DATA_ORG_KEY", "football_data_org_key")),
+                "piyasa_iyms": bool(veri.gizli_anahtar("ODDS_API_IO_KEY", "odds_api_io_key")),
             }
         )
 
