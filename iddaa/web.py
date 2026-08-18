@@ -326,6 +326,55 @@ def uygulama_olustur():
             }
         )
 
+    @app.get("/api/oran-bul")
+    def oran_bul():
+        """Takım isimleriyle maçı önümüzdeki günlerin bülteninde bulup
+        uluslararası oranları döndürür (Takım Analizi'nin otomatik doldurması)."""
+        try:
+            df = _df()
+        except FileNotFoundError:
+            return jsonify({"hata": "Önce veriyi güncelleyin."}), 503
+        try:
+            ev = veri.takim_bul(df, str(request.args.get("ev", "")))
+            dep = veri.takim_bul(df, str(request.args.get("dep", "")))
+        except ValueError as hata:
+            return jsonify({"hata": str(hata)}), 400
+        try:
+            fik, kitapcilar = _fikstur()
+        except Exception as hata:  # noqa: BLE001
+            return jsonify({"hata": f"Fikstür alınamadı: {hata}"}), 502
+
+        duz = fik[(fik["HomeTeam"] == ev) & (fik["AwayTeam"] == dep)]
+        ters = fik[(fik["HomeTeam"] == dep) & (fik["AwayTeam"] == ev)]
+        secilen, ters_mi = (duz, False) if not duz.empty else (ters, True)
+        if secilen.empty:
+            return jsonify(
+                {
+                    "bulundu": False,
+                    "mesaj": f"{ev} – {dep} önümüzdeki günlerin bülteninde bulunamadı; "
+                             "oranı elle girebilirsiniz (analiz oransız da çalışır).",
+                }
+            )
+        r = secilen.iloc[0]
+        oranlar, maks, ust_alt = _fikstur_oranlari(r)
+        ozet = _mac_ozeti(secilen.index[0], r, kitapcilar)
+        return jsonify(
+            {
+                "bulundu": True,
+                "ters": ters_mi,
+                "ev": r["HomeTeam"],
+                "dep": r["AwayTeam"],
+                "tarih": r["Tarih"].strftime("%d.%m.%Y"),
+                "saat": ozet["saat"],
+                "lig_adi": ozet["lig_adi"],
+                "oranlar": oranlar,
+                "maks": maks,
+                "ust_alt": ust_alt,
+                "kitapcilar": ozet["kitapcilar"],
+                "oran_bekleniyor": oranlar is None,
+            }
+        )
+
     @app.post("/api/takim-analiz")
     def takim_analiz():
         try:
@@ -347,8 +396,20 @@ def uygulama_olustur():
             if not oranlar:
                 return jsonify({"hata": "Oranlar geçersiz: üçü de 1.00'den büyük olmalı."}), 400
 
+        ust_alt = None
+        ua = govde.get("ust_alt")
+        if isinstance(ua, (list, tuple)) and len(ua) == 2:
+            try:
+                ua = (float(ua[0]), float(ua[1]))
+                if min(ua) > 1.0:
+                    ust_alt = ua
+            except (TypeError, ValueError):
+                ust_alt = None
+
         tolerans = min(max(float(govde.get("tolerans", 0.02)), 0.005), 0.10)
-        a = analiz.mac_analizi(df, ev, dep, oranlar=oranlar, tolerans=tolerans, elo=_DURUM["elo"])
+        a = analiz.mac_analizi(
+            df, ev, dep, oranlar=oranlar, tolerans=tolerans, elo=_DURUM["elo"], ust_alt=ust_alt
+        )
         return jsonify(_mac_json(a))
 
     def _dis_kapsami_ekle(df: pd.DataFrame, fik: pd.DataFrame, yenile: bool) -> pd.DataFrame:
