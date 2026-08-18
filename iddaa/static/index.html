@@ -315,11 +315,14 @@
       <h2>🎭 Sürpriz Radarı — İY/MS Çapraz Sonuçlar</h2>
       <div class="alt-baslik">
         "İlk yarıyı önde bitirip maçı kaybetme" (<b>1/2</b>), tersi (<b>2/1</b>) ve beraberlikten galibiyete
-        (<b>0/1</b>, <b>0/2</b>) kombinasyonları. İki kaynak harmanlanır: yarı-bazlı Poisson modeli + <b>aynı oran
-        kalıbıyla açılmış geçmiş maçlarda bu kombinasyonların gerçekte kaç kez geldiği</b>. Liste, çapraz sürpriz
-        olasılığı en yüksek maçtan başlar.
+        (<b>0/1</b>, <b>0/2</b>) kombinasyonları. İki kaynak harmanlanır: yarı-bazlı Poisson modeli +
+        <b>birebir aynı oranlarla açılmış geçmiş maçlarda bu kombinasyonların gerçekte kaç kez geldiği</b>.
+        Eşleşme ham oran düzeyindedir: geçmiş maçın <b>üç açılış oranı da</b> bu maçınkine ±0.05 yakın olmalı
+        (örnek yetersizse ±0.10 → ±0.15 → ±0.25 kademeli genişler; kullanılan eşik kartta yazar). Her kartta
+        <b>📜 Oran Kanıtı</b> düğmesi, eşleşen maçları oranlarıyla listeler — aynılığı gözünüzle doğrulayın.
         <b>Dürüst not:</b> bu sonuçlar doğaları gereği %2-6 bandındadır — o yüzden oranları 20-70 arası ödenir.
-        Radar "kesin sürpriz" değil, <i>ortalamadan belirgin sapan maçları</i> gösterir; "adil oran"dan yüksek
+        Aynı oranla açılmış olmak tek başına şike kanıtı değildir; piyasanın iki maçı aynı şekilde fiyatladığını
+        gösterir — radar, bu fiyat kalıbının tarihte nasıl sonuçlandığına bakar. "Adil oran"dan yüksek
         bülten oranı bulursanız matematiksel değer sizdedir.
       </div>
       <div class="gun-pilleri" id="sr-pilleri"></div>
@@ -834,11 +837,12 @@ function tahminDetayHTML(s){
   const ornekler = ((s.kalip && s.kalip.ornekler) || []).filter(o => o.hucre);
   satirlar += ornekler.map(o => `<tr>
     <td class="ipucu" style="white-space:nowrap">${o.tarih} · ${esc(o.lig)}</td>
-    <td style="white-space:nowrap">${esc(o.ev)} – ${esc(o.dep)}</td>
+    <td style="white-space:nowrap">${esc(o.ev)} – ${esc(o.dep)}
+      <div class="ipucu">${(o.oranlar || []).map(x => x.toFixed(2)).join(' / ')}</div></td>
     ${TAB_KOLONLAR.map(k => hucreTd(o.hucre[k])).join('')}</tr>`).join('');
   return `<div class="kart">
     <h2>📋 Tahmin & Benzer Maçlarda Gerçekleşenler</h2>
-    <div class="alt-baslik">İlk satır modelin bu maç tahmini; altı, <b>benzer oranla açılan geçmiş maçlarda gerçekte ne olduğu</b> — skor bazlı eşleştirme. Tahmin ile geçmişin aynı yöne bakması sinyali güçlendirir.</div>
+    <div class="alt-baslik">İlk satır modelin bu maç tahmini; altı, <b>benzer oranla açılan geçmiş maçlarda gerçekte ne olduğu</b> — her satırın altında o maçın açılış oranları (1 / X / 2) yazar, bu maçınkiyle kıyaslayın. Tahmin ile geçmişin aynı yöne bakması sinyali güçlendirir.</div>
     <div style="overflow-x:auto"><table>
       <tr><th>Tarih</th><th>Maç</th>${TAB_BASLIK}</tr>
       ${satirlar}
@@ -1153,7 +1157,9 @@ function srCiz(){
   $('#surpriz-sonuc').innerHTML = liste.map((m, i) => {
     const enIyi = m.kombolar['1/2'].p >= m.kombolar['2/1'].p ? '1/2' : '2/1';
     const k = m.kombolar[enIyi];
-    const kanit = k.kalip_n ? `Kalıp kanıtı: ${k.kalip_n} benzer oranlı maçın ${k.kalip_adet}'i ${enIyi} bitti.` : '';
+    const kanit = (m.kalip && k.kalip_n)
+      ? `Birebir oran kanıtı (±${m.kalip.esik.toFixed(2)}): <b>${m.kalip.hedef.map(x => x.toFixed(2)).join(' / ')}</b> oranlarıyla açılmış ${k.kalip_n} maçın ${k.kalip_adet}'i ${enIyi} bitti.`
+      : (m.oranli ? 'Bu oranlarla birebir eşleşen yeterli geçmiş maç yok — yalnız model konuşuyor.' : '');
     return `<div class="mac-satir" style="${i === 0 ? 'border-color:var(--sari)' : ''}">
       <span class="takimlar">${i === 0 ? '👑 ' : ''}${esc(m.ev)} – ${esc(m.dep)}</span>
       <span class="ipucu">${m.saat} · ${esc(m.lig)}${m.oranli ? '' : ' · oran yok (yalnız model)'}</span>
@@ -1164,10 +1170,34 @@ function srCiz(){
         ${srKombo('0/2', m.kombolar['0/2'], false)}
       </span>
       <span style="flex:1"></span>
+      ${m.ornekler.length ? `<button class="mini-btn" onclick="srGecmisAc(${i})">📜 Oran Kanıtı</button>` : ''}
       <button class="mini-btn" onclick="srDetay(${m.id}, '${m.tarih}')">🔬 Derin Analiz</button>
       ${kanit ? `<span class="ipucu" style="flex-basis:100%">${kanit} Bülteninizde ${enIyi} oranı ${k.adil_oran ? `adil oran ${k.adil_oran}'in` : 'adil oranın'} üzerindeyse matematiksel değer var demektir.</span>` : ''}
+      ${m.ornekler.length ? srGecmisHTML(m, i) : ''}
     </div>`;
   }).join('');
+}
+
+function srGecmisAc(i){
+  const kutu = $('#sr-gecmis-' + i);
+  kutu.style.display = kutu.style.display === 'none' ? 'block' : 'none';
+}
+
+function srGecmisHTML(m, i){
+  const CAPRAZ = ['1/2', '2/1', '0/1', '0/2'];
+  return `<div id="sr-gecmis-${i}" style="display:none;flex-basis:100%">
+    <div class="ipucu" style="margin:6px 0 4px">Bu maçın oranları: <b>${m.kalip.hedef.map(x => x.toFixed(2)).join(' / ')}</b> — altta oran yakınlığına göre en yakın eşleşmeler (sarı satırlar çapraz sürprizle bitenler):</div>
+    <div style="overflow-x:auto"><table>
+      <tr><th>Tarih</th><th>Lig</th><th>Maç</th><th class="orta">1</th><th class="orta">X</th><th class="orta">2</th><th class="orta">İY</th><th class="orta">MS</th><th class="orta">İY/MS</th></tr>
+      ${m.ornekler.map(o => `<tr style="${CAPRAZ.includes(o.kombo) ? 'background:rgba(250,204,21,.14)' : ''}">
+        <td class="ipucu" style="white-space:nowrap">${o.tarih}</td><td>${esc(o.lig)}</td>
+        <td style="white-space:nowrap">${esc(o.ev)} – ${esc(o.dep)}</td>
+        <td class="orta">${o.oranlar[0].toFixed(2)}</td><td class="orta">${o.oranlar[1].toFixed(2)}</td><td class="orta">${o.oranlar[2].toFixed(2)}</td>
+        <td class="orta">${o.iy}</td><td class="orta skor">${o.ms}</td>
+        <td class="orta"><b>${o.kombo}</b></td>
+      </tr>`).join('')}
+    </table></div>
+  </div>`;
 }
 
 function srDetay(id, tarih){

@@ -333,6 +333,69 @@ def oran_kalibi(df: pd.DataFrame, oranlar: tuple[float, float, float],
     }
 
 
+def birebir_oran_maclari(df: pd.DataFrame, oranlar: tuple[float, float, float],
+                         esikler: tuple[float, ...] = (0.05, 0.10, 0.15, 0.25),
+                         min_mac: int = 25, ornek_sayisi: int = 10) -> dict | None:
+    """Birebir aynı oranla açılmış geçmiş maçlar (ham oran uzayında eşleşme).
+
+    oran_kalibi'nden farkı: marj-arındırılmış olasılık bandı yerine, geçmiş
+    maçın üç açılış oranının da hedefe en fazla `esik` kadar uzak olması
+    aranır (ör. 2.05/3.40/3.50 → ±0.05 içinde). En dar eşikten başlanır;
+    min_mac İY verili örnek bulununca durulur. Örnekler oran yakınlığına
+    göre sıralı döner ki "oranlar gerçekten aynı mı" gözle doğrulanabilsin.
+    """
+    h, b, a = oranlar
+    D = df.dropna(subset=["oran_ev", "oran_berabere", "oran_dep",
+                          "HTHG", "HTAG", "FTHG", "FTAG"])
+    if D.empty:
+        return None
+    fark = pd.concat(
+        [(D["oran_ev"] - h).abs(), (D["oran_berabere"] - b).abs(), (D["oran_dep"] - a).abs()],
+        axis=1,
+    ).max(axis=1)
+
+    sec, kullanilan = D.iloc[0:0], esikler[-1]
+    for esik in esikler:
+        sec, kullanilan = D[fark <= esik], esik
+        if len(sec) >= min_mac:
+            break
+    if len(sec) < 5:
+        return None
+
+    iy_harf = (sec["HTHG"] - sec["HTAG"]).map(lambda f: "1" if f > 0 else ("0" if f == 0 else "2"))
+    ms_harf = sec["FTR"].map({"H": "1", "D": "0", "A": "2"})
+    kombo = iy_harf + "/" + ms_harf
+    iyms = {k: int(v) for k, v in kombo.value_counts().items()}
+
+    ornekler = []
+    if ornek_sayisi > 0:
+        en_yakin = fark.loc[sec.index].sort_values().index[:ornek_sayisi]
+        for idx in en_yakin:
+            s = sec.loc[idx]
+            ornekler.append(
+                {
+                    "tarih": s["Tarih"].strftime("%d.%m.%Y"),
+                    "lig": s["Div"],
+                    "ev": s["HomeTeam"],
+                    "dep": s["AwayTeam"],
+                    "oranlar": [round(float(s["oran_ev"]), 2),
+                                round(float(s["oran_berabere"]), 2),
+                                round(float(s["oran_dep"]), 2)],
+                    "iy": f"{int(s['HTHG'])}-{int(s['HTAG'])}",
+                    "ms": f"{int(s['FTHG'])}-{int(s['FTAG'])}",
+                    "kombo": kombo.loc[idx],
+                }
+            )
+
+    return {
+        "n": int(len(sec)),
+        "esik": kullanilan,
+        "hedef": [round(h, 2), round(b, 2), round(a, 2)],
+        "iyms": iyms,
+        "ornekler": ornekler,
+    }
+
+
 def iyms_olasiliklar(poisson: dict) -> dict[str, float]:
     """İY/MS kombinasyon olasılıkları (bağımsız iki yarı Poisson modeli).
 
