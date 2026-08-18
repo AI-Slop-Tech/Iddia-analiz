@@ -934,7 +934,7 @@ function tahminDetayHTML(s){
     ${TAB_KOLONLAR.map(k => hucreTd(o.hucre[k])).join('')}</tr>`).join('');
   return `<div class="kart">
     <h2>📋 Tahmin & Benzer Maçlarda Gerçekleşenler</h2>
-    <div class="alt-baslik">İlk satır modelin bu maç tahmini; altı, <b>benzer oranla açılan geçmiş maçlarda gerçekte ne olduğu</b> — her satırın altında o maçın açılış oranları (1 / X / 2) yazar, bu maçınkiyle kıyaslayın. Tahmin ile geçmişin aynı yöne bakması sinyali güçlendirir.</div>
+    <div class="alt-baslik">İlk satır modelin bu maç tahmini; altı, <b>benzer oranla açılan geçmiş maçlarda gerçekte ne olduğu</b> — her satırın altında o maçın açılış oranları (1 / X / 2) yazar, bu maçınkiyle kıyaslayın. İY skoru olan maçlar önceliklidir; "—" görünen nadir satırlar, İY verisi yayınlanmayan liglerdendir (ABD/Çin/İskandinav arşivleri). Tahmin ile geçmişin aynı yöne bakması sinyali güçlendirir.</div>
     <div style="overflow-x:auto"><table>
       <tr><th>Tarih</th><th>Maç</th>${TAB_BASLIK}</tr>
       ${satirlar}
