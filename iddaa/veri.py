@@ -522,7 +522,12 @@ def veriyi_yukle(ligler: list[str] | None = None) -> pd.DataFrame:
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", pd.errors.PerformanceWarning)
         birlesik = pd.concat(parcalar, ignore_index=True)
-    return birlesik.sort_values("Tarih").reset_index(drop=True)
+    birlesik = birlesik.sort_values("Tarih").reset_index(drop=True)
+    try:
+        _iy_yamalarini_uygula(birlesik)
+    except Exception:  # noqa: BLE001 — yama katmanı asıl yüklemeyi asla düşürmesin
+        pass
+    return birlesik
 
 
 def _normalize(isim: str) -> str:
@@ -1162,3 +1167,147 @@ def iyms_piyasa(ev: str, dep: str, lig_kodu: str, tarih: pd.Timestamp) -> dict |
     except Exception as hata:  # noqa: BLE001 — ağ/format hataları özelliği durdurmasın
         IYMS_SON_DURUM["hata"] = str(hata)[:200]
         return None
+
+
+# ------------------------------------------------ İY tamamlama: hasat + yama katmanı
+#
+# football-data.co.uk'nin ek ülke dosyalarında (BRA/CHN/USA/İskandinav...) ilk
+# yarı skoru yayınlanmaz. İki yan kaynaktan tamamlanır ve kalıcı depoda birikir:
+#   1) odds-api maç listelerindeki p1 (ilk yarı) skorları — oynanmış maçlar
+#      listede yalnız birkaç gün kaldığından GÜNLÜK hasat edilir
+#   2) football-data.org BSA (Brezilya Serie A) — geçmiş sezon İY skorları
+# Yama yalnız şu üçü birden tutunca uygulanır: tarih (±1 gün) + MS skoru
+# birebir + iki takım adının bulanık eşleşmesi. Yanlış eşleme pratikte imkânsız.
+
+IY_YAMA_DOSYASI = os.path.join(VERI_KLASORU, "iy_yamalari.json")
+_EK_ULKE_KODLARI = ("ARG", "AUT", "BRA", "CHN", "DNK", "FIN", "IRL", "JPN",
+                    "MEX", "NOR", "POL", "ROU", "RUS", "SWE", "SWZ", "USA")
+
+
+def _iy_deposunu_oku() -> dict:
+    try:
+        with open(IY_YAMA_DOSYASI, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def iy_hasadi() -> dict:
+    """Yan kaynaklardan İY skorlarını toplayıp kalıcı depoya ekler.
+
+    Bakım döngüsünden günde bir çağrılır; tüm ağ sonuçları önbelleklidir.
+    Dönen özet arayüz teşhisi içindir: {"depo": N, "yeni": M, "hata": ...}.
+    """
+    depo = _iy_deposunu_oku()
+    once = len(depo)
+    hata = None
+
+    # 1) odds-api p1 hasadı (ek ülke ligleri; events önbelleği 12 saat)
+    try:
+        if _oddsapi_anahtar():
+            def _duz(s: str) -> str:
+                return re.sub(r"[^a-z0-9]", "", str(s).lower())
+
+            ligler = _oddsapi_ligler()
+            for kod in _EK_ULKE_KODLARI:
+                ipucu = _ODDSAPI_LIG_IPUCU.get(kod)
+                if not ipucu:
+                    continue
+                adaylar = sorted(
+                    (l for l in ligler
+                     if _duz(l.get("name", "")).startswith(_duz(ipucu))
+                     and not any(d in str(l.get("name", "")).lower() for d in _ODDSAPI_DISLA)),
+                    key=lambda l: len(str(l.get("name", ""))),
+                )[:2]
+                for lig in adaylar:
+                    for m in _oddsapi_maclar(lig["slug"]):
+                        if m.get("status") != "settled":
+                            continue
+                        skorlar = m.get("scores") or {}
+                        p1 = (skorlar.get("periods") or {}).get("p1")
+                        ft = (skorlar.get("periods") or {}).get("ft") or {
+                            "home": skorlar.get("home"), "away": skorlar.get("away")}
+                        if not p1 or p1.get("home") is None:
+                            continue
+                        anahtar = f"{str(m.get('date', ''))[:10]}|{m.get('home')}|{m.get('away')}"
+                        depo.setdefault(anahtar, {
+                            "tarih": str(m.get("date", ""))[:10],
+                            "ev": m.get("home"), "dep": m.get("away"),
+                            "fthg": ft.get("home"), "ftag": ft.get("away"),
+                            "hthg": p1.get("home"), "htag": p1.get("away"),
+                            "kaynak": "oddsapi",
+                        })
+    except Exception as h:  # noqa: BLE001
+        hata = f"oddsapi: {str(h)[:120]}"
+
+    # 2) football-data.org BSA geçmiş sezonları (Brezilya İY arşivi)
+    try:
+        anahtar_fd = gizli_anahtar("FOOTBALL_DATA_ORG_KEY", "football_data_org_key")
+        if anahtar_fd:
+            bu_yil = simdi_tr().year
+            for yil in range(bu_yil, bu_yil - 4, -1):
+                isaret = f"_bsa_{yil}"
+                if depo.get(isaret) and yil != bu_yil:
+                    continue  # geçmiş sezon bir kez çekilir; cari sezon her hasatta tazelenir
+                yanit = requests.get(
+                    f"https://api.football-data.org/v4/competitions/BSA/matches",
+                    params={"season": yil}, headers={"X-Auth-Token": anahtar_fd},
+                    timeout=ZAMAN_ASIMI,
+                )
+                if yanit.status_code != 200:
+                    break  # ücretsiz pakette daha eski sezon yoksa sessizce dur
+                for m in yanit.json().get("matches", []):
+                    iy = (m.get("score") or {}).get("halfTime") or {}
+                    ms = (m.get("score") or {}).get("fullTime") or {}
+                    if m.get("status") != "FINISHED" or iy.get("home") is None:
+                        continue
+                    a = f"{str(m.get('utcDate', ''))[:10]}|{(m.get('homeTeam') or {}).get('name')}|{(m.get('awayTeam') or {}).get('name')}"
+                    depo.setdefault(a, {
+                        "tarih": str(m.get("utcDate", ""))[:10],
+                        "ev": (m.get("homeTeam") or {}).get("name"),
+                        "dep": (m.get("awayTeam") or {}).get("name"),
+                        "fthg": ms.get("home"), "ftag": ms.get("away"),
+                        "hthg": iy.get("home"), "htag": iy.get("away"),
+                        "kaynak": "fdorg",
+                    })
+                depo[isaret] = {"kaynak": "isaret"}
+                time.sleep(6.5)  # ücretsiz katman: dakikada 10 istek
+    except Exception as h:  # noqa: BLE001
+        hata = (hata + " | " if hata else "") + f"fdorg: {str(h)[:120]}"
+
+    os.makedirs(VERI_KLASORU, exist_ok=True)
+    gecici = IY_YAMA_DOSYASI + ".tmp"
+    with open(gecici, "w", encoding="utf-8") as f:
+        json.dump(depo, f, ensure_ascii=False)
+    os.replace(gecici, IY_YAMA_DOSYASI)
+    return {"depo": len(depo), "yeni": len(depo) - once, "hata": hata}
+
+
+def _iy_yamalarini_uygula(df: pd.DataFrame) -> int:
+    """Depodaki İY skorlarını, HT'si eksik arşiv satırlarına güvenli anahtarla işler."""
+    depo = _iy_deposunu_oku()
+    yamalar = [y for y in depo.values() if y.get("kaynak") != "isaret" and y.get("hthg") is not None]
+    if not yamalar:
+        return 0
+    eksik = df["HTHG"].isna()
+    if not eksik.any():
+        return 0
+    alt = df.loc[eksik, ["Tarih", "HomeTeam", "AwayTeam", "FTHG", "FTAG"]]
+    uygulanan = 0
+    for y in yamalar:
+        try:
+            t = pd.Timestamp(y["tarih"])
+            f_ev, f_dep = int(y["fthg"]), int(y["ftag"])
+        except (TypeError, ValueError):
+            continue
+        aday = alt[(alt["FTHG"] == f_ev) & (alt["FTAG"] == f_dep)
+                   & ((alt["Tarih"] - t).abs() <= pd.Timedelta(days=1))]
+        for idx, satir in aday.iterrows():
+            if (_oddsapi_takim_puani(satir["HomeTeam"], y["ev"]) >= 0.5
+                    and _oddsapi_takim_puani(satir["AwayTeam"], y["dep"]) >= 0.5):
+                df.loc[idx, "HTHG"] = float(y["hthg"])
+                df.loc[idx, "HTAG"] = float(y["htag"])
+                alt = alt.drop(idx)
+                uygulanan += 1
+                break
+    return uygulanan
