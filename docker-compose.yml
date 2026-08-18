@@ -32,6 +32,11 @@ services:
       #                        https://iddaa-veri.hesabiniz.workers.dev
       - IDDAA_PROXY=${IDDAA_PROXY:-}
       - IDDAA_KAYNAK_TABAN=${IDDAA_KAYNAK_TABAN:-}
+      # Opsiyonel geniş kapsama: football-data.org ücretsiz anahtarı
+      # (https://www.football-data.org/client/register). Tanımlanırsa
+      # Şampiyonlar Ligi (elemeler dahil) ve büyük liglerin maçları oranlar
+      # yayınlanmadan günler önce takvime düşer (oransız, analizli).
+      - FOOTBALL_DATA_ORG_KEY=${FOOTBALL_DATA_ORG_KEY:-}
     volumes:
       - iddaa-veri:/app/data
     healthcheck:

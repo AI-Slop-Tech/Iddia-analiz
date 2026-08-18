@@ -255,6 +255,7 @@ def uygulama_olustur():
                 "oran_kapsami": round(float(df["oran_ev"].notna().mean()), 3),
                 "surum": SURUM,
                 "gemini": bool(os.environ.get("GEMINI_API_KEY")),
+                "dis_kapsam": bool(os.environ.get("FOOTBALL_DATA_ORG_KEY")),
                 "veri_zamani": time.strftime("%d.%m %H:%M", time.localtime(_DURUM["arsiv_zaman"])),
                 "ligler": [
                     {"kod": lig, "ad": veri.LIGLER.get(lig, lig), "mac": int(adet)}
@@ -350,6 +351,52 @@ def uygulama_olustur():
         a = analiz.mac_analizi(df, ev, dep, oranlar=oranlar, tolerans=tolerans, elo=_DURUM["elo"])
         return jsonify(_mac_json(a))
 
+    def _dis_kapsami_ekle(df: pd.DataFrame, fik: pd.DataFrame, yenile: bool) -> pd.DataFrame:
+        """football-data.org kapsama maçlarını bültene katar (oran yok).
+
+        Takım adları arşive bulanık eşlenir; ikisi de eşleşirse maç tam analiz
+        alır, eşleşmezse yalnız listelenir (analiz_yok). Oranlı bültenle çakışan
+        maçlar (aynı gün + aynı eşleşmiş ikili) elenir — oranlı satır kazanır.
+        """
+        dis = veri.dis_fikstur(yenile=yenile)
+        if dis is None or dis.empty:
+            return fik
+        dis = dis[dis["Tarih"] >= veri.simdi_tr().normalize()].copy()
+        if dis.empty:
+            return fik
+
+        hafiza: dict = {}
+
+        def _esle(ad: str):
+            if ad not in hafiza:
+                try:
+                    hafiza[ad] = veri.takim_bul(df, ad)
+                except ValueError:
+                    hafiza[ad] = None
+            return hafiza[ad]
+
+        mevcut = {
+            (r.Tarih.date(), r.HomeTeam, r.AwayTeam) for r in fik.itertuples()
+        }
+        satirlar = []
+        for r in dis.itertuples():
+            ev, dep = _esle(r.HomeTeam), _esle(r.AwayTeam)
+            analiz_var = ev is not None and dep is not None
+            anahtar = (r.Tarih.date(), ev or r.HomeTeam, dep or r.AwayTeam)
+            if anahtar in mevcut:
+                continue  # oranlı bültende zaten var
+            mevcut.add(anahtar)
+            s = r._asdict()
+            s.pop("Index", None)
+            if analiz_var:
+                s["HomeTeam"], s["AwayTeam"] = ev, dep
+            s["analiz_yok"] = not analiz_var
+            satirlar.append(s)
+        if not satirlar:
+            return fik
+        birlesik = pd.concat([fik, pd.DataFrame(satirlar)], ignore_index=True)
+        return birlesik.sort_values("Tarih").reset_index(drop=True)
+
     def _fikstur(yenile: bool = False, bellek_ttl: bool = False):
         """bellek_ttl=True: listeleme çağrıları için TTL dolduysa yeniden oku.
         Detay/tarama çağrıları mevcut kopyayı kullanır ki satır id'leri kaymasın."""
@@ -359,6 +406,7 @@ def uygulama_olustur():
             fik, kitapcilar = veri.fikstur_yukle(
                 ligler=sorted(set(df["Div"].unique()) | set(veri.EK_LIGLER)), yenile=yenile
             )
+            fik = _dis_kapsami_ekle(df, fik, yenile)
             _DURUM["fikstur"], _DURUM["kitapcilar"] = fik, kitapcilar
             _DURUM["fikstur_zaman"] = time.time()
         return _DURUM["fikstur"], _DURUM["kitapcilar"]
@@ -383,17 +431,20 @@ def uygulama_olustur():
             uclu = [_num(r.get(f"{p}H")), _num(r.get(f"{p}D")), _num(r.get(f"{p}A"))]
             if all(x is not None for x in uclu):
                 kitapci[veri.KITAPCI_ADLARI[p]] = uclu
+        ozel_ad = r.get("LigAdi")
         return {
             "id": int(idx),
             "saat": r["Tarih"].strftime("%H:%M"),
             "lig": r["Div"],
-            "lig_adi": veri.LIGLER.get(r["Div"], r["Div"]),
+            "lig_adi": (ozel_ad if isinstance(ozel_ad, str) and ozel_ad else None)
+                       or veri.LIGLER.get(r["Div"], r["Div"]),
             "ev": r["HomeTeam"],
             "dep": r["AwayTeam"],
             "oranlar": oranlar,
             "maks": maks,
             "ust_alt": ust_alt,
             "kitapcilar": kitapci,
+            "analiz_yok": bool(r.get("analiz_yok", False) is True),
         }
 
     @app.get("/api/bulten")
@@ -535,6 +586,8 @@ def uygulama_olustur():
         satirlar, gunluk_kayitlar = [], []
         simdi = veri.simdi_tr()
         for idx, r in hedef.iterrows():
+            if bool(r.get("analiz_yok", False) is True):
+                continue
             oranlar, _maks, _ust_alt = _fikstur_oranlari(r)
             poisson = analiz.poisson_tahmini(df, r["HomeTeam"], r["AwayTeam"], lig_ipucu=r["Div"])
             kalip = analiz.oran_kalibi(df, tuple(oranlar)) if oranlar else None
@@ -587,6 +640,8 @@ def uygulama_olustur():
             r = fik.loc[idx]
         except (ValueError, KeyError):
             return jsonify({"hata": "Maç bulunamadı; bülteni yenileyin."}), 404
+        if bool(r.get("analiz_yok", False) is True):
+            return jsonify({"hata": "Bu maçın takımları istatistik arşivimizin kapsamı dışında; listeleyebiliyor ama analiz edemiyoruz."}), 400
 
         oranlar, maks, ust_alt = _fikstur_oranlari(r)
         a = analiz.mac_analizi(

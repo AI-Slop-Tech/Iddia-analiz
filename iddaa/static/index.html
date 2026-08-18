@@ -479,7 +479,7 @@ async function baslat(){
     GEMINI_VAR = !!d.gemini;
     $('#surum-notu').textContent =
       `İddaa Analiz v${d.surum} · veri yüklemesi: ${d.veri_zamani} · fikstür ve arşiv otomatik tazelenir` +
-      (GEMINI_VAR ? ' · Gemini bağlı ✨' : '');
+      (GEMINI_VAR ? ' · Gemini bağlı ✨' : '') + (d.dis_kapsam ? ' · geniş kapsam 🌍' : '');
     d.ligler.forEach(l => {
       $('#g-lig').insertAdjacentHTML('beforeend', `<option value="${esc(l.kod)}">${esc(l.ad)}</option>`);
       $('#h-lig').insertAdjacentHTML('beforeend', `<option value="${esc(l.kod)}">${esc(l.ad)}</option>`);
@@ -562,6 +562,8 @@ async function bosFiksturAciklamasi(){
         <p><b>Bülten arası.</b> Bu haftanın maçları oynandı; veri kaynağı yeni haftanın
         fikstürünü ve oranlarını genellikle <b>Salı–Perşembe</b> günleri yayınlar.</p>
         ${HAFTA && HAFTA.kaynak_yayini ? `<p class="ipucu">Kaynağın son bülten yayını: <b>${esc(HAFTA.kaynak_yayini)}</b> — yani gecikme bizde değil, kaynakta.</p>` : ''}
+        <p class="ipucu">İpucu: ücretsiz bir football-data.org anahtarını <b>FOOTBALL_DATA_ORG_KEY</b> olarak tanımlarsanız
+        Şampiyonlar Ligi (elemeler dahil) ve büyük liglerin maçları oranlar yayınlanmadan günler önce takvime düşer.</p>
         <p class="ipucu">Panel arka planda kontrol etmeye devam ediyor — bülten düştüğü anda maçlar
         burada otomatik belirecek. Bu arada 📊 Sonuçlar sekmesinden oynanan maçları inceleyebilirsiniz.</p>
         <button class="btn ikincil" onclick="haftaYukle(true)">↻ Şimdi Tekrar Dene</button>`;
@@ -618,7 +620,9 @@ function gunCiz(){
         <span class="oran-kutu"><small>2</small>${m.oranlar[2].toFixed(2)}</span>
       </span>` : '<span class="ipucu">oran yok</span>'}
       ${m.ust_alt ? `<span class="ipucu">Ü/A: ${m.ust_alt[0].toFixed(2)} / ${m.ust_alt[1].toFixed(2)}</span>` : ''}
-      <button class="mini-btn" onclick="detayToggle(${m.id})">🔬 Detay</button>
+      ${m.analiz_yok
+        ? '<span class="ipucu" title="Takımlar istatistik arşivinin kapsamı dışında">yalnız listeleme</span>'
+        : `<button class="mini-btn" onclick="detayToggle(${m.id})">🔬 Detay</button>`}
     </div>
     <div id="detay-${m.id}"></div>`).join('');
 }
