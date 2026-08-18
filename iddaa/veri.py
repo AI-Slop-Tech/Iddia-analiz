@@ -270,6 +270,7 @@ TAKMA_ADLAR = {
     "athleticbilbao": "Ath Bilbao",
     "intermilan": "Inter",
     "acmilan": "Milan",
+    "nec": "Nijmegen",
     "bayernmunih": "Bayern Munich",
     "borussiadortmund": "Dortmund",
 }
