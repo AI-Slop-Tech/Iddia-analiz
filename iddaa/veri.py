@@ -1124,46 +1124,67 @@ def iyms_piyasa(ev: str, dep: str, lig_kodu: str, tarih: pd.Timestamp) -> dict |
     takım adı benzerliği + tarih yakınlığıyla bulunur. Tüm ağ sonuçları
     diskte önbelleklenir — günlük ücretsiz istek bütçesi (500) rahat yeter.
     """
+    oa_var, af_var = bool(_oddsapi_anahtar()), bool(_af_anahtar())
     IYMS_SON_DURUM.update(
-        {"zaman": simdi_tr().strftime("%H:%M"), "anahtar_var": bool(_oddsapi_anahtar()), "hata": None}
+        {"zaman": simdi_tr().strftime("%H:%M"), "anahtar_var": oa_var or af_var, "hata": None}
     )
-    if not IYMS_SON_DURUM["anahtar_var"]:
+    if not (oa_var or af_var):
         return None
     ipucu = _ODDSAPI_LIG_IPUCU.get(str(lig_kodu))
-    if not ipucu:
-        return None
     try:
         def _duz(s: str) -> str:
             return re.sub(r"[^a-z0-9]", "", str(s).lower())
 
-        ipucu_duz = _duz(ipucu)
-        adaylar = sorted(
-            (
-                l for l in _oddsapi_ligler()
-                if _duz(l.get("name", "")).startswith(ipucu_duz)
-                and not any(d in str(l.get("name", "")).lower() for d in _ODDSAPI_DISLA)
-            ),
-            key=lambda l: len(str(l.get("name", ""))),  # en kısa (en birebir) ad önce
-        )
-        hedef_utc = pd.Timestamp(tarih) - pd.Timedelta(hours=3)  # TR → UTC
-        en_mac, en_puan = None, 0.0
-        for lig in adaylar[:5]:
-            for m in _oddsapi_maclar(lig["slug"]):
-                if m.get("status") == "settled":
-                    continue
-                try:
-                    mac_utc = pd.Timestamp(str(m.get("date", "")).replace("Z", ""))
-                except ValueError:
-                    continue
-                if abs((mac_utc - hedef_utc).total_seconds()) > 36 * 3600:
-                    continue
-                puan = min(_oddsapi_takim_puani(ev, m.get("home", "")),
-                           _oddsapi_takim_puani(dep, m.get("away", "")))
-                if puan > en_puan:
-                    en_mac, en_puan = m, puan
-        if en_mac is None or en_puan < 0.5:
-            return None
-        return _oddsapi_iyms_cek(int(en_mac["id"]))
+        sonuc = None
+        if oa_var and ipucu:
+            ipucu_duz = _duz(ipucu)
+            adaylar = sorted(
+                (
+                    l for l in _oddsapi_ligler()
+                    if _duz(l.get("name", "")).startswith(ipucu_duz)
+                    and not any(d in str(l.get("name", "")).lower() for d in _ODDSAPI_DISLA)
+                ),
+                key=lambda l: len(str(l.get("name", ""))),  # en kısa (en birebir) ad önce
+            )
+            hedef_utc = pd.Timestamp(tarih) - pd.Timedelta(hours=3)  # TR → UTC
+            en_mac, en_puan = None, 0.0
+            for lig in adaylar[:5]:
+                for m in _oddsapi_maclar(lig["slug"]):
+                    if m.get("status") == "settled":
+                        continue
+                    try:
+                        mac_utc = pd.Timestamp(str(m.get("date", "")).replace("Z", ""))
+                    except ValueError:
+                        continue
+                    if abs((mac_utc - hedef_utc).total_seconds()) > 36 * 3600:
+                        continue
+                    puan = min(_oddsapi_takim_puani(ev, m.get("home", "")),
+                               _oddsapi_takim_puani(dep, m.get("away", "")))
+                    if puan > en_puan:
+                        en_mac, en_puan = m, puan
+            if not (en_mac is None or en_puan < 0.5):
+                sonuc = _oddsapi_iyms_cek(int(en_mac["id"]))
+
+        # API-Football harmanı: ~15 kitapçı arasında kombo başına EN İYİ fiyat.
+        # odds-api hiç eşleşmediyse (ör. ŞL maçları) tek başına da yeterlidir.
+        af = af_iyms(ev, dep, tarih) if af_var else None
+        if af:
+            if sonuc is None:
+                sonuc = {"kombolar": {}, "kombo_kitapci": {}, "kitapci": None, "guncel": "",
+                         "korner": None, "korner_kitapci": None, "ms": None, "ms_kitapci": None,
+                         "ms_maks": None, "ust_alt25": None, "ust_alt25_kitapci": None}
+            else:
+                sonuc = dict(sonuc)
+                sonuc["kombolar"] = dict(sonuc.get("kombolar") or {})
+                sonuc["kombo_kitapci"] = dict(sonuc.get("kombo_kitapci") or {})
+            for k, oran in af["kombolar"].items():
+                if oran > sonuc["kombolar"].get(k, 0.0):
+                    sonuc["kombolar"][k] = oran
+                    sonuc["kombo_kitapci"][k] = af["kombo_kitapci"].get(k, "APIF")
+            adlar = list(sonuc["kombo_kitapci"].values())
+            sonuc["kitapci"] = max(set(adlar), key=adlar.count) if adlar else None
+            sonuc["kitapci_sayisi"] = int(af.get("kitapci_sayisi", 0)) + (1 if oa_var else 0)
+        return sonuc
     except Exception as hata:  # noqa: BLE001 — ağ/format hataları özelliği durdurmasın
         IYMS_SON_DURUM["hata"] = str(hata)[:200]
         return None
@@ -1311,3 +1332,156 @@ def _iy_yamalarini_uygula(df: pd.DataFrame) -> int:
                 uygulanan += 1
                 break
     return uygulanan
+
+
+# ------------------------------------------------ API-Football (api-sports.io): 3. anahtar
+#
+# Ücretsiz plan: günde 100 istek, tüm yarışmalar ve pazarlar (canlı testle
+# doğrulandı: güncel sezon + ŞL play-off + 14 kitapçı × 169 pazar). Verimli
+# kullanım: günün TÜM fikstürü tek istekte (/fixtures?date=...), maç başına
+# oranlar tek istekte ve 6 saat önbellekli. Yumuşak tavan 90 istek/gün.
+
+APIFOOTBALL_TABAN = "https://v3.football.api-sports.io"
+_AF_ORAN_TTL = 6 * 3600
+_AF_GUN_TTL = 6 * 3600
+AF_SON_DURUM: dict = {"anahtar_var": False, "hata": None, "bugun_istek": 0}
+
+_AF_IYMS_ETIKET = {
+    "Home/Home": "1/1", "Home/Draw": "1/0", "Home/Away": "1/2",
+    "Draw/Home": "0/1", "Draw/Draw": "0/0", "Draw/Away": "0/2",
+    "Away/Home": "2/1", "Away/Draw": "2/0", "Away/Away": "2/2",
+}
+
+
+def _af_anahtar() -> str:
+    return gizli_anahtar("APIFOOTBALL_KEY", "apifootball_key")
+
+
+def _af_sayac_artir() -> bool:
+    """Günlük yumuşak tavan (90): aşılırsa yeni ağ isteği yapılmaz, önbellek çalışır."""
+    dosya = os.path.join(VERI_KLASORU, "af_sayac.json")
+    bugun = simdi_tr().strftime("%Y-%m-%d")
+    try:
+        with open(dosya, encoding="utf-8") as f:
+            s = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        s = {}
+    if s.get("gun") != bugun:
+        s = {"gun": bugun, "adet": 0}
+    if s["adet"] >= 90:
+        AF_SON_DURUM["bugun_istek"] = s["adet"]
+        return False
+    s["adet"] += 1
+    AF_SON_DURUM["bugun_istek"] = s["adet"]
+    os.makedirs(VERI_KLASORU, exist_ok=True)
+    with open(dosya + ".tmp", "w", encoding="utf-8") as f:
+        json.dump(s, f)
+    os.replace(dosya + ".tmp", dosya)
+    return True
+
+
+def _af_getir(yol: str, parametreler: dict):
+    if not _af_sayac_artir():
+        raise RuntimeError("API-Football günlük istek tavanına ulaşıldı (90)")
+    yanit = requests.get(
+        APIFOOTBALL_TABAN + yol, params=parametreler,
+        headers={"x-apisports-key": _af_anahtar(), "User-Agent": KULLANICI_AJANI},
+        timeout=12,
+    )
+    yanit.raise_for_status()
+    govde = yanit.json()
+    if govde.get("errors"):
+        raise RuntimeError(str(govde["errors"])[:200])
+    return govde
+
+
+def _af_gun_fiksturu(gun: str) -> list:
+    """Günün tüm dünya fikstürü — TEK istek, 6 saat önbellek. gun: YYYY-MM-DD."""
+    onbellek = _oddsapi_onbellek("af_fikstur.json")
+    kayit = onbellek.get(gun)
+    if kayit and time.time() - kayit.get("zaman", 0) < _AF_GUN_TTL:
+        return kayit["veri"]
+    govde = _af_getir("/fixtures", {"date": gun, "timezone": "UTC"})
+    maclar = [
+        {
+            "id": r["fixture"]["id"],
+            "ev": (r["teams"]["home"] or {}).get("name"),
+            "dep": (r["teams"]["away"] or {}).get("name"),
+            "durum": (r["fixture"]["status"] or {}).get("short"),
+        }
+        for r in govde.get("response", [])
+    ]
+    onbellek[gun] = {"zaman": time.time(), "veri": maclar}
+    for eski in [k for k, v in onbellek.items() if time.time() - v.get("zaman", 0) > 3 * 86400]:
+        onbellek.pop(eski, None)
+    _oddsapi_onbellek_yaz("af_fikstur.json", onbellek)
+    return maclar
+
+
+def af_iyms(ev: str, dep: str, tarih: pd.Timestamp) -> dict | None:
+    """API-Football'dan İY/MS oranları: TÜM kitapçılar arasında kombo başına en iyi.
+
+    Dönen: {"kombolar": {...}, "kombo_kitapci": {...}, "kitapci_sayisi": N} | None
+    """
+    AF_SON_DURUM["anahtar_var"] = bool(_af_anahtar())
+    if not AF_SON_DURUM["anahtar_var"]:
+        return None
+    # Free planın tarih penceresi (bugün ±1 gün) bir kez görüldüyse, pencere
+    # dışı tarihler için ağa hiç çıkma — istek bütçesi boşa yanmasın.
+    gun_farki = abs((pd.Timestamp(tarih).normalize() - simdi_tr().normalize()).days)
+    if AF_SON_DURUM.get("pencere_free") and gun_farki > 1:
+        return None
+    try:
+        AF_SON_DURUM["hata"] = None
+        utc_gun = (pd.Timestamp(tarih) - pd.Timedelta(hours=3)).strftime("%Y-%m-%d")
+        mac_id, en_puan = None, 0.0
+        for gun in (utc_gun,):
+            for m in _af_gun_fiksturu(gun):
+                puan = min(_oddsapi_takim_puani(ev, m.get("ev") or ""),
+                           _oddsapi_takim_puani(dep, m.get("dep") or ""))
+                if puan > en_puan:
+                    mac_id, en_puan = m["id"], puan
+        if mac_id is None or en_puan < 0.5:
+            return None
+
+        onbellek = _oddsapi_onbellek("af_oranlar.json")
+        kayit = onbellek.get(str(mac_id))
+        if kayit and time.time() - kayit.get("zaman", 0) < _AF_ORAN_TTL:
+            return kayit["veri"] or None
+
+        govde = _af_getir("/odds", {"fixture": mac_id})
+        kombolar: dict[str, float] = {}
+        kitapcilar: dict[str, str] = {}
+        kitapci_kumesi: set[str] = set()
+        for r in govde.get("response", []):
+            for b in r.get("bookmakers", []):
+                for bet in b.get("bets", []):
+                    if bet.get("name") not in ("HT/FT Double", "Half Time/Full Time"):
+                        continue
+                    kitapci_kumesi.add(b["name"])
+                    for v in bet.get("values", []):
+                        k = _AF_IYMS_ETIKET.get(str(v.get("value")))
+                        try:
+                            oran = float(v.get("odd"))
+                        except (TypeError, ValueError):
+                            continue
+                        if k and oran > 1 and oran > kombolar.get(k, 0.0):
+                            kombolar[k] = oran
+                            kitapcilar[k] = b["name"]
+        sonuc = ({"kombolar": kombolar, "kombo_kitapci": kitapcilar,
+                  "kitapci_sayisi": len(kitapci_kumesi)} if kombolar else None)
+        onbellek[str(mac_id)] = {"zaman": time.time(), "veri": sonuc}
+        for eski in [k for k, v in onbellek.items()
+                     if time.time() - v.get("zaman", 0) > 4 * _AF_ORAN_TTL]:
+            onbellek.pop(eski, None)
+        _oddsapi_onbellek_yaz("af_oranlar.json", onbellek)
+        return sonuc
+    except Exception as hata:  # noqa: BLE001
+        metin = str(hata)
+        if "access to this date" in metin:
+            # Free plan tarih penceresi — hata değil, bilinen kapsam sınırı
+            AF_SON_DURUM["pencere_free"] = True
+            AF_SON_DURUM["hata"] = None
+        else:
+            AF_SON_DURUM["hata"] = metin[:160]
+        return None

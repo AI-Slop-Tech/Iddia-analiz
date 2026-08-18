@@ -362,8 +362,12 @@
       <button class="btn" id="btn-surpriz" onclick="surprizTara()">🎭 Radarı Çalıştır</button>
       <div id="sr-anahtar" style="display:none;margin-top:12px" class="form-satir">
         <div class="alan" style="flex:1;min-width:220px">
-          <label>🔑 odds-api.io anahtarı — Bet365'in <b>gerçek İY/MS oranlarını</b> otomatik çeker ve değer hükmünü kendisi verir (ücretsiz anahtar: odds-api.io, 30 saniye)</label>
-          <input id="oa-anahtar" type="password" placeholder="anahtarı buraya yapıştır" autocomplete="off">
+          <label>🔑 odds-api.io anahtarı — Bet365 İY/MS + 1xbet korner (ücretsiz: odds-api.io)</label>
+          <input id="oa-anahtar" type="password" placeholder="odds-api.io anahtarı" autocomplete="off">
+        </div>
+        <div class="alan" style="flex:1;min-width:220px">
+          <label>🔑 API-Football anahtarı — 14+ kitapçı, ŞL/Avrupa kupası oranları (ücretsiz: dashboard.api-football.com)</label>
+          <input id="af-anahtar" type="password" placeholder="API-Football anahtarı" autocomplete="off">
         </div>
         <button class="btn ikincil" id="btn-oa" onclick="oaAnahtarKaydet()">💾 Kaydet ve Tara</button>
       </div>
@@ -888,7 +892,11 @@ function tabloDetay(id){
   detayToggle(id, true);
 }
 
-function kitapciKisa(ad){ return ad === '1xbet' ? '1xB' : String(ad || 'B365').replace('Bet365', 'B365'); }
+function kitapciKisa(ad){
+  const s = String(ad || 'B365').replace('Bet365', 'B365').replace('1xbet', '1xB')
+    .replace('Marathonbet', 'Mrtn').replace('Betfair', 'Btfr').replace('Unibet', 'Unib');
+  return s.length > 6 ? s.slice(0, 6) : s;
+}
 
 function kornerHTML(s){
   const c = s.korner;
@@ -1342,13 +1350,17 @@ function srSecimDegisti(i){
 }
 
 async function oaAnahtarKaydet(){
-  const deger = $('#oa-anahtar').value.trim();
-  if(!deger){ bildir('Önce anahtarı yapıştırın.', true); return; }
+  const oa = $('#oa-anahtar').value.trim();
+  const af = $('#af-anahtar').value.trim();
+  if(!oa && !af){ bildir('En az bir anahtar yapıştırın.', true); return; }
   const b = $('#btn-oa'); b.disabled = true; b.textContent = '⏳ Deneniyor…';
   try{
-    await api('/api/ayarlar', {odds_api_io_key: deger});
-    $('#oa-anahtar').value = '';
-    bildir('Anahtar kaydedildi — Bet365 İY/MS oranları çekiliyor…');
+    const govde = {};
+    if(oa) govde.odds_api_io_key = oa;
+    if(af) govde.apifootball_key = af;
+    await api('/api/ayarlar', govde);
+    $('#oa-anahtar').value = ''; $('#af-anahtar').value = '';
+    bildir('Anahtar kaydedildi — piyasa İY/MS oranları çekiliyor…');
     await surprizTara();
   }catch(h){ bildir(h.message, true); }
   b.disabled = false; b.textContent = '💾 Kaydet ve Tara';

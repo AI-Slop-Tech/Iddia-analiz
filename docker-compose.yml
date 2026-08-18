@@ -42,6 +42,10 @@ services:
       # Bet365'in İY/MS oranlarını otomatik çekip değer hükmünü kendisi verir.
       # Panelden de (🎭 sekmesindeki anahtar kutusu) kaydedilebilir.
       - ODDS_API_IO_KEY=${ODDS_API_IO_KEY:-}
+      # Opsiyonel 3. oran kaynağı: API-Football ücretsiz anahtarı
+      # (https://dashboard.api-football.com — günde 100 istek). 14+ kitapçının
+      # İY/MS oranları ve ŞL/Avrupa kupası maçlarının fiyatları gelir.
+      - APIFOOTBALL_KEY=${APIFOOTBALL_KEY:-}
     volumes:
       - iddaa-veri:/app/data
     healthcheck:
