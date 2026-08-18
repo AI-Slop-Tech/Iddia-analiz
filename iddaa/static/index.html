@@ -257,13 +257,24 @@
 
 <header>
   <div class="ust">
-    <div class="logo"><span class="top">⚽</span> İddaa <b>Analiz</b></div>
+    <div class="logo"><span class="top">⚽</span> İddaa <b>Analiz</b>
+      <span id="surum-rozet" style="font-size:11.5px;color:var(--cok-soluk);font-weight:800"></span></div>
     <div class="durum-chipler" id="durum-chipler">
       <span class="chip">yükleniyor…</span>
     </div>
+    <button class="btn ikincil" id="btn-teshis" onclick="teshisAc()" title="Sistem tanısı">🩺</button>
     <button class="btn ikincil" id="btn-guncelle" onclick="veriGuncelle()">🔄 Veriyi Güncelle</button>
   </div>
 </header>
+
+<div id="teshis-kaplama" style="display:none;position:fixed;inset:0;background:#000b;z-index:70;overflow:auto;padding:14px"
+     onclick="if(event.target===this)this.style.display='none'">
+  <div class="kart" style="max-width:660px;margin:30px auto">
+    <h2>🩺 Sistem Tanısı</h2>
+    <div id="teshis-icerik" class="alt-baslik">çalışıyor…</div>
+    <button class="btn ikincil" onclick="$('#teshis-kaplama').style.display='none'">Kapat</button>
+  </div>
+</div>
 
 <div class="sarici">
   <nav>
@@ -539,6 +550,7 @@ async function baslat(){
       rozet('Arşiv', d.ilk_tarih.slice(-4) + '–' + d.son_tarih.slice(-4)) +
       rozet('Oran kapsamı', pct1(d.oran_kapsami));
     GEMINI_VAR = !!d.gemini;
+    $('#surum-rozet').textContent = 'v' + d.surum;
     $('#surum-notu').textContent =
       `İddaa Analiz v${d.surum} · veri yüklemesi: ${d.veri_zamani} · fikstür ve arşiv otomatik tazelenir` +
       (GEMINI_VAR ? ' · Gemini bağlı ✨' : '') + (d.dis_kapsam ? ' · geniş kapsam 🌍' : '');
@@ -558,6 +570,22 @@ async function baslat(){
   }catch(h){ bildir(h.message, true); }
 }
 baslat();
+
+async function teshisAc(){
+  $('#teshis-kaplama').style.display = '';
+  $('#teshis-icerik').innerHTML = '<div class="iskelet" style="height:90px"></div>';
+  try{
+    const t = await api('/api/teshis');
+    $('#teshis-icerik').innerHTML = t.kontroller.map(k =>
+      `<div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:11px">
+        <span style="font-size:17px">${k.tamam ? '✅' : '❌'}</span>
+        <div style="min-width:0"><b>${esc(k.ad)}</b><div class="ipucu">${esc(k.detay || '')}</div></div>
+      </div>`).join('') +
+      `<div class="not">Bir şey çalışmıyorsa bu ekranın görüntüsünü paylaşın — anahtar değerleriniz asla gösterilmez.</div>`;
+  }catch(h){
+    $('#teshis-icerik').innerHTML = `<div class="ipucu">Tanı alınamadı: ${esc(h.message)} — sunucu eski sürümde olabilir; Coolify'da yeniden deploy edin.</div>`;
+  }
+}
 
 async function veriGuncelle(){
   const b = $('#btn-guncelle');

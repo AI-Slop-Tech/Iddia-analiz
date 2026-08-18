@@ -240,6 +240,88 @@ def uygulama_olustur():
     def ana_sayfa():
         return app.send_static_file("index.html")
 
+    @app.after_request
+    def _onbellek_kapat(yanit):
+        # iPhone/Safari eski arayüzü önbellekten açmasın: HTML ve API her zaman taze gelsin
+        if yanit.mimetype in ("text/html", "application/json"):
+            yanit.headers["Cache-Control"] = "no-store, must-revalidate"
+        return yanit
+
+    @app.get("/api/teshis")
+    def teshis():
+        """Tek bakışta kurulum sağlığı — kullanıcı ekran görüntüsüyle destek isteyebilsin.
+
+        Anahtar değerleri asla dönmez; yalnız var/yok ve son hata metinleri.
+        """
+        kontroller = []
+
+        def ekle(ad, tamam, detay):
+            kontroller.append({"ad": ad, "tamam": bool(tamam), "detay": str(detay)})
+
+        ekle("Yazılım sürümü", True,
+             f"v{SURUM} — sayfa başlığında da bu yazmalı; farklıysa tarayıcınız eski sayfayı "
+             "önbellekten açıyor demektir (gizli sekmede deneyin)")
+
+        try:
+            df = _df()
+            ekle("Maç arşivi", True,
+                 f"{len(df):,} maç · {df['Div'].nunique()} lig · yükleme: "
+                 f"{time.strftime('%d.%m %H:%M', time.localtime(_DURUM['arsiv_zaman']))}")
+        except FileNotFoundError:
+            df = None
+            ekle("Maç arşivi", False, "veri indirilmemiş — üstteki 🔄 Veriyi Güncelle'ye basın")
+
+        try:
+            fik, _k = _fikstur()
+            gelecek = fik[fik["Tarih"] >= veri.simdi_tr().normalize()]
+            bayrak = (gelecek["analiz_yok"].fillna(False).astype(bool)
+                      if "analiz_yok" in gelecek.columns
+                      else pd.Series(False, index=gelecek.index))
+            analizli = int((~bayrak).sum())
+            ekle("Bülten (fikstür)", len(gelecek) > 0,
+                 f"takvimde {len(gelecek)} maç ({analizli} analizli) · kaynak yayını: "
+                 f"{veri.fikstur_kaynak_yayini() or 'bilinmiyor'}")
+        except Exception as hata:  # noqa: BLE001
+            ekle("Bülten (fikstür)", False, f"alınamadı: {str(hata)[:160]}")
+
+        try:
+            t = veri.baglanti_testi()
+            ekle("Veri kaynağı erişimi (football-data.co.uk)", bool(t.get("tamam")),
+                 (f"{t.get('sure_ms')} ms · vekil: {t.get('vekil') or 'yok'}" if t.get("tamam")
+                  else f"hata: {t.get('hata')} · vekil: {t.get('vekil') or 'yok'} — Türkiye'deki "
+                       "sunucularda IDDAA_PROXY / IDDAA_KAYNAK_TABAN gerekir"))
+        except Exception as hata:  # noqa: BLE001
+            ekle("Veri kaynağı erişimi (football-data.co.uk)", False, str(hata)[:160])
+
+        fd_var = bool(veri.gizli_anahtar("FOOTBALL_DATA_ORG_KEY", "football_data_org_key"))
+        d = veri.DIS_SON_DURUM
+        if not fd_var:
+            ekle("football-data.org (ŞL + büyük ligler)", False,
+                 "anahtar kayıtlı değil — Bu Hafta sekmesindeki 🔑 kutudan ekleyin")
+        else:
+            ekle("football-data.org (ŞL + büyük ligler)", not d.get("hata"),
+                 f"hata: {d['hata']}" if d.get("hata")
+                 else f"son çekim {d.get('zaman') or '—'} · {d.get('mac') if d.get('mac') is not None else '?'} maç geldi")
+
+        oa_var = bool(veri.gizli_anahtar("ODDS_API_IO_KEY", "odds_api_io_key"))
+        if not oa_var:
+            ekle("odds-api.io (Bet365 İY/MS oranları)", False,
+                 "anahtar kayıtlı değil — 🎭 Sürpriz sekmesindeki 🔑 kutudan ekleyin")
+        else:
+            try:
+                ligler = veri._oddsapi_ligler()
+                ekle("odds-api.io (Bet365 İY/MS oranları)", True,
+                     f"anahtar çalışıyor · {len(ligler)} lig erişilebilir"
+                     + (f" · son hata: {veri.IYMS_SON_DURUM['hata']}" if veri.IYMS_SON_DURUM.get("hata") else ""))
+            except Exception as hata:  # noqa: BLE001
+                ekle("odds-api.io (Bet365 İY/MS oranları)", False, f"erişim hatası: {str(hata)[:160]}")
+
+        ekle("Gemini yorumu", bool(veri.gizli_anahtar("GEMINI_API_KEY", "gemini_api_key")),
+             "bağlı" if veri.gizli_anahtar("GEMINI_API_KEY", "gemini_api_key")
+             else "anahtar yok (isteğe bağlı özellik)")
+
+        return jsonify({"surum": SURUM, "kontroller": kontroller})
+
     @app.get("/api/durum")
     def durum():
         try:
