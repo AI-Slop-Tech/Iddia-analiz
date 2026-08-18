@@ -392,6 +392,13 @@ def birebir_oran_maclari(df: pd.DataFrame, oranlar: tuple[float, float, float],
         "esik": kullanilan,
         "hedef": [round(h, 2), round(b, 2), round(a, 2)],
         "iyms": iyms,
+        # Aynı oranlı geçmişin MS dağılımı — çapraz kombinasyon kanıtının
+        # yanında maç sonucu eğilimi de okunabilsin diye.
+        "ms": {
+            "1": float((sec["FTR"] == "H").mean()),
+            "0": float((sec["FTR"] == "D").mean()),
+            "2": float((sec["FTR"] == "A").mean()),
+        },
         "ornekler": ornekler,
     }
 

@@ -728,10 +728,11 @@ def uygulama_olustur():
             return jsonify({"hata": f"Fikstür alınamadı: {hata}"}), 502
         hedef = fik[fik["Tarih"].dt.strftime("%d.%m.%Y") == tarih]
 
-        # Bülten İY/MS pazarının 9 seçeneğinin tamamı hesaplanır;
-        # köşegen dışı 6'sı "sürpriz" sayılır (İY sonucu MS'de değişenler).
+        # Bülten İY/MS pazarının 9 seçeneği hesaplanır; ⭐ adayları, ilk
+        # yarıda bir taraf öndeyken sonucun değiştiği 4 çapraz kombinasyondur
+        # (0/1 ve 0/2 bilgi olarak gösterilir ama yarışa girmez).
         FOKUS = ("1/1", "1/0", "1/2", "0/1", "0/0", "0/2", "2/1", "2/0", "2/2")
-        SURPRIZ = ("1/0", "1/2", "0/1", "0/2", "2/1", "2/0")
+        SURPRIZ = ("1/0", "1/2", "2/1", "2/0")
         satirlar = []
         for idx, r in hedef.iterrows():
             if bool(r.get("analiz_yok", False) is True):
@@ -773,7 +774,8 @@ def uygulama_olustur():
                     "kombolar": kombolar,
                     "one_cikan": one_cikan,
                     "kalip": (
-                        {"esik": birebir["esik"], "n": birebir["n"], "hedef": birebir["hedef"]}
+                        {"esik": birebir["esik"], "n": birebir["n"],
+                         "hedef": birebir["hedef"], "ms": birebir["ms"]}
                         if birebir else None
                     ),
                     "ornekler": birebir["ornekler"] if birebir else [],
