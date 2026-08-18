@@ -896,6 +896,9 @@ _ODDSAPI_LIG_IPUCU = {
     "RUS": "Russia - Premier League", "SWE": "Sweden - Allsvenskan",
     "SWZ": "Switzerland - Super League", "USA": "USA - MLS",
     "ŞL": "International Clubs - UEFA Champions League",
+    "EL": "International Clubs - UEFA Europa League",
+    "CLI": "International Clubs - CONMEBOL Libertadores",
+    "CSA": "International Clubs - CONMEBOL Sudamericana",
 }
 _ODDSAPI_DISLA = ("women", "u17", "u19", "u20", "u21", "u23", "reserve", "youth", "amateur")
 
@@ -914,7 +917,7 @@ def _oddsapi_getir(yol: str, parametreler: dict):
     parametreler = dict(parametreler, apiKey=_oddsapi_anahtar())
     yanit = requests.get(
         ODDSAPI_TABAN + yol, params=parametreler,
-        headers={"User-Agent": KULLANICI_AJANI}, timeout=ZAMAN_ASIMI,
+        headers={"User-Agent": KULLANICI_AJANI}, timeout=12,  # tarama bütçesini tek istek yemesin
     )
     yanit.raise_for_status()
     govde = yanit.json()
