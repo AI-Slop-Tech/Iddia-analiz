@@ -337,7 +337,9 @@
         <b>birebir aynı oranlarla açılmış geçmiş maçlarda bu kombinasyonların gerçekte kaç kez geldiği</b>.
         Eşleşme ham oran düzeyindedir: geçmiş maçın <b>üç açılış oranı da</b> bu maçınkine ±0.05 yakın olmalı
         (örnek yetersizse ±0.10 → ±0.15 → ±0.25 kademeli genişler; kullanılan eşik kartta yazar). Her kartta
-        <b>📜 Oran Kanıtı</b> düğmesi, eşleşen maçları oranlarıyla listeler — aynılığı gözünüzle doğrulayın.
+        <b>📜 Oran Kanıtı</b> düğmesi, eşleşen maçları hem 1X2 hem de <b>türetilmiş İY/MS oranlarıyla</b> listeler —
+        geçmişte o maça 1/0, 1/2, 2/1, 2/0 için kaç oran düştüğünü bugünkü maçla yan yana görürsünüz
+        (kitapçılar İY/MS fiyatını 1X2 modelinden türetir; tarihsel İY/MS piyasa fiyatı ücretsiz yayınlanmaz).
         <b>Dürüst not:</b> bu sonuçlar doğaları gereği %2-6 bandındadır — o yüzden oranları 20-70 arası ödenir.
         Aynı oranla açılmış olmak tek başına şike kanıtı değildir; piyasanın iki maçı aynı şekilde fiyatladığını
         gösterir — radar, bu fiyat kalıbının tarihte nasıl sonuçlandığına bakar. "Adil oran"dan yüksek
@@ -1249,16 +1251,35 @@ function srGecmisAc(i){
   kutu.style.display = kutu.style.display === 'none' ? 'block' : 'none';
 }
 
+function srAdilTd(kaynak, ad, vurgula){
+  const v = (kaynak || {})[ad];
+  return `<td class="orta" style="${vurgula ? 'color:var(--sari);font-weight:800' : ''}">${v ? v.toFixed(1) : '—'}</td>`;
+}
+
 function srGecmisHTML(m, i){
   const CAPRAZ = ['1/0', '1/2', '2/1', '2/0'];
+  const hedefAdil = (m.kalip && m.kalip.iyms_adil) || {};
   return `<div id="sr-gecmis-${i}" style="display:none;margin-top:8px">
-    <div class="ipucu" style="margin:6px 0 4px">Bu maçın oranları: <b>${m.kalip.hedef.map(x => x.toFixed(2)).join(' / ')}</b> — altta oran yakınlığına göre en yakın eşleşmeler (sarı satırlar çapraz sürprizle bitenler):</div>
+    <div class="ipucu" style="margin:6px 0 4px">İlk satır bu maç, altı oran yakınlığına göre en yakın geçmiş eşleşmeler (sarı satırlar çaprazla bitenler).
+      <b>1/0 · 1/2 · 2/1 · 2/0 sütunları</b>, her maçın kendi 1X2 oranından türetilmiş <b>adil İY/MS oranlarıdır</b> —
+      kitapçılar bu pazarı aynı yöntemle 1X2 modelinden fiyatlar (tarihsel İY/MS piyasa fiyatı hiçbir ücretsiz kaynakta yayınlanmaz);
+      bülten, marj nedeniyle adilin altını öder.</div>
     <div style="overflow-x:auto"><table>
-      <tr><th>Tarih</th><th>Lig</th><th>Maç</th><th class="orta">1</th><th class="orta">X</th><th class="orta">2</th><th class="orta">İY</th><th class="orta">MS</th><th class="orta">İY/MS</th></tr>
+      <tr><th>Tarih</th><th>Lig</th><th>Maç</th><th class="orta">1</th><th class="orta">X</th><th class="orta">2</th>
+        <th class="orta">1/0</th><th class="orta">1/2</th><th class="orta">2/1</th><th class="orta">2/0</th>
+        <th class="orta">İY</th><th class="orta">MS</th><th class="orta">İY/MS</th></tr>
+      <tr style="background:var(--kart-ic)">
+        <td class="ipucu" style="white-space:nowrap">→ bugün</td><td>${esc(m.lig)}</td>
+        <td style="white-space:nowrap"><b>${esc(m.ev)} – ${esc(m.dep)}</b></td>
+        ${m.kalip.hedef.map(x => `<td class="orta"><b>${x.toFixed(2)}</b></td>`).join('')}
+        ${CAPRAZ.map(ad => srAdilTd(hedefAdil, ad, true)).join('')}
+        <td class="orta">—</td><td class="orta">—</td><td class="orta">?</td>
+      </tr>
       ${m.ornekler.map(o => `<tr style="${CAPRAZ.includes(o.kombo) ? 'background:rgba(250,204,21,.14)' : ''}">
         <td class="ipucu" style="white-space:nowrap">${o.tarih}</td><td>${esc(o.lig)}</td>
         <td style="white-space:nowrap">${esc(o.ev)} – ${esc(o.dep)}</td>
         <td class="orta">${o.oranlar[0].toFixed(2)}</td><td class="orta">${o.oranlar[1].toFixed(2)}</td><td class="orta">${o.oranlar[2].toFixed(2)}</td>
+        ${CAPRAZ.map(ad => srAdilTd(o.iyms_adil, ad, o.kombo === ad)).join('')}
         <td class="orta">${o.iy}</td><td class="orta skor">${o.ms}</td>
         <td class="orta"><b>${o.kombo}</b></td>
       </tr>`).join('')}
