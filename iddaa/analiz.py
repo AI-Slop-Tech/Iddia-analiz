@@ -286,6 +286,16 @@ def oran_kalibi(df: pd.DataFrame, oranlar: tuple[float, float, float],
     toplam_gol = sec["FTHG"] + sec["FTAG"]
     skor_sayimi = (sec["FTHG"].astype(str) + "-" + sec["FTAG"].astype(str)).value_counts()
 
+    # İY/MS kombinasyonlarının bu oran kalıbındaki gerçekleşme sayıları
+    # (sürpriz radarı: "1/2", "2/1" gibi çapraz sonuçlar tarihte kaç kez geldi?)
+    ht = sec.dropna(subset=["HTHG", "HTAG"])
+    iyms_n = int(len(ht))
+    iyms: dict[str, int] = {}
+    if iyms_n:
+        iy_harf = (ht["HTHG"] - ht["HTAG"]).map(lambda f: "1" if f > 0 else ("0" if f == 0 else "2"))
+        ms_harf = ht["FTR"].map({"H": "1", "D": "0", "A": "2"})
+        iyms = {k: int(v) for k, v in (iy_harf + "/" + ms_harf).value_counts().items()}
+
     ornekler = []
     if ornek_sayisi > 0:
         for s in sec.sort_values("Tarih", ascending=False).head(ornek_sayisi).itertuples():
@@ -307,6 +317,8 @@ def oran_kalibi(df: pd.DataFrame, oranlar: tuple[float, float, float],
 
     return {
         "ornekler": ornekler,
+        "iyms_n": iyms_n,
+        "iyms": iyms,
         "n": n,
         "tolerans": kullanilan_tol,
         "lig_sayisi": int(sec["Div"].nunique()),
@@ -319,6 +331,40 @@ def oran_kalibi(df: pd.DataFrame, oranlar: tuple[float, float, float],
         "kg_var": float(((sec["FTHG"] > 0) & (sec["FTAG"] > 0)).mean()),
         "skorlar": [(skor, int(adet), adet / n) for skor, adet in skor_sayimi.head(6).items()],
     }
+
+
+def iyms_olasiliklar(poisson: dict) -> dict[str, float]:
+    """İY/MS kombinasyon olasılıkları (bağımsız iki yarı Poisson modeli).
+
+    İlk yarı ve ikinci yarı skorları ayrı Poisson süreçleri olarak numaralanır
+    (yarı payı ligin gerçek İY verisinden gelir); 9 kombinasyonun olasılığı
+    çıkarılır: "1/1", "1/0", "1/2", "0/1", ... Çapraz sonuçlar ("1/2", "2/1")
+    doğaları gereği düşük olasılıklıdır — yüksek oran ödemelerinin nedeni budur.
+    """
+    pay = poisson.get("iy_pay", 0.45)
+    l1e, l1d = poisson["lambda_ev"] * pay, poisson["lambda_dep"] * pay
+    l2e, l2d = poisson["lambda_ev"] * (1 - pay), poisson["lambda_dep"] * (1 - pay)
+    N = 7
+    pe1 = [_poisson_pmf(i, l1e) for i in range(N)]
+    pd1 = [_poisson_pmf(i, l1d) for i in range(N)]
+    pe2 = [_poisson_pmf(i, l2e) for i in range(N)]
+    pd2 = [_poisson_pmf(i, l2d) for i in range(N)]
+
+    sonuc: dict[str, float] = {}
+    toplam = 0.0
+    for h1 in range(N):
+        for a1 in range(N):
+            p_iy = pe1[h1] * pd1[a1]
+            iy = "1" if h1 > a1 else ("0" if h1 == a1 else "2")
+            for h2 in range(N):
+                for a2 in range(N):
+                    p = p_iy * pe2[h2] * pd2[a2]
+                    th, ta = h1 + h2, a1 + a2
+                    ms = "1" if th > ta else ("0" if th == ta else "2")
+                    anahtar = iy + "/" + ms
+                    sonuc[anahtar] = sonuc.get(anahtar, 0.0) + p
+                    toplam += p
+    return {k: v / toplam for k, v in sonuc.items()}
 
 
 def tahmin_hucreleri(poisson: dict, kalip: dict | None = None) -> dict:

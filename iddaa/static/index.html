@@ -256,6 +256,7 @@
   <nav>
     <button class="sekme aktif" data-s="hafta"><span class="ikon">📅</span><span class="etiket">Bu Hafta</span></button>
     <button class="sekme" data-s="tablo"><span class="ikon">📋</span><span class="etiket">Tablo</span></button>
+    <button class="sekme" data-s="surpriz"><span class="ikon">🎭</span><span class="etiket">Sürpriz</span></button>
     <button class="sekme" data-s="sonuc"><span class="ikon">📊</span><span class="etiket">Sonuçlar</span></button>
     <button class="sekme" data-s="oran"><span class="ikon">📈</span><span class="etiket">Oran</span></button>
     <button class="sekme" data-s="takim"><span class="ikon">🎯</span><span class="etiket">Takım</span></button>
@@ -306,6 +307,25 @@
       </div>
     </div>
     <div id="tablo-sonuc"></div>
+  </section>
+
+  <!-- ============ SÜRPRİZ RADARI ============ -->
+  <section id="s-surpriz">
+    <div class="kart">
+      <h2>🎭 Sürpriz Radarı — İY/MS Çapraz Sonuçlar</h2>
+      <div class="alt-baslik">
+        "İlk yarıyı önde bitirip maçı kaybetme" (<b>1/2</b>), tersi (<b>2/1</b>) ve beraberlikten galibiyete
+        (<b>0/1</b>, <b>0/2</b>) kombinasyonları. İki kaynak harmanlanır: yarı-bazlı Poisson modeli + <b>aynı oran
+        kalıbıyla açılmış geçmiş maçlarda bu kombinasyonların gerçekte kaç kez geldiği</b>. Liste, çapraz sürpriz
+        olasılığı en yüksek maçtan başlar.
+        <b>Dürüst not:</b> bu sonuçlar doğaları gereği %2-6 bandındadır — o yüzden oranları 20-70 arası ödenir.
+        Radar "kesin sürpriz" değil, <i>ortalamadan belirgin sapan maçları</i> gösterir; "adil oran"dan yüksek
+        bülten oranı bulursanız matematiksel değer sizdedir.
+      </div>
+      <div class="gun-pilleri" id="sr-pilleri"></div>
+      <button class="btn" id="btn-surpriz" onclick="surprizTara()">🎭 Radarı Çalıştır</button>
+    </div>
+    <div id="surpriz-sonuc"></div>
   </section>
 
   <!-- ============ SONUÇLAR ============ -->
@@ -546,7 +566,9 @@ async function haftaYukle(yenile, sessiz){
       return;
     }
     _gunSecimiKoru();
-    pilCiz(); gunCiz(); tabloPilCiz();
+    if(!HAFTA.gunler.map(g => g.tarih).includes(AKTIF_SR_GUN))
+      AKTIF_SR_GUN = HAFTA.gunler.map(g => g.tarih).includes(HAFTA.bugun) ? HAFTA.bugun : HAFTA.gunler[0].tarih;
+    pilCiz(); gunCiz(); tabloPilCiz(); srPilCiz();
     if(HAFTA.kaynak_yayini)
       $('#kaynak-notu').textContent =
         `Kaynağın son bülten yayını: ${HAFTA.kaynak_yayini} — yeni tur maçları kaynak yayınladıkça (genellikle Salı–Perşembe) otomatik eklenir.` + disMetni(HAFTA.dis);
@@ -1090,6 +1112,68 @@ function takimSonucHTML(s, gctx){
     html += `<div class="not" style="margin-top:-6px">İpucu: 1X2 oranlarını da girerseniz oran kalıbı, değer analizi ve öneri eklenir.</div>`;
   }
   return html;
+}
+
+/* ---------- SÜRPRİZ RADARI ---------- */
+let AKTIF_SR_GUN = null, SR_SONUCLAR = {};
+
+function srPilCiz(){
+  if(!HAFTA) return;
+  $('#sr-pilleri').innerHTML = HAFTA.gunler.map(g =>
+    `<button class="gun-pil ${g.tarih === AKTIF_SR_GUN ? 'aktif' : ''}" onclick="srGunSec('${g.tarih}')">
+      ${g.tarih.slice(0,5)} <small>${gunEtiket(g)} · ${g.maclar.length} maç</small></button>`).join('');
+}
+function srGunSec(t){ AKTIF_SR_GUN = t; srPilCiz(); srCiz(); }
+
+async function surprizTara(){
+  if(!AKTIF_SR_GUN){ bildir('Fikstürün yüklenmesini bekleyin.', true); return; }
+  const b = $('#btn-surpriz'); b.disabled = true; b.textContent = '⏳ Radar taranıyor…';
+  $('#surpriz-sonuc').innerHTML = '<div class="iskelet" style="height:120px"></div>';
+  try{
+    SR_SONUCLAR[AKTIF_SR_GUN] = await api('/api/surpriz-radar', {tarih: AKTIF_SR_GUN});
+    srCiz();
+  }catch(h){ bildir(h.message, true); $('#surpriz-sonuc').innerHTML = ''; }
+  b.disabled = false; b.textContent = '🎭 Radarı Çalıştır';
+}
+
+function srKombo(ad, k, one){
+  const yuzde = (k.p * 100).toFixed(1);
+  const kanit = k.kalip_n ? `${k.kalip_n} benzer maçta ${k.kalip_adet} kez` : 'kalıp verisi yok';
+  return `<span class="rozet" style="${one ? 'border-color:var(--sari)' : ''}" title="${kanit}">
+    <b>${ad}</b> %${yuzde}${k.adil_oran ? ` <span class="ipucu">adil ${k.adil_oran}</span>` : ''}</span>`;
+}
+
+function srCiz(){
+  const liste = SR_SONUCLAR[AKTIF_SR_GUN];
+  if(!liste){ $('#surpriz-sonuc').innerHTML = ''; return; }
+  if(!liste.length){
+    $('#surpriz-sonuc').innerHTML = `<div class="kart bos-durum"><div class="dev">🤷</div><p>Bu gün için taranabilir maç yok.</p></div>`;
+    return;
+  }
+  $('#surpriz-sonuc').innerHTML = liste.map((m, i) => {
+    const enIyi = m.kombolar['1/2'].p >= m.kombolar['2/1'].p ? '1/2' : '2/1';
+    const k = m.kombolar[enIyi];
+    const kanit = k.kalip_n ? `Kalıp kanıtı: ${k.kalip_n} benzer oranlı maçın ${k.kalip_adet}'i ${enIyi} bitti.` : '';
+    return `<div class="mac-satir" style="${i === 0 ? 'border-color:var(--sari)' : ''}">
+      <span class="takimlar">${i === 0 ? '👑 ' : ''}${esc(m.ev)} – ${esc(m.dep)}</span>
+      <span class="ipucu">${m.saat} · ${esc(m.lig)}${m.oranli ? '' : ' · oran yok (yalnız model)'}</span>
+      <span style="display:flex;gap:6px;flex-wrap:wrap">
+        ${srKombo('1/2', m.kombolar['1/2'], enIyi === '1/2')}
+        ${srKombo('2/1', m.kombolar['2/1'], enIyi === '2/1')}
+        ${srKombo('0/1', m.kombolar['0/1'], false)}
+        ${srKombo('0/2', m.kombolar['0/2'], false)}
+      </span>
+      <span style="flex:1"></span>
+      <button class="mini-btn" onclick="srDetay(${m.id}, '${m.tarih}')">🔬 Derin Analiz</button>
+      ${kanit ? `<span class="ipucu" style="flex-basis:100%">${kanit} Bülteninizde ${enIyi} oranı ${k.adil_oran ? `adil oran ${k.adil_oran}'in` : 'adil oranın'} üzerindeyse matematiksel değer var demektir.</span>` : ''}
+    </div>`;
+  }).join('');
+}
+
+function srDetay(id, tarih){
+  sekmeAc('hafta');
+  if(AKTIF_GUN !== tarih) gunSec(tarih);
+  detayToggle(id, true);
 }
 
 /* ---------- SONUÇLAR ---------- */
