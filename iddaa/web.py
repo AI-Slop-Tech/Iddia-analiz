@@ -775,7 +775,8 @@ def uygulama_olustur():
                     "one_cikan": one_cikan,
                     "kalip": (
                         {"esik": birebir["esik"], "n": birebir["n"],
-                         "hedef": birebir["hedef"], "ms": birebir["ms"]}
+                         "hedef": birebir["hedef"], "ms": birebir["ms"],
+                         "iyms_adil": birebir["hedef_iyms_adil"]}
                         if birebir else None
                     ),
                     "ornekler": birebir["ornekler"] if birebir else [],

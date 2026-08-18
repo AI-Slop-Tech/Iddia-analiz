@@ -17,6 +17,7 @@ karşılaştırılır; pozitif beklenen değer (EV) taşıyan seçimler işaretl
 from __future__ import annotations
 
 import math
+from functools import lru_cache
 
 import pandas as pd
 
@@ -333,6 +334,52 @@ def oran_kalibi(df: pd.DataFrame, oranlar: tuple[float, float, float],
     }
 
 
+@lru_cache(maxsize=4096)
+def _oranlardan_lambdalar(oranlar: tuple[float, float, float], N: int = 8) -> tuple[float, float]:
+    """1X2 oranlarından Poisson gol beklentilerini (ev, dep) geri çözer.
+
+    Kitapçılar İY/MS gibi türev pazarları 1X2'yi üreten aynı gol modelinden
+    fiyatlar; burada o modelin tersine mühendisliği yapılır: marjı
+    arındırılmış 1X2 olasılıklarını en iyi üreten (λ_ev, λ_dep) çifti aranır.
+    """
+    p1, p0, _p2 = adil_olasilik(*oranlar)
+    hedef_fark = p1 - (1 - p1 - p0)
+
+    en_iyi, en_kucuk = (1.35, 1.15), float("inf")
+    for adim in range(15, 45):          # toplam gol beklentisi 1.5 .. 4.4
+        toplam = adim / 10
+        lo, hi = -min(2.4, toplam - 0.2), min(2.4, toplam - 0.2)
+        le = ld = toplam / 2
+        for _ in range(16):             # fark için ikiye bölme
+            fark = (lo + hi) / 2
+            le, ld = (toplam + fark) / 2, (toplam - fark) / 2
+            pe = [_poisson_pmf(i, le) for i in range(N)]
+            pd_ = [_poisson_pmf(i, ld) for i in range(N)]
+            q1 = sum(pe[i] * pd_[j] for i in range(1, N) for j in range(i))
+            q0 = sum(pe[i] * pd_[i] for i in range(N))
+            if (q1 - (1 - q1 - q0)) < hedef_fark:
+                lo = fark
+            else:
+                hi = fark
+        hata = abs(q0 - p0)
+        if hata < en_kucuk:
+            en_kucuk, en_iyi = hata, (le, ld)
+    return en_iyi
+
+
+def iyms_adil_oranlar(oranlar: tuple[float, float, float], iy_pay: float = 0.45,
+                      odak: tuple[str, ...] = ("1/0", "1/2", "2/1", "2/0")) -> dict[str, float]:
+    """Bir maçın 1X2 oranlarından türetilmiş adil İY/MS oranları.
+
+    Tarihsel İY/MS piyasa fiyatı hiçbir ücretsiz kaynakta yayınlanmadığı için
+    fiyat, kitapçıların kendi yöntemiyle (1X2 → gol modeli → çift yarı) yeniden
+    üretilir; çıktı marjsız adil orandır — bülten bunun altını öder.
+    """
+    le, ld = _oranlardan_lambdalar(tuple(round(float(x), 2) for x in oranlar))
+    olasiliklar = iyms_olasiliklar({"lambda_ev": le, "lambda_dep": ld, "iy_pay": iy_pay})
+    return {k: round(1.0 / olasiliklar[k], 1) for k in odak if olasiliklar.get(k, 0) > 1e-6}
+
+
 def birebir_oran_maclari(df: pd.DataFrame, oranlar: tuple[float, float, float],
                          esikler: tuple[float, ...] = (0.05, 0.10, 0.15, 0.25),
                          min_mac: int = 25, ornek_sayisi: int = 10) -> dict | None:
@@ -372,15 +419,19 @@ def birebir_oran_maclari(df: pd.DataFrame, oranlar: tuple[float, float, float],
         en_yakin = fark.loc[sec.index].sort_values().index[:ornek_sayisi]
         for idx in en_yakin:
             s = sec.loc[idx]
+            o3 = (round(float(s["oran_ev"]), 2),
+                  round(float(s["oran_berabere"]), 2),
+                  round(float(s["oran_dep"]), 2))
             ornekler.append(
                 {
                     "tarih": s["Tarih"].strftime("%d.%m.%Y"),
                     "lig": s["Div"],
                     "ev": s["HomeTeam"],
                     "dep": s["AwayTeam"],
-                    "oranlar": [round(float(s["oran_ev"]), 2),
-                                round(float(s["oran_berabere"]), 2),
-                                round(float(s["oran_dep"]), 2)],
+                    "oranlar": list(o3),
+                    # o günün 1X2'sinden türetilmiş İY/MS adil oranları —
+                    # "geçmişte bu maça İY/MS kaç verilirdi" sorusunun cevabı
+                    "iyms_adil": iyms_adil_oranlar(o3),
                     "iy": f"{int(s['HTHG'])}-{int(s['HTAG'])}",
                     "ms": f"{int(s['FTHG'])}-{int(s['FTAG'])}",
                     "kombo": kombo.loc[idx],
@@ -391,6 +442,7 @@ def birebir_oran_maclari(df: pd.DataFrame, oranlar: tuple[float, float, float],
         "n": int(len(sec)),
         "esik": kullanilan,
         "hedef": [round(h, 2), round(b, 2), round(a, 2)],
+        "hedef_iyms_adil": iyms_adil_oranlar((round(h, 2), round(b, 2), round(a, 2))),
         "iyms": iyms,
         # Aynı oranlı geçmişin MS dağılımı — çapraz kombinasyon kanıtının
         # yanında maç sonucu eğilimi de okunabilsin diye.
