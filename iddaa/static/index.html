@@ -359,12 +359,15 @@
       <div class="form-satir">
         <div class="alan"><label>Ev sahibi</label><input class="takim" id="t-ev" list="takim-listesi" placeholder="ör. Galatasaray"></div>
         <div class="alan"><label>Deplasman</label><input class="takim" id="t-dep" list="takim-listesi" placeholder="ör. Fenerbahçe"></div>
-        <div class="alan"><label>MS 1 <span class="ipucu">(ops.)</span></label><input class="oran" id="to1" type="number" step="0.01" min="1.01" placeholder="—"></div>
-        <div class="alan"><label>MS 0</label><input class="oran" id="to0" type="number" step="0.01" min="1.01" placeholder="—"></div>
-        <div class="alan"><label>MS 2</label><input class="oran" id="to2" type="number" step="0.01" min="1.01" placeholder="—"></div>
+        <div class="alan"><label>MS 1 <span class="ipucu">(ops.)</span></label><input class="oran" id="to1" type="number" step="0.01" min="1.01" placeholder="oto"></div>
+        <div class="alan"><label>MS 0</label><input class="oran" id="to0" type="number" step="0.01" min="1.01" placeholder="oto"></div>
+        <div class="alan"><label>MS 2</label><input class="oran" id="to2" type="number" step="0.01" min="1.01" placeholder="oto"></div>
+        <button class="btn ikincil" id="btn-oranbul" onclick="oranBul()">🔍 Oranı Bültenden Çek</button>
         <button class="btn" id="btn-takim" onclick="takimAnaliz()">Analiz Et</button>
       </div>
-      <div class="not">Türkçe karakter ve kısaltma serbest: “başakşehir”, “göztepe”, “man city”… otomatik eşlenir.</div>
+      <div class="not">Türkçe karakter ve kısaltma serbest: “başakşehir”, “göztepe”, “man city”… otomatik eşlenir.
+        Oran kutularını <b>boş bırakırsanız</b> sistem, maç önümüzdeki günlerin bültenindeyse uluslararası oranları (piyasa ortalaması + Alt/Üst) kendisi çeker;
+        Nesine gibi farklı bir bültenle kıyaslamak isterseniz oranı elle de yazabilirsiniz.</div>
     </div>
     <datalist id="takim-listesi"></datalist>
     <div id="takim-sonuc"></div>
@@ -885,17 +888,55 @@ function oranSonucHTML(s){
 }
 
 /* ---------- TAKIM ANALİZİ ---------- */
+let TAKIM_UA = null;  // bültenden çekilen Üst/Alt 2.5 oranları
+['t-ev', 't-dep'].forEach(id => {
+  document.addEventListener('input', e => { if(e.target.id === id) TAKIM_UA = null; });
+});
+
+async function oranBul(sessiz){
+  const ev = $('#t-ev').value.trim(), dep = $('#t-dep').value.trim();
+  if(!ev || !dep){ if(!sessiz) bildir('Önce iki takımı da girin.', true); return null; }
+  const b = $('#btn-oranbul'); b.disabled = true; if(!sessiz) b.textContent = '⏳ Aranıyor…';
+  try{
+    const s = await api('/api/oran-bul?' + new URLSearchParams({ev, dep}));
+    if(!s.bulundu){ if(!sessiz) bildir(s.mesaj, true); return null; }
+    if(s.ters){
+      $('#t-ev').value = s.ev; $('#t-dep').value = s.dep;
+      bildir(`Bültende ev sahibi ${s.ev} — takımları o yönde düzelttim.`);
+    }
+    if(s.oranlar){
+      $('#to1').value = s.oranlar[0]; $('#to0').value = s.oranlar[1]; $('#to2').value = s.oranlar[2];
+      TAKIM_UA = s.ust_alt || null;
+      if(!sessiz) bildir(`${s.tarih} ${s.saat} · ${s.lig_adi} — oranlar bültenden çekildi ✓`
+        + (s.ust_alt ? ` (Ü/A: ${s.ust_alt[0]}/${s.ust_alt[1]})` : ''));
+    }else{
+      if(!sessiz) bildir(`Maç bültende (${s.tarih}) ama oranları kaynak henüz yayınlamadı — oransız analiz yapılabilir.`, true);
+    }
+    return s;
+  }catch(h){ if(!sessiz) bildir(h.message, true); return null; }
+  finally{ b.disabled = false; b.textContent = '🔍 Oranı Bültenden Çek'; }
+}
+
 async function takimAnaliz(){
   const ev = $('#t-ev').value.trim(), dep = $('#t-dep').value.trim();
   if(!ev || !dep){ bildir('İki takımı da girin.', true); return; }
-  const o = [$('#to1').value, $('#to0').value, $('#to2').value];
-  const oranlar = o.every(x => x && Number(x) > 1) ? o.map(Number) : null;
-  const b = $('#btn-takim'); b.disabled = true;
+  let o = [$('#to1').value, $('#to0').value, $('#to2').value];
+  let oranlar = o.every(x => x && Number(x) > 1) ? o.map(Number) : null;
+  const b = $('#btn-takim'); b.disabled = true; b.textContent = '⏳ Analiz ediliyor…';
   try{
-    const s = await api('/api/takim-analiz', {ev, dep, oranlar, tolerans: Number($('#tol').value)});
+    if(!oranlar){
+      // kullanıcı oran yazmadıysa uluslararası bültenden kendimiz çekeriz
+      const s = await oranBul(true);
+      if(s && s.oranlar){
+        oranlar = s.oranlar;
+        bildir('Uluslararası oranlar bültenden otomatik çekildi ✓');
+      }
+    }
+    const s = await api('/api/takim-analiz',
+      {ev: $('#t-ev').value.trim(), dep: $('#t-dep').value.trim(), oranlar, ust_alt: TAKIM_UA, tolerans: Number($('#tol').value)});
     $('#takim-sonuc').innerHTML = takimSonucHTML(s, {ev: s.ev, dep: s.dep, oranlar: s.oranlar});
   }catch(h){ bildir(h.message, true); }
-  b.disabled = false;
+  b.disabled = false; b.textContent = 'Analiz Et';
 }
 
 function formKart(f, saha, etiket){
