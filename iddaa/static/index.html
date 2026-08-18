@@ -2,7 +2,13 @@
 <html lang="tr">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0a0f1c">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="İddaa Analiz">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚽</text></svg>">
 <title>⚽ İddaa Analiz Sistemi</title>
 <style>
   :root{
@@ -13,7 +19,10 @@
     --radius:16px;
   }
   *{box-sizing:border-box;margin:0;padding:0}
+  html{-webkit-text-size-adjust:100%}
+  button, .sekme, .gun-pil, .mini-btn{-webkit-tap-highlight-color:transparent}
   body{
+    -webkit-font-smoothing:antialiased;
     background:radial-gradient(1200px 600px at 80% -10%,#12305522,transparent),
                radial-gradient(900px 500px at -10% 10%,#0d3b2e22,transparent),var(--bg);
     color:var(--metin);
@@ -34,9 +43,11 @@
   nav{display:flex;gap:8px;margin:26px 0 22px;flex-wrap:wrap}
   .sekme{
     border:1px solid var(--cizgi);background:var(--kart);color:var(--soluk);
-    padding:11px 20px;border-radius:999px;font-size:15px;font-weight:600;cursor:pointer;
+    padding:11px 18px;border-radius:999px;font-size:14.5px;font-weight:600;cursor:pointer;
     transition:all .18s ease;
+    display:inline-flex;align-items:center;gap:7px;
   }
+  .sekme .ikon{font-size:16px;line-height:1}
   .sekme:hover{color:var(--metin);border-color:#2c3d63}
   .sekme.aktif{background:var(--grad);color:#04121f;border-color:transparent;box-shadow:0 6px 24px #0ea5e933}
   section{display:none}
@@ -164,21 +175,58 @@
   .mac-satir{transition:border-color .15s}
   .mac-satir:hover{border-color:#2c3d63}
 
-  /* mobil uyum */
-  @media(max-width:640px){
-    .sarici{padding:0 12px 40px}
-    .ust{padding:10px 14px;gap:8px}
-    .logo{font-size:19px}
-    nav{gap:6px;margin:18px 0 16px}
-    .sekme{padding:9px 14px;font-size:13px}
-    .kart{padding:15px}
-    .mac-satir{padding:11px 12px;gap:8px}
-    .mac-satir .takimlar{flex:1 1 100%;order:-1}
-    .mac-satir .saat{width:auto}
-    .bar-satir{grid-template-columns:84px 1fr 64px;gap:8px}
-    .one-cikan .buyukev{min-width:auto}
-    table{font-size:12.5px}
+  /* ---------- mobil (iPhone) düzeni: altta iOS tarzı sekme çubuğu ---------- */
+  @media(max-width:700px){
+    .sarici{padding:0 12px calc(92px + env(safe-area-inset-bottom))}
+    header{padding-top:env(safe-area-inset-top)}
+    .ust{padding:10px 14px;gap:8px;flex-wrap:nowrap}
+    .logo{font-size:18px}.logo .top{font-size:21px}
+    .durum-chipler{display:none}
+    #btn-guncelle{margin-left:auto;padding:9px 13px;font-size:12.5px;white-space:nowrap}
+
+    nav{
+      position:fixed;left:0;right:0;bottom:0;z-index:40;margin:0;
+      display:flex;gap:2px;flex-wrap:nowrap;
+      padding:7px 6px calc(7px + env(safe-area-inset-bottom));
+      background:#0a0f1cf2;backdrop-filter:blur(16px);
+      border-top:1px solid var(--cizgi);
+    }
+    .sekme{
+      flex:1;min-width:0;flex-direction:column;gap:3px;
+      padding:5px 2px;border:none;background:none;border-radius:12px;
+      font-size:9.5px;font-weight:700;color:var(--cok-soluk);
+    }
+    .sekme .ikon{font-size:21px}
+    .sekme .etiket{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .sekme.aktif{background:#12305544;color:var(--yesil);box-shadow:none}
+
+    .kart{padding:15px;border-radius:14px}
+    .kart h2{font-size:16px}
+    input,select{font-size:16px}  /* 16px altı, iOS Safari'yi otomatik yakınlaştırır */
     input.takim{width:100%}
+    input.oran{flex:1;min-width:0;width:auto}
+    .form-satir{gap:10px}
+    .form-satir .btn{flex:1 1 100%;min-height:46px}
+    .btn.ikincil{min-height:44px}
+
+    .mac-satir{padding:12px;gap:8px}
+    .mac-satir .takimlar{flex:1 1 100%;order:-1;font-size:15px}
+    .mac-satir .saat{width:auto}
+    .mac-satir .oran-trio{display:flex;flex:1 1 auto}
+    .oran-kutu{flex:1;min-width:0}
+    .mini-btn{padding:8px 12px}
+    .one-cikan{padding:10px 12px}
+    .one-cikan .buyukev{min-width:auto;margin-left:auto}
+    .gun-pilleri{overflow-x:auto;flex-wrap:nowrap;padding-bottom:4px;-webkit-overflow-scrolling:touch}
+    .gun-pil{flex:0 0 auto}
+
+    .bar-satir{grid-template-columns:78px 1fr 56px;gap:8px}
+    .kart table{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch}
+    th,td{white-space:nowrap}
+    table{font-size:12.5px}
+    .detay-panel{padding:10px}
+    #bildirim{bottom:calc(96px + env(safe-area-inset-bottom))}
+    footer{font-size:11.5px;padding-bottom:8px}
   }
 
   #bildirim{
@@ -206,13 +254,13 @@
 
 <div class="sarici">
   <nav>
-    <button class="sekme aktif" data-s="hafta">📅 Bu Hafta</button>
-    <button class="sekme" data-s="tablo">📋 Tahmin Tablosu</button>
-    <button class="sekme" data-s="sonuc">📊 Sonuçlar</button>
-    <button class="sekme" data-s="oran">📈 Oran Analizi</button>
-    <button class="sekme" data-s="takim">🎯 Takım Analizi</button>
-    <button class="sekme" data-s="gecmis">🕰 Geçmiş Maçlar</button>
-    <button class="sekme" data-s="btest">🧪 Backtest</button>
+    <button class="sekme aktif" data-s="hafta"><span class="ikon">📅</span><span class="etiket">Bu Hafta</span></button>
+    <button class="sekme" data-s="tablo"><span class="ikon">📋</span><span class="etiket">Tablo</span></button>
+    <button class="sekme" data-s="sonuc"><span class="ikon">📊</span><span class="etiket">Sonuçlar</span></button>
+    <button class="sekme" data-s="oran"><span class="ikon">📈</span><span class="etiket">Oran</span></button>
+    <button class="sekme" data-s="takim"><span class="ikon">🎯</span><span class="etiket">Takım</span></button>
+    <button class="sekme" data-s="gecmis"><span class="ikon">🕰</span><span class="etiket">Geçmiş</span></button>
+    <button class="sekme" data-s="btest"><span class="ikon">🧪</span><span class="etiket">Backtest</span></button>
   </nav>
 
   <!-- ============ BU HAFTA ============ -->
