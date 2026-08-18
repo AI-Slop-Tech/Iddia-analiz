@@ -119,12 +119,17 @@ içindedir (bağımlılıksız, tek dosya, mobil uyumlu); JSON API uçları
 | `backtest [--sezon 3] [--lig T1] [--esik 0.04] [--maks-oran 3.60]` | Stratejiyi geçmişte test et: ROI, eşik tablosu, kırılımlar |
 | `web [--port 8000] [--host 127.0.0.1]` | Modern web panelini başlat |
 
-Desteklenen ligler (22): Türkiye Süper Lig (`T1`); İngiltere'nin 5 katmanı
+Desteklenen ligler (38): Türkiye Süper Lig (`T1`); İngiltere'nin 5 katmanı
 (`E0`-`E3`, `EC`); İskoçya'nın 4 katmanı (`SC0`-`SC3`); Almanya, İtalya,
-İspanya ve Fransa'nın 2'şer katmanı (`D1/D2`, `I1/I2`, `SP1/SP2`, `F1/F2`);
-Hollanda `N1`, Belçika `B1`, Portekiz `P1`, Yunanistan `G1`. Varsayılan
-`guncelle` hepsini indirir (~77 bin maç) — böylece haftalık fikstürde görünen
-her maçın hem geçmişi hem oran kalıbı örneklemi hazır olur.
+İspanya ve Fransa'nın 2'şer katmanı; Hollanda, Belçika, Portekiz, Yunanistan;
+ayrıca **16 ekstra ülke ligi**: Arjantin, Avusturya, Brezilya, Çin, Danimarka,
+Finlandiya, İrlanda, Japonya, Meksika, Norveç, Polonya, Romanya, Rusya, İsveç,
+İsviçre, ABD (MLS). Ekstra ligler yaz takvimli olduğundan ana Avrupa bülteni
+boşken bile (hafta içi) takvimi doldururlar; fikstürleri ayrı beslemeden
+(`new_league_fixtures.csv`) otomatik gelir. Varsayılan `guncelle` hepsini
+indirir (~140 bin maç) — fikstürde görünen her maçın hem geçmişi hem oran
+kalıbı örneklemi hazır olur. (Ekstra lig dosyalarında ilk yarı skoru, maç
+istatistiği ve Alt/Üst oranı bulunmaz; o kolonlar bu liglerde boş kalır.)
 
 ## Örnek çıktı (gerçek veriyle)
 

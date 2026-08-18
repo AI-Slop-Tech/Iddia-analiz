@@ -113,7 +113,9 @@ def _cmd_analiz(args: argparse.Namespace) -> int:
 
 def _cmd_bulten(args: argparse.Namespace) -> int:
     df = veri.veriyi_yukle()
-    fik, _ = veri.fikstur_yukle(ligler=list(df["Div"].unique()), yenile=args.yenile)
+    fik, _ = veri.fikstur_yukle(
+        ligler=sorted(set(df["Div"].unique()) | set(veri.EK_LIGLER)), yenile=args.yenile
+    )
     if args.lig:
         fik = fik[fik["Div"] == args.lig]
     if fik.empty:

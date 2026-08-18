@@ -63,7 +63,9 @@ def _bakim_dongusu() -> None:
             pass
         try:
             if _DURUM["df"] is not None:
-                fik, kitapcilar = veri.fikstur_yukle(ligler=list(_DURUM["df"]["Div"].unique()))
+                fik, kitapcilar = veri.fikstur_yukle(
+                    ligler=sorted(set(_DURUM["df"]["Div"].unique()) | set(veri.EK_LIGLER))
+                )
                 _DURUM["fikstur"], _DURUM["kitapcilar"] = fik, kitapcilar
                 _DURUM["fikstur_zaman"] = time.time()
         except Exception:  # noqa: BLE001
@@ -353,7 +355,9 @@ def uygulama_olustur():
         df = _df()
         bayat = bellek_ttl and time.time() - _DURUM["fikstur_zaman"] > FIKSTUR_BELLEK_TTL
         if _DURUM["fikstur"] is None or yenile or bayat:
-            fik, kitapcilar = veri.fikstur_yukle(ligler=list(df["Div"].unique()), yenile=yenile)
+            fik, kitapcilar = veri.fikstur_yukle(
+                ligler=sorted(set(df["Div"].unique()) | set(veri.EK_LIGLER)), yenile=yenile
+            )
             _DURUM["fikstur"], _DURUM["kitapcilar"] = fik, kitapcilar
             _DURUM["fikstur_zaman"] = time.time()
         return _DURUM["fikstur"], _DURUM["kitapcilar"]

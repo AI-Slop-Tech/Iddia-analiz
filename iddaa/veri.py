@@ -35,6 +35,7 @@ VERI_KLASORU = os.path.join(
 VARSAYILAN_TABAN = "https://www.football-data.co.uk"
 KAYNAK_YOLU = "/mmz4281/{sezon}/{lig}.csv"
 FIKSTUR_YOLU = "/fixtures.csv"
+EK_FIKSTUR_YOLU = "/new_league_fixtures.csv"
 FIKSTUR_TTL_SANIYE = 6 * 3600  # fikstür dosyası en fazla 6 saatte bir tazelenir
 
 KULLANICI_AJANI = "iddaa-analiz/1.0"
@@ -211,7 +212,33 @@ LIGLER = {
     "G1": "Yunanistan Süper Lig",
 }
 
-# Varsayılan: tüm ligler — fikstürdeki her maçın 10 yıllık geçmişi bulunsun diye
+# football-data.co.uk "ekstra ligler": ülke başına tüm sezonları içeren tek
+# dosya (/new/{KOD}.csv) + ayrı fikstür beslemesi (new_league_fixtures.csv).
+# Yaz takvimli ligler (İskandinavya, Brezilya, ABD, Japonya...) hafta içi de
+# oynadığı için ana bülten boşken bile takvimi doldururlar.
+# Not: bu dosyalarda ilk yarı skoru, maç istatistiği ve Alt/Üst oranı yoktur.
+EK_LIGLER = {
+    "ARG": ("Argentina", "Arjantin Liga Profesional"),
+    "AUT": ("Austria", "Avusturya Bundesliga"),
+    "BRA": ("Brazil", "Brezilya Serie A"),
+    "CHN": ("China", "Çin Süper Ligi"),
+    "DNK": ("Denmark", "Danimarka Superliga"),
+    "FIN": ("Finland", "Finlandiya Veikkausliiga"),
+    "IRL": ("Ireland", "İrlanda Premier Division"),
+    "JPN": ("Japan", "Japonya J1 Ligi"),
+    "MEX": ("Mexico", "Meksika Liga MX"),
+    "NOR": ("Norway", "Norveç Eliteserien"),
+    "POL": ("Poland", "Polonya Ekstraklasa"),
+    "ROU": ("Romania", "Romanya Liga 1"),
+    "RUS": ("Russia", "Rusya Premier Lig"),
+    "SWE": ("Sweden", "İsveç Allsvenskan"),
+    "SWZ": ("Switzerland", "İsviçre Süper Ligi"),
+    "USA": ("USA", "ABD MLS"),
+}
+LIGLER.update({kod: ad for kod, (_ulke, ad) in EK_LIGLER.items()})
+EK_ULKE_KODU = {ulke: kod for kod, (ulke, _ad) in EK_LIGLER.items()}
+
+# Varsayılan: tüm ligler — fikstürdeki her maçın geçmişi bulunsun diye
 VARSAYILAN_LIGLER = list(LIGLER)
 
 # Oran kolonları için öncelik sırası: Bet365 -> Pinnacle -> piyasa ortalaması -> diğerleri.
@@ -274,6 +301,8 @@ def indir(ligler: list[str] | None = None, sezon_sayisi: int = 11, yenile: bool 
     oturum = _oturum()
 
     for lig in ligler:
+        if lig in EK_LIGLER:
+            continue  # ekstra ligler aşağıda tek dosya olarak indirilir
         for sezon in kodlar:
             hedef = os.path.join(VERI_KLASORU, f"{sezon}_{lig}.csv")
             if os.path.exists(hedef) and not yenile and sezon != guncel_kod:
@@ -301,6 +330,27 @@ def indir(ligler: list[str] | None = None, sezon_sayisi: int = 11, yenile: bool 
             except Exception as h:  # noqa: BLE001 - tek dosya hatası akışı durdurmasın
                 ozet["hata"].append(f"{lig} {sezon}: {h}")
                 print(f"  ✗ {lig} {sezon[:2]}/{sezon[2:]} indirilemedi ({h})")
+
+    # ekstra ligler: tüm sezonlar tek dosyada; sonuçlar işlendikçe değiştiği
+    # için her güncellemede tazelenir
+    for lig in ligler:
+        if lig not in EK_LIGLER:
+            continue
+        hedef = os.path.join(VERI_KLASORU, f"EK_{lig}.csv")
+        try:
+            yanit = _getir(oturum, kaynak_taban() + f"/new/{lig}.csv")
+            if yanit.status_code != 200 or b"Country" not in yanit.content[:200]:
+                raise ValueError(f"HTTP {yanit.status_code}")
+            with open(hedef, "wb") as f:
+                f.write(yanit.content)
+            ozet["indirilen"] += 1
+            print(f"  ✓ {LIGLER[lig]} arşivi indirildi")
+        except ErisimHatasi as h:
+            h.ozet = ozet
+            raise
+        except Exception as h:  # noqa: BLE001
+            ozet["hata"].append(f"{lig}: {h}")
+            print(f"  ✗ {LIGLER[lig]} indirilemedi ({h})")
     return ozet
 
 
@@ -324,9 +374,63 @@ def _tek_dosya_oku(yol: str) -> pd.DataFrame | None:
     return None
 
 
+_EK_EV_ORAN = ["PSH", "PH", "B365H", "AvgH", "PSCH", "B365CH", "AvgCH", "MaxH", "MaxCH"]
+_EK_BERABERE_ORAN = ["PSD", "PD", "B365D", "AvgD", "PSCD", "B365CD", "AvgCD", "MaxD", "MaxCD"]
+_EK_DEP_ORAN = ["PSA", "PA", "B365A", "AvgA", "PSCA", "B365CA", "AvgCA", "MaxA", "MaxCA"]
+
+
+def _ek_sezon(s) -> str:
+    s = str(s)
+    if "/" in s:  # "2025/2026" -> "2526"
+        a, b = s.split("/", 1)
+        return a[-2:] + b[-2:]
+    return s  # takvim yılı ligleri: "2026"
+
+
+def _satir_maksimum(p: pd.DataFrame, kolonlar: list[str]) -> pd.Series:
+    mevcut = [k for k in kolonlar if k in p.columns]
+    if not mevcut:
+        return pd.Series(float("nan"), index=p.index)
+    return p[mevcut].apply(pd.to_numeric, errors="coerce").max(axis=1)
+
+
+def _ek_arsiv_oku(yol: str, kod: str) -> pd.DataFrame | None:
+    """Ekstra lig arşivini (Country/League/Season/HG/AG/Res...) ana şemaya çevirir."""
+    p = _tek_dosya_oku(yol)
+    if p is None or "Res" not in p.columns:
+        return None
+    p = p.dropna(subset=["Date", "Home", "Away", "Res"]).copy()
+    c = pd.DataFrame(index=p.index)
+    c["Div"] = kod
+    c["Sezon"] = p["Season"].map(_ek_sezon) if "Season" in p.columns else "?"
+    c["Tarih"] = pd.to_datetime(p["Date"], dayfirst=True, format="mixed", errors="coerce")
+    c["HomeTeam"] = p["Home"]
+    c["AwayTeam"] = p["Away"]
+    c["FTHG"] = pd.to_numeric(p["HG"], errors="coerce")
+    c["FTAG"] = pd.to_numeric(p["AG"], errors="coerce")
+    c["FTR"] = p["Res"]
+    for k in ("HTHG", "HTAG", *ISTATISTIK_KOLONLARI):
+        c[k] = float("nan")  # ekstra dosyalarda İY skoru ve istatistik yok
+    c["oran_ev"] = _ilk_dolu_kolon(p, _EK_EV_ORAN)
+    c["oran_berabere"] = _ilk_dolu_kolon(p, _EK_BERABERE_ORAN)
+    c["oran_dep"] = _ilk_dolu_kolon(p, _EK_DEP_ORAN)
+    c["oran_ust25"] = float("nan")
+    c["oran_alt25"] = float("nan")
+    c["oran_ev_maks"] = _satir_maksimum(p, ["MaxH", "MaxCH", "PSH", "PSCH", "B365H", "B365CH", "BFEH", "BFECH"])
+    c["oran_berabere_maks"] = _satir_maksimum(p, ["MaxD", "MaxCD", "PSD", "PSCD", "B365D", "B365CD", "BFED", "BFECD"])
+    c["oran_dep_maks"] = _satir_maksimum(p, ["MaxA", "MaxCA", "PSA", "PSCA", "B365A", "B365CA", "BFEA", "BFECA"])
+    c["oran_ust25_maks"] = float("nan")
+    c["oran_alt25_maks"] = float("nan")
+    c = c.dropna(subset=["Tarih", "FTHG", "FTAG", "FTR"])
+    c["FTHG"] = c["FTHG"].astype(int)
+    c["FTAG"] = c["FTAG"].astype(int)
+    return c
+
+
 def veriyi_yukle(ligler: list[str] | None = None) -> pd.DataFrame:
     """Önbellekteki tüm CSV'leri tek bir normalize DataFrame'de birleştirir."""
     dosyalar = sorted(glob.glob(os.path.join(VERI_KLASORU, "*_*.csv")))
+    dosyalar = [d for d in dosyalar if not os.path.basename(d).startswith("EK_")]
     if ligler:
         dosyalar = [d for d in dosyalar if os.path.basename(d).split("_", 1)[1][:-4] in ligler]
     if not dosyalar:
@@ -387,7 +491,21 @@ def veriyi_yukle(ligler: list[str] | None = None) -> pd.DataFrame:
         "oran_ev_maks", "oran_berabere_maks", "oran_dep_maks",
         "oran_ust25_maks", "oran_alt25_maks",
     ]
-    return df[kolonlar].sort_values("Tarih").reset_index(drop=True)
+    parcalar = [df[kolonlar]]
+
+    # ekstra lig arşivleri (EK_*.csv) aynı şemaya çevrilip eklenir
+    for yol in sorted(glob.glob(os.path.join(VERI_KLASORU, "EK_*.csv"))):
+        kod = os.path.basename(yol)[3:-4]
+        if ligler and kod not in ligler:
+            continue
+        ek = _ek_arsiv_oku(yol, kod)
+        if ek is not None and not ek.empty:
+            parcalar.append(ek[kolonlar])
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", pd.errors.PerformanceWarning)
+        birlesik = pd.concat(parcalar, ignore_index=True)
+    return birlesik.sort_values("Tarih").reset_index(drop=True)
 
 
 def _normalize(isim: str) -> str:
@@ -463,6 +581,27 @@ def fikstur_indir(yenile: bool = False) -> str:
     return hedef
 
 
+def _fikstur_ek_indir(yenile: bool = False) -> str | None:
+    """Ekstra liglerin fikstürünü indirir; ulaşılamazsa sessizce None döner
+    (ana bülten tek başına da yeterlidir)."""
+    hedef = os.path.join(VERI_KLASORU, "fixtures_ek.csv")
+    taze = (
+        os.path.exists(hedef)
+        and not yenile
+        and time.time() - os.path.getmtime(hedef) < FIKSTUR_TTL_SANIYE
+    )
+    if not taze:
+        try:
+            yanit = _getir(_oturum(), kaynak_taban() + EK_FIKSTUR_YOLU)
+            if yanit.status_code != 200 or b"Country" not in yanit.content[:200]:
+                raise ValueError(f"HTTP {yanit.status_code}")
+            with open(hedef, "wb") as f:
+                f.write(yanit.content)
+        except Exception:  # noqa: BLE001
+            return hedef if os.path.exists(hedef) else None
+    return hedef
+
+
 def fikstur_yukle(ligler: list[str] | None = None,
                   yenile: bool = False,
                   gecmisi_at: bool = True) -> tuple[pd.DataFrame, list[str]]:
@@ -479,6 +618,18 @@ def fikstur_yukle(ligler: list[str] | None = None,
     if f is None or "Div" not in f.columns:
         raise RuntimeError("Fikstür dosyası okunamadı.")
     f = f.dropna(subset=["Div", "Date", "HomeTeam", "AwayTeam"]).copy()
+
+    # ekstra liglerin fikstürü aynı çerçeveye eklenir (Country -> Div kodu)
+    ek_yol = _fikstur_ek_indir(yenile=yenile)
+    if ek_yol:
+        e = _tek_dosya_oku(ek_yol)
+        if e is not None and "Country" in e.columns:
+            e = e.dropna(subset=["Country", "Date", "Home", "Away"]).copy()
+            e["Div"] = e["Country"].map(EK_ULKE_KODU)
+            e = e.dropna(subset=["Div"]).rename(columns={"Home": "HomeTeam", "Away": "AwayTeam"})
+            if not e.empty:
+                f = pd.concat([f, e], ignore_index=True)
+
     if ligler:
         f = f[f["Div"].isin(ligler)]
 
@@ -504,10 +655,10 @@ def fikstur_yukle(ligler: list[str] | None = None,
         for k in ("H", "D", "A"):
             f[f"{p}{k}"] = pd.to_numeric(f[f"{p}{k}"], errors="coerce")
 
-    # analiz oranı: piyasa ortalaması en sağlıklısı; yoksa Bet365, o da yoksa Max
-    f["oran_ev"] = _ilk_dolu_kolon(f, ["AvgH", "B365H", "MaxH"])
-    f["oran_berabere"] = _ilk_dolu_kolon(f, ["AvgD", "B365D", "MaxD"])
-    f["oran_dep"] = _ilk_dolu_kolon(f, ["AvgA", "B365A", "MaxA"])
+    # analiz oranı: piyasa ortalaması en sağlıklısı; yoksa Bet365/Pinnacle/Max
+    f["oran_ev"] = _ilk_dolu_kolon(f, ["AvgH", "B365H", "PSH", "MaxH"])
+    f["oran_berabere"] = _ilk_dolu_kolon(f, ["AvgD", "B365D", "PSD", "MaxD"])
+    f["oran_dep"] = _ilk_dolu_kolon(f, ["AvgA", "B365A", "PSA", "MaxA"])
     # en iyi (en yüksek) piyasa oranı: Max kolonu, yoksa kitapçıların satır maksimumu
     for uc, kolon in (("ev", "H"), ("berabere", "D"), ("dep", "A")):
         kaynaklar = [f"{p}{kolon}" for p in mevcut_kitapcilar]
