@@ -299,7 +299,15 @@ def oran_kalibi(df: pd.DataFrame, oranlar: tuple[float, float, float],
 
     ornekler = []
     if ornek_sayisi > 0:
-        for s in sec.sort_values("Tarih", ascending=False).head(ornek_sayisi).itertuples():
+        # İY skoru olan maçlar önceliklidir (ek arşiv ülkeleri İY yayınlamaz;
+        # yaz döneminde en yeni eşleşmeler hep onlardan gelip tabloyu boş bırakıyordu)
+        sirali = sec.sort_values("Tarih", ascending=False)
+        iyli = sirali.dropna(subset=["HTHG", "HTAG"]).head(ornek_sayisi)
+        eksik = ornek_sayisi - len(iyli)
+        digerleri = (sirali[~sirali.index.isin(iyli.index)].head(eksik)
+                     if eksik > 0 else sirali.iloc[0:0])
+        secilen = pd.concat([iyli, digerleri]).sort_values("Tarih", ascending=False)
+        for s in secilen.itertuples():
             iy_var = not (pd.isna(s.HTHG) or pd.isna(s.HTAG))
             ornekler.append(
                 {
