@@ -726,6 +726,41 @@ _DIS_KOD = {
 }
 
 
+AYAR_DOSYASI = os.path.join(VERI_KLASORU, "ayarlar.json")
+
+
+def ayar_oku(ad: str) -> str:
+    """Panelden kaydedilen ayarı okur (data/ayarlar.json — kalıcı diskte)."""
+    try:
+        with open(AYAR_DOSYASI, encoding="utf-8") as f:
+            return str(json.load(f).get(ad) or "").strip()
+    except (OSError, json.JSONDecodeError):
+        return ""
+
+
+def ayar_yaz(ad: str, deger: str) -> None:
+    os.makedirs(VERI_KLASORU, exist_ok=True)
+    try:
+        with open(AYAR_DOSYASI, encoding="utf-8") as f:
+            mevcut = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        mevcut = {}
+    deger = (deger or "").strip()
+    if deger:
+        mevcut[ad] = deger
+    else:
+        mevcut.pop(ad, None)
+    gecici = AYAR_DOSYASI + ".tmp"
+    with open(gecici, "w", encoding="utf-8") as f:
+        json.dump(mevcut, f)
+    os.replace(gecici, AYAR_DOSYASI)
+
+
+def gizli_anahtar(env_adi: str, ayar_adi: str) -> str:
+    """Önce ortam değişkeni, yoksa panelden kaydedilen ayar."""
+    return (os.environ.get(env_adi) or "").strip() or ayar_oku(ayar_adi)
+
+
 # geniş kapsama katmanının son deneme durumu (arayüzde öz-teşhis için)
 DIS_SON_DURUM: dict = {"zaman": None, "mac": None, "hata": None, "anahtar_var": False}
 
@@ -737,7 +772,7 @@ def dis_fikstur(gun_sayisi: int = 8, yenile: bool = False) -> pd.DataFrame | Non
     büyük liglerin maçlarını, oranlar yayınlanmadan günler önce takvime
     düşürür. Oran içermez; anahtar yoksa None döner (özellik uykuda).
     """
-    anahtar = (os.environ.get("FOOTBALL_DATA_ORG_KEY") or "").strip()
+    anahtar = gizli_anahtar("FOOTBALL_DATA_ORG_KEY", "football_data_org_key")
     DIS_SON_DURUM.update(
         {"zaman": simdi_tr().strftime("%H:%M"), "anahtar_var": bool(anahtar), "hata": None, "mac": None}
     )
@@ -756,7 +791,7 @@ def dis_fikstur(gun_sayisi: int = 8, yenile: bool = False) -> pd.DataFrame | Non
             govde = None
     if govde is None:
         if not anahtar:
-            DIS_SON_DURUM["hata"] = "FOOTBALL_DATA_ORG_KEY tanımlı değil"
+            DIS_SON_DURUM["hata"] = "anahtar tanımlı değil — aşağıdaki kutudan yapıştırın"
             return None
         bas = simdi_tr().date()
         son = (simdi_tr() + pd.Timedelta(days=gun_sayisi)).date()

@@ -47,7 +47,9 @@ KURALLAR: Yalnızca verilen rapora dayan, rakam uydurma. Veri desteklemiyorsa "k
 
 
 def yorum_al(rapor_metni: str, zaman_asimi: int = 90) -> str:
-    anahtar = os.environ.get("GEMINI_API_KEY")
+    from . import veri
+
+    anahtar = veri.gizli_anahtar("GEMINI_API_KEY", "gemini_api_key")
     if not anahtar:
         raise RuntimeError(
             "GEMINI_API_KEY ortam değişkeni tanımlı değil.\n"
