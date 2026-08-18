@@ -796,6 +796,7 @@ def uygulama_olustur():
         if not veri.gizli_anahtar("GEMINI_API_KEY", "gemini_api_key"):
             return jsonify({"hata": "Gemini anahtarı tanımlı değil (Bu Hafta sekmesindeki anahtar kutusundan veya GEMINI_API_KEY ile ekleyin)."}), 400
         govde = request.get_json(silent=True) or {}
+        ek_bolum = ""
         try:
             if govde.get("id") is not None:
                 fik, _kitapcilar = _fikstur()
@@ -808,6 +809,17 @@ def uygulama_olustur():
                     ust_alt=tuple(ust_alt) if ust_alt else None,
                     lig_ipucu=r["Div"],
                 )
+                ozet = _mac_ozeti(int(govde["id"]), r, _kitapcilar)
+                if ozet["kitapcilar"]:
+                    satirlar = [
+                        f"  {ad}: {o[0]:.2f} / {o[1]:.2f} / {o[2]:.2f}"
+                        for ad, o in ozet["kitapcilar"].items()
+                    ]
+                    if ozet["maks"]:
+                        satirlar.append(
+                            f"  En iyi (piyasa maks.): {ozet['maks'][0]:.2f} / {ozet['maks'][1]:.2f} / {ozet['maks'][2]:.2f}"
+                        )
+                    ek_bolum = "\n\n=== KİTAPÇI ORANLARI (1 / X / 2) ===\n" + "\n".join(satirlar)
             else:
                 ev = veri.takim_bul(df, str(govde.get("ev", "")))
                 dep = veri.takim_bul(df, str(govde.get("dep", "")))
@@ -816,7 +828,7 @@ def uygulama_olustur():
         except (KeyError, ValueError) as hata:
             return jsonify({"hata": f"Maç kurulamadı: {hata}"}), 404
 
-        metin = rapor.rapor_olustur(a, lig_adi=veri.LIGLER.get(a["poisson"]["lig"], ""))
+        metin = rapor.rapor_olustur(a, lig_adi=veri.LIGLER.get(a["poisson"]["lig"], "")) + ek_bolum
         try:
             from . import gemini_yorum
             return jsonify({"yorum": gemini_yorum.yorum_al(metin)})

@@ -14,32 +14,47 @@ import requests
 VARSAYILAN_MODEL = "gemini-2.5-flash"
 URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 
-PROMPT = """Sen 20 yıllık deneyime sahip profesyonel bir futbol analisti ve iddaa danışmanısın.
-Aşağıda bir maç için istatistik motorumun ürettiği rapor var: iki takımın formu,
-aralarındaki maçlar, geçmişte benzer oranla açılan maçların sonuç dağılımı (oran kalıbı),
-Poisson modelinin olasılıkları ve değer (value) analizi.
+PROMPT = """Sen üst düzey bir futbol istihbarat biriminde çalışan kıdemli maç analistisin;
+raporların bahis fonlarına satılıyor. Aşağıdaki istatistik motoru çıktısını kullanarak
+bu maç için profesyonel, bahis odaklı bir analiz raporu yaz.
 
-GÖREVİN — raporu yorumlayıp şu bölümleri yaz:
+MUTLAK KURALLAR:
+- Yalnızca verilen verilere dayan; raporda olmayan hiçbir rakam/olay uydurma
+  (sakatlık, transfer, hava durumu, motivasyon gibi dış bilgiler raporda yoksa yazma).
+- "Kesin", "garanti", "banko", "yatır" kelimeleri yasak; olasılık diliyle konuş.
+- Değer yoksa dürüstçe söyle — profesyonelliğin ölçüsü pas diyebilmektir.
+- Türkçe yaz; akıcı, kendinden emin ama ölçülü bir analist sesi kullan. 500-800 kelime.
 
-## 🎙 Maçın Hikâyesi
-2-3 paragraf profesyonel yorum: form, güç dengesi, istatistiksel eğilimler.
+BİÇİM (başlıkları aynen kullan):
 
-## 🔑 En Güçlü 3 Sinyal
-Verideki en anlamlı 3 bulguyu madde madde, rakamlarıyla açıkla.
+## 📌 Maç Künyesi
+Tek paragraf: eşleşme, lig, verinin öne çıkardığı ana hikâye.
 
-## 🎫 Kupon Önerileri
-1. En güvenli tekli (güven notu /10 + tek cümle gerekçe)
-2. Mantıklı alternatif veya kombine (güven notu /10 + gerekçe)
-3. Düşük olasılıklı ama oransal değeri olan sürpriz (güven notu /10 + gerekçe)
+## 📊 Verinin Okuması
+2-3 paragraf: güç dengesi (Elo), form ve saha kırılımı, seri notları, aralarındaki
+maçların eğilimi, gol beklentisi ve oran kalıbının anlattığı. Rakamları cümle içinde
+kullan; sinyaller çelişiyorsa çelişkiyi açıkça yaz.
 
-## 🚫 Uzak Durulmalı
-Bu maçta oynanmaması gereken seçenekler ve nedenleri.
+## 🎯 Pazar Pazar Görüş
+Her satır: Görüş — güven (1-5 yıldız) — tek cümle gerekçe.
+- Maç Sonucu (1X2):
+- Çifte Şans:
+- Alt/Üst 2.5:
+- Karşılıklı Gol:
+- Skor bandı (en olası 2-3 skor):
 
-## ⚖️ Kapanış
-İki cümlelik özet + kısa sorumlu bahis hatırlatması.
+## 🎫 Kupon Masası
+1) GÜVENLİ TEKLİ — seçim (+oran varsa) · güven X/10 · kasa payı önerisi (%1-2) · gerekçe
+2) DEĞER OYUNU — değer analizinin işaret ettiği seçim; değer yoksa "bu maçta değer yok" yaz
+3) KOMBİNE FİKRİ — bu maçtan iki pazarın mantıklı birleşimi ve hangi tip kupona uyacağı
+Değerli hiçbir şey yoksa üçünü de zorlamak yerine "izlemelik maç" kararını savun.
 
-KURALLAR: Yalnızca verilen rapora dayan, rakam uydurma. Veri desteklemiyorsa "kesin",
-"garanti" gibi ifadeler kullanma. Türkçe yaz.
+## ⚠️ Riskler ve Uzak Durulacaklar
+Madde madde: çelişen sinyaller, küçük örneklemler, sürpriz oran tuzağına girenler,
+bu maçta oynanmaması gereken pazarlar.
+
+## 🧾 Kapanış
+İki cümle özet + tek cümle sorumlu oyun notu.
 
 === İSTATİSTİK RAPORU ===
 {rapor}
@@ -61,7 +76,7 @@ def yorum_al(rapor_metni: str, zaman_asimi: int = 90) -> str:
 
     govde = {
         "contents": [{"parts": [{"text": PROMPT.format(rapor=rapor_metni)}]}],
-        "generationConfig": {"temperature": 0.4},
+        "generationConfig": {"temperature": 0.55, "maxOutputTokens": 4096},
     }
     yanit = requests.post(
         URL.format(model=model), params={"key": anahtar}, json=govde, timeout=zaman_asimi
