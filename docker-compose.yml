@@ -37,6 +37,11 @@ services:
       # Şampiyonlar Ligi (elemeler dahil) ve büyük liglerin maçları oranlar
       # yayınlanmadan günler önce takvime düşer (oransız, analizli).
       - FOOTBALL_DATA_ORG_KEY=${FOOTBALL_DATA_ORG_KEY:-}
+      # Opsiyonel gerçek İY/MS piyasa oranları: odds-api.io ücretsiz anahtarı
+      # (https://odds-api.io — günde 500 istek). Tanımlanırsa Sürpriz Radarı
+      # Bet365'in İY/MS oranlarını otomatik çekip değer hükmünü kendisi verir.
+      # Panelden de (🎭 sekmesindeki anahtar kutusu) kaydedilebilir.
+      - ODDS_API_IO_KEY=${ODDS_API_IO_KEY:-}
     volumes:
       - iddaa-veri:/app/data
     healthcheck:

@@ -335,6 +335,8 @@
         <b>MS dağılımı</b> (1-X-2) yazar — çapraz sinyal ile maç sonucu eğilimini birlikte okuyun.
         İki kaynak harmanlanır: yarı-bazlı Poisson modeli +
         <b>birebir aynı oranlarla açılmış geçmiş maçlarda bu kombinasyonların gerçekte kaç kez geldiği</b>.
+        odds-api.io anahtarı girilirse <b>Bet365'in gerçek İY/MS oranları</b> her hücreye otomatik düşer ve
+        sistem adil oranla kıyaslayıp değer hükmünü (✅/🟡/❌) kendisi verir.
         Eşleşme ham oran düzeyindedir: geçmiş maçın <b>üç açılış oranı da</b> bu maçınkine ±0.05 yakın olmalı
         (örnek yetersizse ±0.10 → ±0.15 → ±0.25 kademeli genişler; kullanılan eşik kartta yazar). Her kartta
         <b>📜 Oran Kanıtı</b> düğmesi, eşleşen maçları hem 1X2 hem de <b>türetilmiş İY/MS oranlarıyla</b> listeler —
@@ -347,6 +349,13 @@
       </div>
       <div class="gun-pilleri" id="sr-pilleri"></div>
       <button class="btn" id="btn-surpriz" onclick="surprizTara()">🎭 Radarı Çalıştır</button>
+      <div id="sr-anahtar" style="display:none;margin-top:12px" class="form-satir">
+        <div class="alan" style="flex:1;min-width:220px">
+          <label>🔑 odds-api.io anahtarı — Bet365'in <b>gerçek İY/MS oranlarını</b> otomatik çeker ve değer hükmünü kendisi verir (ücretsiz anahtar: odds-api.io, 30 saniye)</label>
+          <input id="oa-anahtar" type="password" placeholder="anahtarı buraya yapıştır" autocomplete="off">
+        </div>
+        <button class="btn ikincil" id="btn-oa" onclick="oaAnahtarKaydet()">💾 Kaydet ve Tara</button>
+      </div>
     </div>
     <div id="surpriz-sonuc"></div>
   </section>
@@ -1168,10 +1177,17 @@ function srHucre(ad, k, yildiz){
   if(!k) return '';
   const kanit = k.kalip_n ? `Birebir oranlı ${k.kalip_n} geçmiş maçta ${k.kalip_adet} kez geldi` : 'birebir kalıp verisi yok';
   const sinif = 'sr-hucre' + (yildiz ? ' yildiz' : (SR_NORMAL.includes(ad) ? ' normal' : ''));
+  let piyasa = '';
+  if(k.piyasa){
+    const renk = k.ev >= 0.03 ? 'var(--yesil)' : (k.ev >= 0 ? 'var(--sari)' : 'var(--kirmizi)');
+    piyasa = `<div class="adil" style="color:${renk};font-weight:800"
+      title="beklenen değer ${k.ev >= 0 ? '+' : ''}${(k.ev*100).toFixed(1)}%">B365 ${k.piyasa.toFixed(2)}</div>`;
+  }
   return `<div class="${sinif}" title="${kanit}">
     <div class="ad">${yildiz ? '⭐ ' : ''}${ad}</div>
     <div class="p">%${(k.p * 100).toFixed(1)}</div>
     <div class="adil">${k.adil_oran ? 'adil ' + k.adil_oran : '—'}</div>
+    ${piyasa}
   </div>`;
 }
 
@@ -1195,6 +1211,12 @@ function srCiz(){
     const kanit = (m.kalip && k.kalip_n)
       ? `Birebir oran kanıtı (±${m.kalip.esik.toFixed(2)}): <b>${m.kalip.hedef.map(x => x.toFixed(2)).join(' / ')}</b> oranlarıyla açılmış ${k.kalip_n} maçın ${k.kalip_adet}'i ${enIyi} bitti.${srMsMetni(m.kalip)}`
       : (m.oranli ? 'Bu oranlarla birebir eşleşen yeterli geçmiş maç yok — yalnız model konuşuyor.' : '');
+    const karar = k.piyasa
+      ? `<div class="ipucu" style="margin-bottom:8px">💰 <b>${esc(m.piyasa.kitapci)}</b> şu an ${enIyi} için
+         <b>${k.piyasa.toFixed(2)}</b> veriyor (adil ${k.adil_oran || '—'}) → beklenen değer
+         <b class="${k.ev >= 0 ? 'ev-poz' : 'ev-neg'}">${k.ev >= 0 ? '+' : ''}${(k.ev*100).toFixed(1)}%</b>
+         ${k.ev >= 0.05 ? '✅ değer var' : (k.ev >= 0 ? '🟡 sınırda' : '❌ bu fiyattan değersiz')}</div>`
+      : '';
     const tacYorum = (i === 0 && m.kalip && k.kalip_n)
       ? `<div class="ipucu" style="margin-bottom:8px">👑 <b>Günün odak eşleşmesi:</b> model + birebir oran tarihi birlikte en güçlü çapraz sinyali bu maçta veriyor.
          ⭐ ${enIyi} için harman olasılık %${(k.p*100).toFixed(1)} → adil oran ${k.adil_oran || '—'}; geçmişte aynı oranlarla ${k.kalip_n} maçta ${k.kalip_adet} kez gerçekleşti
@@ -1207,7 +1229,8 @@ function srCiz(){
       </div>
       <div class="sr-grid">${SR_SIRA.map(ad => srHucre(ad, m.kombolar[ad], ad === enIyi)).join('')}</div>
       ${tacYorum}
-      ${kanit ? `<div class="ipucu" style="margin-bottom:8px">${kanit} Bülteninizde ${enIyi} oranı ${k.adil_oran ? `adil oran ${k.adil_oran}'in` : 'adil oranın'} üzerindeyse matematiksel değer var demektir.</div>` : ''}
+      ${karar}
+      ${kanit ? `<div class="ipucu" style="margin-bottom:8px">${kanit}${karar ? '' : ` Bülteninizde ${enIyi} oranı ${k.adil_oran ? `adil oran ${k.adil_oran}'in` : 'adil oranın'} üzerindeyse matematiksel değer var demektir.`}</div>` : ''}
       ${srDegerHTML(m, i, enIyi)}
       <div class="sr-alt">
         ${m.ornekler.length ? `<button class="mini-btn" onclick="srGecmisAc(${i})">📜 Oran Kanıtı</button>` : ''}
@@ -1216,17 +1239,41 @@ function srCiz(){
       ${m.ornekler.length ? srGecmisHTML(m, i) : ''}
     </div>`;
   }).join('');
+  liste.forEach((m, i) => { const g = $('#sr-oran-' + i); if(g && g.value) srDeger(i); });
+  const kutu = $('#sr-anahtar');
+  if(kutu) kutu.style.display = liste.some(m => m.piyasa) ? 'none' : '';
+}
+
+function srSecimDegisti(i){
+  const m = (SR_SONUCLAR[AKTIF_SR_GUN] || [])[i]; if(!m) return;
+  const piyasa = (m.kombolar[$('#sr-sec-' + i).value] || {}).piyasa;
+  if(piyasa) $('#sr-oran-' + i).value = piyasa;
+  srDeger(i);
+}
+
+async function oaAnahtarKaydet(){
+  const deger = $('#oa-anahtar').value.trim();
+  if(!deger){ bildir('Önce anahtarı yapıştırın.', true); return; }
+  const b = $('#btn-oa'); b.disabled = true; b.textContent = '⏳ Deneniyor…';
+  try{
+    await api('/api/ayarlar', {odds_api_io_key: deger});
+    $('#oa-anahtar').value = '';
+    bildir('Anahtar kaydedildi — Bet365 İY/MS oranları çekiliyor…');
+    await surprizTara();
+  }catch(h){ bildir(h.message, true); }
+  b.disabled = false; b.textContent = '💾 Kaydet ve Tara';
 }
 
 function srDegerHTML(m, i, enIyi){
-  // İY/MS piyasa oranları ücretsiz kaynaklarda tarihsel olarak yok;
-  // kullanıcı bülten oranını girer, sistem adil oranla kıyaslar.
+  // Bet365 oranı otomatik gelirse ön-dolar; kullanıcı kendi bülten
+  // oranını yazarak Türkiye fiyatıyla da kıyaslayabilir.
   const sec = SR_ODAK.map(ad =>
     `<option value="${ad}" ${ad === enIyi ? 'selected' : ''}>${ad}</option>`).join('');
+  const hazir = (m.kombolar[enIyi] || {}).piyasa || '';
   return `<div class="sr-alt" style="margin-bottom:8px">
-    <span class="ipucu">Bülten İY/MS oranını girin:</span>
-    <select id="sr-sec-${i}" onchange="srDeger(${i})" style="width:auto;padding:8px 10px">${sec}</select>
-    <input id="sr-oran-${i}" type="number" step="0.01" min="1.01" inputmode="decimal"
+    <span class="ipucu">Bülten İY/MS oranı${hazir ? ' (B365 ön-dolu)' : 'nı girin'}:</span>
+    <select id="sr-sec-${i}" onchange="srSecimDegisti(${i})" style="width:auto;padding:8px 10px">${sec}</select>
+    <input id="sr-oran-${i}" type="number" step="0.01" min="1.01" inputmode="decimal" value="${hazir}"
       placeholder="ör. 22.50" style="width:100px;padding:8px 10px" oninput="srDeger(${i})">
     <span id="sr-ev-${i}" class="ipucu"></span>
   </div>`;

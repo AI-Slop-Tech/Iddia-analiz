@@ -859,3 +859,218 @@ def takim_listesi(df: pd.DataFrame, lig: str | None = None) -> pd.DataFrame:
         .reset_index()
     )
     return ozet
+
+
+# ---------------------------------------------------------- odds-api.io: gerçek İY/MS piyasa oranları
+
+ODDSAPI_TABAN = "https://api.odds-api.io/v3"
+ODDSAPI_KITAPCI = "Bet365"
+_ODDSAPI_ORAN_TTL = 6 * 3600     # maç başı oran önbelleği
+_ODDSAPI_MAC_TTL = 12 * 3600     # lig fikstürü önbelleği
+_ODDSAPI_LIG_TTL = 24 * 3600     # lig listesi önbelleği
+
+# öz-teşhis (arayüz "piyasa oranı neden yok" diyebilsin)
+IYMS_SON_DURUM: dict = {"zaman": None, "hata": None, "anahtar_var": False}
+
+# Div kodu → odds-api.io lig adı ön eki (kaynağın gerçek adlandırmasıyla;
+# karşılaştırma noktalama/boşluk bağımsız yapılır, ör. "LaLiga" ↔ "La Liga")
+_ODDSAPI_LIG_IPUCU = {
+    "E0": "England - Premier League", "E1": "England - Championship",
+    "E2": "England - League One", "E3": "England - League Two",
+    "EC": "England - National League",
+    "SC0": "Scotland - Premiership", "SC1": "Scotland - Championship",
+    "SC2": "Scotland - League One", "SC3": "Scotland - League Two",
+    "D1": "Germany - Bundesliga", "D2": "Germany - 2. Bundesliga",
+    "I1": "Italy - Serie A", "I2": "Italy - Serie B",
+    "SP1": "Spain - LaLiga", "SP2": "Spain - LaLiga 2",
+    "F1": "France - Ligue 1", "F2": "France - Ligue 2",
+    "N1": "Netherlands - Eredivisie", "B1": "Belgium - First Division A",
+    "P1": "Portugal - Liga Portugal", "T1": "Turkiye - Super Lig",
+    "G1": "Greece - Super League",
+    "ARG": "Argentina - Primera LPF", "AUT": "Austria - Bundesliga",
+    "BRA": "Brazil - Brasileiro Serie A", "CHN": "China - Chinese Super League",
+    "DNK": "Denmark - Superligaen", "FIN": "Finland - Veikkausliiga",
+    "IRL": "Ireland - Premier Division", "JPN": "Japan - J-League",
+    "MEX": "Mexico - Liga MX", "NOR": "Norway - Eliteserien",
+    "POL": "Poland - Ekstraklasa", "ROU": "Romania - Superliga",
+    "RUS": "Russia - Premier League", "SWE": "Sweden - Allsvenskan",
+    "SWZ": "Switzerland - Super League", "USA": "USA - MLS",
+    "ŞL": "International Clubs - UEFA Champions League",
+}
+_ODDSAPI_DISLA = ("women", "u17", "u19", "u20", "u21", "u23", "reserve", "youth", "amateur")
+
+_IYMS_ETIKET = {
+    "Home / Home": "1/1", "Home / Draw": "1/0", "Home / Away": "1/2",
+    "Draw / Home": "0/1", "Draw / Draw": "0/0", "Draw / Away": "0/2",
+    "Away / Home": "2/1", "Away / Draw": "2/0", "Away / Away": "2/2",
+}
+
+
+def _oddsapi_anahtar() -> str:
+    return gizli_anahtar("ODDS_API_IO_KEY", "odds_api_io_key")
+
+
+def _oddsapi_getir(yol: str, parametreler: dict):
+    parametreler = dict(parametreler, apiKey=_oddsapi_anahtar())
+    yanit = requests.get(
+        ODDSAPI_TABAN + yol, params=parametreler,
+        headers={"User-Agent": KULLANICI_AJANI}, timeout=ZAMAN_ASIMI,
+    )
+    yanit.raise_for_status()
+    govde = yanit.json()
+    if isinstance(govde, dict) and govde.get("error"):
+        raise RuntimeError(str(govde["error"]))
+    return govde
+
+
+def _oddsapi_onbellek(ad: str) -> dict:
+    try:
+        with open(os.path.join(VERI_KLASORU, ad), encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _oddsapi_onbellek_yaz(ad: str, veri_sozlugu: dict) -> None:
+    os.makedirs(VERI_KLASORU, exist_ok=True)
+    yol = os.path.join(VERI_KLASORU, ad)
+    with open(yol + ".tmp", "w", encoding="utf-8") as f:
+        json.dump(veri_sozlugu, f, ensure_ascii=False)
+    os.replace(yol + ".tmp", yol)
+
+
+def _oddsapi_ligler() -> list:
+    onbellek = _oddsapi_onbellek("oddsapi_ligler.json")
+    if onbellek.get("veri") and time.time() - onbellek.get("zaman", 0) < _ODDSAPI_LIG_TTL:
+        return onbellek["veri"]
+    ligler = _oddsapi_getir("/leagues", {"sport": "football"})
+    _oddsapi_onbellek_yaz("oddsapi_ligler.json", {"zaman": time.time(), "veri": ligler})
+    return ligler
+
+
+def _oddsapi_maclar(slug: str) -> list:
+    onbellek = _oddsapi_onbellek("oddsapi_maclar.json")
+    kayit = onbellek.get(slug)
+    if kayit and time.time() - kayit.get("zaman", 0) < _ODDSAPI_MAC_TTL:
+        return kayit["veri"]
+    maclar = _oddsapi_getir("/events", {"sport": "football", "league": slug})
+    onbellek[slug] = {"zaman": time.time(), "veri": maclar}
+    # eski ligleri buda ki dosya şişmesin
+    for eski in [k for k, v in onbellek.items()
+                 if time.time() - v.get("zaman", 0) > 3 * _ODDSAPI_MAC_TTL]:
+        onbellek.pop(eski, None)
+    _oddsapi_onbellek_yaz("oddsapi_maclar.json", onbellek)
+    return maclar
+
+
+_TAKIM_GENEL_EK = {
+    "cf", "fc", "cd", "ca", "ac", "afc", "cfc", "sc", "club", "clube", "cp",
+    "de", "the", "fk", "if", "bk", "sk", "ff", "aif", "calcio", "deportivo",
+}
+
+
+_TAKIM_HARF_CEVRIM = str.maketrans(
+    {"ç": "c", "ğ": "g", "ı": "i", "ö": "o", "ş": "s", "ü": "u",
+     "á": "a", "é": "e", "í": "i", "ó": "o", "ú": "u", "à": "a", "â": "a",
+     "ã": "a", "ê": "e", "ô": "o", "û": "u", "ñ": "n", "ß": "ss"}
+)
+
+
+def _oddsapi_takim_parcalari(ad: str) -> set[str]:
+    duz = str(ad).lower().translate(_TAKIM_HARF_CEVRIM)
+    duz = re.sub(r"[^a-z0-9 ]", " ", duz)
+    parcalar = {p for p in duz.split() if len(p) > 1 and p not in _TAKIM_GENEL_EK}
+    return parcalar or ({duz.strip()} if duz.strip() else set())
+
+
+def _oddsapi_takim_puani(bizim: str, onlarin: str) -> float:
+    A, B = _oddsapi_takim_parcalari(bizim), _oddsapi_takim_parcalari(onlarin)
+    if not A or not B:
+        return 0.0
+    kesisim = len(A & B)
+    if kesisim:
+        return kesisim / min(len(A), len(B))
+    return difflib.SequenceMatcher(None, " ".join(sorted(A)), " ".join(sorted(B))).ratio()
+
+
+def _oddsapi_iyms_cek(mac_id: int) -> dict | None:
+    onbellek = _oddsapi_onbellek("oddsapi_iyms.json")
+    kayit = onbellek.get(str(mac_id))
+    if kayit and time.time() - kayit.get("zaman", 0) < _ODDSAPI_ORAN_TTL:
+        return kayit["veri"] or None
+    govde = _oddsapi_getir("/odds", {"eventId": mac_id, "bookmakers": ODDSAPI_KITAPCI})
+    sonuc = None
+    for pazar in (govde.get("bookmakers") or {}).get(ODDSAPI_KITAPCI, []):
+        if pazar.get("name") != "Half Time / Full Time":
+            continue
+        kombolar = {}
+        for satir in pazar.get("odds", []):
+            anahtar = _IYMS_ETIKET.get(satir.get("label"))
+            try:
+                oran = float(satir.get("odds"))
+            except (TypeError, ValueError):
+                continue
+            if anahtar and oran > 1:
+                kombolar[anahtar] = oran
+        if kombolar:
+            sonuc = {"kombolar": kombolar, "kitapci": ODDSAPI_KITAPCI,
+                     "guncel": str(pazar.get("updatedAt", ""))[:16].replace("T", " ")}
+        break
+    onbellek[str(mac_id)] = {"zaman": time.time(), "veri": sonuc}
+    for eski in [k for k, v in onbellek.items()
+                 if time.time() - v.get("zaman", 0) > 4 * _ODDSAPI_ORAN_TTL]:
+        onbellek.pop(eski, None)
+    _oddsapi_onbellek_yaz("oddsapi_iyms.json", onbellek)
+    return sonuc
+
+
+def iyms_piyasa(ev: str, dep: str, lig_kodu: str, tarih: pd.Timestamp) -> dict | None:
+    """Bir bülten maçı için Bet365'in gerçek İY/MS oranları (odds-api.io).
+
+    Anahtar yoksa None döner (özellik uykuda). Lig, ada göre eşlenir; maç,
+    takım adı benzerliği + tarih yakınlığıyla bulunur. Tüm ağ sonuçları
+    diskte önbelleklenir — günlük ücretsiz istek bütçesi (500) rahat yeter.
+    """
+    IYMS_SON_DURUM.update(
+        {"zaman": simdi_tr().strftime("%H:%M"), "anahtar_var": bool(_oddsapi_anahtar()), "hata": None}
+    )
+    if not IYMS_SON_DURUM["anahtar_var"]:
+        return None
+    ipucu = _ODDSAPI_LIG_IPUCU.get(str(lig_kodu))
+    if not ipucu:
+        return None
+    try:
+        def _duz(s: str) -> str:
+            return re.sub(r"[^a-z0-9]", "", str(s).lower())
+
+        ipucu_duz = _duz(ipucu)
+        adaylar = sorted(
+            (
+                l for l in _oddsapi_ligler()
+                if _duz(l.get("name", "")).startswith(ipucu_duz)
+                and not any(d in str(l.get("name", "")).lower() for d in _ODDSAPI_DISLA)
+            ),
+            key=lambda l: len(str(l.get("name", ""))),  # en kısa (en birebir) ad önce
+        )
+        hedef_utc = pd.Timestamp(tarih) - pd.Timedelta(hours=3)  # TR → UTC
+        en_mac, en_puan = None, 0.0
+        for lig in adaylar[:5]:
+            for m in _oddsapi_maclar(lig["slug"]):
+                if m.get("status") == "settled":
+                    continue
+                try:
+                    mac_utc = pd.Timestamp(str(m.get("date", "")).replace("Z", ""))
+                except ValueError:
+                    continue
+                if abs((mac_utc - hedef_utc).total_seconds()) > 36 * 3600:
+                    continue
+                puan = min(_oddsapi_takim_puani(ev, m.get("home", "")),
+                           _oddsapi_takim_puani(dep, m.get("away", "")))
+                if puan > en_puan:
+                    en_mac, en_puan = m, puan
+        if en_mac is None or en_puan < 0.5:
+            return None
+        return _oddsapi_iyms_cek(int(en_mac["id"]))
+    except Exception as hata:  # noqa: BLE001 — ağ/format hataları özelliği durdurmasın
+        IYMS_SON_DURUM["hata"] = str(hata)[:200]
+        return None
