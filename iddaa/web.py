@@ -57,6 +57,12 @@ def _bakim_dongusu() -> None:
         try:
             if _DURUM["df"] is not None and time.time() - _DURUM["arsiv_zaman"] > ARSIV_YENILEME_ARALIGI:
                 veri.indir()
+                # İY hasadı: ek ülke liglerinin ilk yarı skorları yan kaynaklardan
+                # toplanıp kalıcı depoya eklenir; ardından yeniden yüklenen arşive işlenir.
+                try:
+                    veri.iy_hasadi()
+                except Exception:  # noqa: BLE001
+                    pass
                 _df(zorla=True)
                 _DURUM["fikstur"] = None  # yeni veriyle yeniden okunsun
         except Exception:  # noqa: BLE001 - bakım hatası servisi düşürmesin
@@ -361,6 +367,10 @@ def uygulama_olustur():
             ozet = veri.indir(govde.get("ligler"))
         except veri.ErisimHatasi as hata:
             return jsonify({"hata": str(hata), "indirilen": hata.ozet.get("indirilen", 0)}), 502
+        try:
+            veri.iy_hasadi()  # ek ülke İY skorları yan kaynaklardan depoya
+        except Exception:  # noqa: BLE001
+            pass
         try:
             _df(zorla=True)
         except FileNotFoundError:
