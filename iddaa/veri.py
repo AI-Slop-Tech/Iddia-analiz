@@ -864,7 +864,10 @@ def takim_listesi(df: pd.DataFrame, lig: str | None = None) -> pd.DataFrame:
 # ---------------------------------------------------------- odds-api.io: gerçek İY/MS piyasa oranları
 
 ODDSAPI_TABAN = "https://api.odds-api.io/v3"
-ODDSAPI_KITAPCI = "Bet365"
+# Ücretsiz pakette hesap başına 2 kitapçı seçilebiliyor; bu hesapta kilitli ikili.
+# İY/MS pazarını fiilen Bet365, korner baremlerini 1xbet taşıyor — her pazar için
+# ikisinden en iyi fiyat alınır.
+ODDSAPI_KITAPCILAR = "Bet365,1xbet"
 _ODDSAPI_ORAN_TTL = 6 * 3600     # maç başı oran önbelleği
 _ODDSAPI_MAC_TTL = 12 * 3600     # lig fikstürü önbelleği
 _ODDSAPI_LIG_TTL = 24 * 3600     # lig listesi önbelleği
@@ -996,29 +999,58 @@ def _oddsapi_takim_puani(bizim: str, onlarin: str) -> float:
     return difflib.SequenceMatcher(None, " ".join(sorted(A)), " ".join(sorted(B))).ratio()
 
 
+def _oddsapi_oranlari_isle(govde: dict) -> dict | None:
+    """İki kitapçının yanıtından İY/MS (kombo başına en iyi fiyat) + korner baremi."""
+    kombolar: dict[str, float] = {}
+    kombo_kitapci: dict[str, str] = {}
+    korner = korner_kitapci = None
+    guncel = ""
+    for kitapci, pazarlar in (govde.get("bookmakers") or {}).items():
+        if "(no latency)" in kitapci:
+            continue
+        for pazar in pazarlar:
+            ad = pazar.get("name")
+            if ad == "Half Time / Full Time":
+                guncel = guncel or str(pazar.get("updatedAt", ""))[:16].replace("T", " ")
+                for satir in pazar.get("odds", []):
+                    k = _IYMS_ETIKET.get(satir.get("label"))
+                    try:
+                        oran = float(satir.get("odds"))
+                    except (TypeError, ValueError):
+                        continue
+                    if k and oran > 1 and oran > kombolar.get(k, 0.0):
+                        kombolar[k] = oran
+                        kombo_kitapci[k] = kitapci
+            elif ad == "Corners Totals":
+                basamaklar = []
+                for satir in pazar.get("odds", []):
+                    try:
+                        basamaklar.append({"cizgi": float(satir.get("hdp")),
+                                           "ust": float(satir.get("over")),
+                                           "alt": float(satir.get("under"))})
+                    except (TypeError, ValueError):
+                        continue
+                if basamaklar and (korner is None or len(basamaklar) > len(korner)):
+                    korner, korner_kitapci = basamaklar, kitapci
+    if not kombolar and not korner:
+        return None
+    kitapci_ana = None
+    if kombo_kitapci:
+        adlar = list(kombo_kitapci.values())
+        kitapci_ana = max(set(adlar), key=adlar.count)
+    return {"kombolar": kombolar, "kombo_kitapci": kombo_kitapci, "kitapci": kitapci_ana,
+            "guncel": guncel, "korner": korner, "korner_kitapci": korner_kitapci}
+
+
 def _oddsapi_iyms_cek(mac_id: int) -> dict | None:
     onbellek = _oddsapi_onbellek("oddsapi_iyms.json")
     kayit = onbellek.get(str(mac_id))
-    if kayit and time.time() - kayit.get("zaman", 0) < _ODDSAPI_ORAN_TTL:
+    taze = kayit and time.time() - kayit.get("zaman", 0) < _ODDSAPI_ORAN_TTL
+    eski_bicim = kayit and kayit.get("veri") and "kombo_kitapci" not in kayit["veri"]
+    if taze and not eski_bicim:
         return kayit["veri"] or None
-    govde = _oddsapi_getir("/odds", {"eventId": mac_id, "bookmakers": ODDSAPI_KITAPCI})
-    sonuc = None
-    for pazar in (govde.get("bookmakers") or {}).get(ODDSAPI_KITAPCI, []):
-        if pazar.get("name") != "Half Time / Full Time":
-            continue
-        kombolar = {}
-        for satir in pazar.get("odds", []):
-            anahtar = _IYMS_ETIKET.get(satir.get("label"))
-            try:
-                oran = float(satir.get("odds"))
-            except (TypeError, ValueError):
-                continue
-            if anahtar and oran > 1:
-                kombolar[anahtar] = oran
-        if kombolar:
-            sonuc = {"kombolar": kombolar, "kitapci": ODDSAPI_KITAPCI,
-                     "guncel": str(pazar.get("updatedAt", ""))[:16].replace("T", " ")}
-        break
+    govde = _oddsapi_getir("/odds", {"eventId": mac_id, "bookmakers": ODDSAPI_KITAPCILAR})
+    sonuc = _oddsapi_oranlari_isle(govde)
     onbellek[str(mac_id)] = {"zaman": time.time(), "veri": sonuc}
     for eski in [k for k, v in onbellek.items()
                  if time.time() - v.get("zaman", 0) > 4 * _ODDSAPI_ORAN_TTL]:

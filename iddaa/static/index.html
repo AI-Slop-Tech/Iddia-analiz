@@ -787,7 +787,7 @@ async function detayToggle(id, kaydir){
   kutu.innerHTML = '<div class="detay-panel yukleniyor">⏳ Maç analiz ediliyor…</div>';
   try{
     const s = await api('/api/mac-detay?id=' + id);
-    kutu.innerHTML = `<div class="detay-panel">${kitapciHTML(s)}${takimSonucHTML(s, {id})}${tahminDetayHTML(s)}</div>`;
+    kutu.innerHTML = `<div class="detay-panel">${kitapciHTML(s)}${takimSonucHTML(s, {id})}${kornerHTML(s)}${tahminDetayHTML(s)}</div>`;
   }catch(h){
     kutu.innerHTML = `<div class="detay-panel"><span class="ev-neg">${esc(h.message)}</span></div>`;
   }
@@ -885,6 +885,41 @@ function tabloDetay(id){
   sekmeAc('hafta');
   if(AKTIF_GUN !== AKTIF_TABLO_GUN) gunSec(AKTIF_TABLO_GUN);
   detayToggle(id, true);
+}
+
+function kitapciKisa(ad){ return ad === '1xbet' ? '1xB' : String(ad || 'B365').replace('Bet365', 'B365'); }
+
+function kornerHTML(s){
+  const c = s.korner;
+  if(!c || (!c.model && !c.piyasa && !c.kalip)) return '';
+  const m = c.model;
+  const ustRozet = m ? Object.entries(m.ustler).map(([cz, p]) => rozet('Üst ' + cz, pct(p))).join('') : '';
+  const kalip = c.kalip
+    ? `<div class="ipucu" style="margin-top:6px">📜 Birebir oranlı geçmiş <b>${c.kalip.n}</b> maçta ortalama
+       <b>${c.kalip.ort}</b> korner · Üst 9.5 gerçekleşme %${(c.kalip.ust95 * 100).toFixed(0)}.</div>` : '';
+  const evKutu = v => v == null ? '—' : `<b class="${v >= 0 ? 'ev-poz' : 'ev-neg'}">${v >= 0 ? '+' : ''}${(v*100).toFixed(1)}%</b>`;
+  const tablo = (c.piyasa && c.piyasa.barem && c.piyasa.barem.length)
+    ? `<div class="ipucu" style="margin-top:8px"><b>${esc(kitapciKisa(c.piyasa.kitapci))}</b> korner baremi — model olasılığı ve beklenen değerle (✅ pozitifse matematik sizden yana):</div>
+      <div style="overflow-x:auto"><table>
+        <tr><th class="orta">Çizgi</th><th class="orta">Üst</th><th class="orta">Alt</th><th class="orta">Model Üst</th><th class="orta">EV Üst</th><th class="orta">EV Alt</th></tr>
+        ${c.piyasa.barem.map(b => `<tr>
+          <td class="orta"><b>${b.cizgi}</b></td>
+          <td class="orta">${b.ust.toFixed(2)}</td><td class="orta">${b.alt.toFixed(2)}</td>
+          <td class="orta">${b.p_ust != null ? '%' + (b.p_ust * 100).toFixed(0) : '—'}</td>
+          <td class="orta">${evKutu(b.ev_ust)}</td><td class="orta">${evKutu(b.ev_alt)}</td>
+        </tr>`).join('')}
+      </table></div>` : '';
+  return `<div class="kart">
+    <h2>🚩 Korner Analizi</h2>
+    ${m ? `<div class="alt-baslik">Model beklentisi: toplam <b>${m.toplam}</b> korner
+        (${esc(s.ev)} <b>${m.ev}</b> – <b>${m.dep}</b> ${esc(s.dep)}) · lig ortalaması ${m.lig_ort} ·
+        örneklem: ev ${m.n_ev} / dep ${m.n_dep} maç.</div>
+      <div class="rozetler">${ustRozet}</div>`
+      : '<div class="alt-baslik">Bu takımlar için yeterli korner verisi yok (ek arşiv liglerinde korner istatistiği yayınlanmıyor).</div>'}
+    ${kalip}
+    ${tablo}
+    <div class="not">Korner dağılımı Poisson'dan daha oynaktır; olasılıklar yaklaşıktır — en sağlıklı okuma modelin toplamına yakın çizgilerdedir.</div>
+  </div>`;
 }
 
 function tahminDetayHTML(s){
@@ -1210,7 +1245,7 @@ function srHucre(ad, k, yildiz){
     const renk = k.ev == null ? 'var(--soluk)'
       : (k.ev >= 0.03 ? 'var(--yesil)' : (k.ev >= 0 ? 'var(--sari)' : 'var(--kirmizi)'));
     piyasa = `<div class="adil" style="color:${renk};font-weight:800"
-      title="${k.ev == null ? 'model olasılığı yok — yalnız fiyat' : `beklenen değer ${k.ev >= 0 ? '+' : ''}${(k.ev*100).toFixed(1)}%`}">B365 ${k.piyasa.toFixed(2)}</div>`;
+      title="${k.ev == null ? 'model olasılığı yok — yalnız fiyat' : `beklenen değer ${k.ev >= 0 ? '+' : ''}${(k.ev*100).toFixed(1)}%`}">${kitapciKisa(k.kitapci)} ${k.piyasa.toFixed(2)}</div>`;
   }
   return `<div class="${sinif}" title="${kanit}">
     <div class="ad">${yildiz ? '⭐ ' : ''}${ad}</div>
@@ -1316,7 +1351,7 @@ function srDegerHTML(m, i, enIyi){
     `<option value="${ad}" ${ad === enIyi ? 'selected' : ''}>${ad}</option>`).join('');
   const hazir = (m.kombolar[enIyi] || {}).piyasa || '';
   return `<div class="sr-alt" style="margin-bottom:8px">
-    <span class="ipucu">Bülten İY/MS oranı${hazir ? ' (B365 ön-dolu)' : 'nı girin'}:</span>
+    <span class="ipucu">Bülten İY/MS oranı${hazir ? ' (piyasa ön-dolu)' : 'nı girin'}:</span>
     <select id="sr-sec-${i}" onchange="srSecimDegisti(${i})" style="width:auto;padding:8px 10px">${sec}</select>
     <input id="sr-oran-${i}" type="number" step="0.01" min="1.01" inputmode="decimal" value="${hazir}"
       placeholder="ör. 22.50" style="width:100px;padding:8px 10px" oninput="srDeger(${i})">
