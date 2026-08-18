@@ -674,8 +674,18 @@ def uygulama_olustur():
         simdi = veri.simdi_tr()
 
         sonuclar, gunluk_kayitlar = [], []
+        piyasa_butce = time.time() + 25.0
         for idx, r in hedef.iterrows():
+            if bool(r.get("analiz_yok", False) is True):
+                continue
             oranlar, maks, ust_alt = _fikstur_oranlari(r)
+            if not oranlar and time.time() < piyasa_butce:
+                # API füzyonu: bülten oranı yoksa canlı piyasa 1X2'si kullanılır
+                pk = veri.iyms_piyasa(r["HomeTeam"], r["AwayTeam"], r["Div"], r["Tarih"])
+                if pk and pk.get("ms"):
+                    oranlar = pk["ms"]
+                    maks = maks or pk.get("ms_maks")
+                    ust_alt = ust_alt or pk.get("ust_alt25")
             if not oranlar:
                 continue
             a = analiz.mac_analizi(
@@ -755,6 +765,10 @@ def uygulama_olustur():
             if bool(r.get("analiz_yok", False) is True):
                 continue
             oranlar, _maks, _ust_alt = _fikstur_oranlari(r)
+            if not oranlar:
+                pk = veri.iyms_piyasa(r["HomeTeam"], r["AwayTeam"], r["Div"], r["Tarih"])
+                if pk and pk.get("ms"):
+                    oranlar = pk["ms"]  # API füzyonu: canlı piyasa 1X2'si
             poisson = analiz.poisson_tahmini(df, r["HomeTeam"], r["AwayTeam"], lig_ipucu=r["Div"])
             kalip = analiz.oran_kalibi(df, tuple(oranlar)) if oranlar else None
             hucreler = analiz.tahmin_hucreleri(poisson, kalip)
@@ -824,6 +838,15 @@ def uygulama_olustur():
         for idx, r in hedef.iterrows():
             analizsiz = bool(r.get("analiz_yok", False) is True)
             oranlar, _maks, _ua = _fikstur_oranlari(r)
+            # Piyasa yanıtı önce alınır (İY/MS + canlı 1X2 aynı pakette gelir):
+            # bülten CSV'sinde oran yayınlanmamışsa canlı 1X2 ile füzyon yapılır,
+            # böylece maç kalıp eşleşmesi ve tam analiz alabilir.
+            piyasa = None
+            if time.time() < piyasa_butce_bitis:
+                piyasa = veri.iyms_piyasa(r["HomeTeam"], r["AwayTeam"], r["Div"], r["Tarih"])
+            oran_kaynak = "bulten" if oranlar else None
+            if not oranlar and piyasa and piyasa.get("ms"):
+                oranlar, oran_kaynak = piyasa["ms"], "canli"
             # Birebir oran eşleşmesi: geçmiş maçın üç açılış oranı da hedefe
             # ±eşik kadar yakın olmalı (±0.05'ten başlar, örnek yetersizse genişler).
             birebir = analiz.birebir_oran_maclari(df, tuple(oranlar)) if oranlar else None
@@ -853,11 +876,6 @@ def uygulama_olustur():
                     "kalip_n": kalip_n,
                 }
 
-            # Gerçek İY/MS piyasa oranları — arşivden bağımsız çalışır, bu yüzden
-            # analiz edilemeyen maçlara bile fiyat düşürebilir.
-            piyasa = None
-            if time.time() < piyasa_butce_bitis:
-                piyasa = veri.iyms_piyasa(r["HomeTeam"], r["AwayTeam"], r["Div"], r["Tarih"])
             piyasa_iyms = bool(piyasa and piyasa.get("kombolar"))
             if piyasa_iyms:
                 for k, kombo in kombolar.items():
@@ -892,6 +910,7 @@ def uygulama_olustur():
                     "ev": r["HomeTeam"],
                     "dep": r["AwayTeam"],
                     "oranli": bool(oranlar),
+                    "oran_kaynak": oran_kaynak,
                     "mod": mod,
                     "neden": neden,
                     "kombolar": kombolar,
@@ -933,6 +952,14 @@ def uygulama_olustur():
             return jsonify({"hata": "Bu maçın takımları istatistik arşivimizin kapsamı dışında; listeleyebiliyor ama analiz edemiyoruz."}), 400
 
         oranlar, maks, ust_alt = _fikstur_oranlari(r)
+        # API füzyonu: aynı pakette İY/MS + korner + canlı 1X2 gelir; bülten
+        # oranı yayınlanmamışsa canlı 1X2 ile tam analiz yapılır.
+        piyasa_k = veri.iyms_piyasa(r["HomeTeam"], r["AwayTeam"], r["Div"], r["Tarih"])
+        oran_kaynak = "bulten" if oranlar else None
+        if not oranlar and piyasa_k and piyasa_k.get("ms"):
+            oranlar, oran_kaynak = piyasa_k["ms"], "canli"
+            maks = maks or piyasa_k.get("ms_maks")
+            ust_alt = ust_alt or piyasa_k.get("ust_alt25")
         a = analiz.mac_analizi(
             df, r["HomeTeam"], r["AwayTeam"],
             oranlar=tuple(oranlar) if oranlar else None,
@@ -948,7 +975,6 @@ def uygulama_olustur():
         # piyasa baremi (1xbet/Bet365) ve modele göre beklenen değer.
         korner_model = analiz.korner_beklentisi(df, r["HomeTeam"], r["AwayTeam"], lig_ipucu=r["Div"])
         birebir = analiz.birebir_oran_maclari(df, tuple(oranlar), ornek_sayisi=0) if oranlar else None
-        piyasa_k = veri.iyms_piyasa(r["HomeTeam"], r["AwayTeam"], r["Div"], r["Tarih"])
         korner_piyasa = None
         if piyasa_k and piyasa_k.get("korner"):
             import math as _m
@@ -983,12 +1009,17 @@ def uygulama_olustur():
                     satir["oran_max"] = en_iyi
                     satir["ev_max"] = model_p[satir["secim"]] * en_iyi - 1.0
         ozet = _mac_ozeti(idx, r, kitapcilar)
+        # Canlı piyasa 1X2'si panoya eklenir — bülten açılışıyla yan yana
+        # görünce oran hareketi (açılış → şimdi) okunur hale gelir.
+        if piyasa_k and piyasa_k.get("ms"):
+            ozet["kitapcilar"][f"{piyasa_k.get('ms_kitapci') or 'Piyasa'} (canlı)"] = piyasa_k["ms"]
         j["fikstur"] = {
             "tarih": r["Tarih"].strftime("%d.%m.%Y"),
             "saat": ozet["saat"],
             "kitapcilar": ozet["kitapcilar"],
             "maks": ozet["maks"],
             "ust_alt": ozet["ust_alt"],
+            "oran_kaynak": oran_kaynak,
         }
         return jsonify(j)
 

@@ -1015,17 +1015,42 @@ def _oddsapi_takim_puani(bizim: str, onlarin: str) -> float:
 
 
 def _oddsapi_oranlari_isle(govde: dict) -> dict | None:
-    """İki kitapçının yanıtından İY/MS (kombo başına en iyi fiyat) + korner baremi."""
+    """İki kitapçının yanıtından İY/MS (kombo başına en iyi fiyat), korner baremi,
+    canlı 1X2 (ML) ve Alt/Üst 2.5 — API füzyonu: bülten CSV'sinde oran yayınlanmamış
+    maçlar bu 1X2 ile tam analiz + kalıp eşleşmesi alabilir."""
     kombolar: dict[str, float] = {}
     kombo_kitapci: dict[str, str] = {}
     korner = korner_kitapci = None
+    ms_hepsi: dict[str, list[float]] = {}
+    ust_alt_hepsi: dict[str, list[float]] = {}
     guncel = ""
     for kitapci, pazarlar in (govde.get("bookmakers") or {}).items():
         if "(no latency)" in kitapci:
             continue
         for pazar in pazarlar:
             ad = pazar.get("name")
-            if ad == "Half Time / Full Time":
+            if ad == "ML":
+                satirlar = pazar.get("odds") or []
+                if satirlar:
+                    try:
+                        uclu = [float(satirlar[0].get("home")),
+                                float(satirlar[0].get("draw")),
+                                float(satirlar[0].get("away"))]
+                        if all(x > 1 for x in uclu):
+                            ms_hepsi[kitapci] = [round(x, 2) for x in uclu]
+                    except (TypeError, ValueError):
+                        pass
+            elif ad == "Totals":
+                for satir in pazar.get("odds", []):
+                    try:
+                        if abs(float(satir.get("hdp")) - 2.5) < 1e-6:
+                            u, a = float(satir.get("over")), float(satir.get("under"))
+                            if u > 1 and a > 1:
+                                ust_alt_hepsi[kitapci] = [round(u, 2), round(a, 2)]
+                            break
+                    except (TypeError, ValueError):
+                        continue
+            elif ad == "Half Time / Full Time":
                 guncel = guncel or str(pazar.get("updatedAt", ""))[:16].replace("T", " ")
                 for satir in pazar.get("odds", []):
                     k = _IYMS_ETIKET.get(satir.get("label"))
@@ -1047,21 +1072,34 @@ def _oddsapi_oranlari_isle(govde: dict) -> dict | None:
                         continue
                 if basamaklar and (korner is None or len(basamaklar) > len(korner)):
                     korner, korner_kitapci = basamaklar, kitapci
-    if not kombolar and not korner:
+    if not kombolar and not korner and not ms_hepsi:
         return None
     kitapci_ana = None
     if kombo_kitapci:
         adlar = list(kombo_kitapci.values())
         kitapci_ana = max(set(adlar), key=adlar.count)
+
+    def _tercih(sozluk: dict) -> tuple[str | None, list[float] | None]:
+        if not sozluk:
+            return None, None
+        ad = "Bet365" if "Bet365" in sozluk else next(iter(sozluk))
+        return ad, sozluk[ad]
+
+    ms_kitapci, ms = _tercih(ms_hepsi)
+    ua_kitapci, ust_alt25 = _tercih(ust_alt_hepsi)
+    ms_maks = ([round(max(v[i] for v in ms_hepsi.values()), 2) for i in range(3)]
+               if ms_hepsi else None)
     return {"kombolar": kombolar, "kombo_kitapci": kombo_kitapci, "kitapci": kitapci_ana,
-            "guncel": guncel, "korner": korner, "korner_kitapci": korner_kitapci}
+            "guncel": guncel, "korner": korner, "korner_kitapci": korner_kitapci,
+            "ms": ms, "ms_kitapci": ms_kitapci, "ms_maks": ms_maks,
+            "ust_alt25": ust_alt25, "ust_alt25_kitapci": ua_kitapci}
 
 
 def _oddsapi_iyms_cek(mac_id: int) -> dict | None:
     onbellek = _oddsapi_onbellek("oddsapi_iyms.json")
     kayit = onbellek.get(str(mac_id))
     taze = kayit and time.time() - kayit.get("zaman", 0) < _ODDSAPI_ORAN_TTL
-    eski_bicim = kayit and kayit.get("veri") and "kombo_kitapci" not in kayit["veri"]
+    eski_bicim = kayit and kayit.get("veri") and "ms" not in kayit["veri"]
     if taze and not eski_bicim:
         return kayit["veri"] or None
     govde = _oddsapi_getir("/odds", {"eventId": mac_id, "bookmakers": ODDSAPI_KITAPCILAR})

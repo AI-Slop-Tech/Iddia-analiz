@@ -808,6 +808,7 @@ function kitapciHTML(s){
       ${f.maks ? `<tr><td><b>En iyi (Max)</b></td>${f.maks.map(x => `<td class="sag eniyi">${x.toFixed(2)}</td>`).join('')}</tr>` : ''}
     </table>
     ${f.ust_alt ? `<div class="rozetler">${rozet('Üst 2.5', f.ust_alt[0].toFixed(2))}${rozet('Alt 2.5', f.ust_alt[1].toFixed(2))}</div>` : ''}
+    ${f.oran_kaynak === 'canli' ? `<div class="not">📡 Bülten açılış oranı henüz yayınlanmadı — analiz <b>canlı piyasa 1X2'si</b> ile yapıldı; açılış gelince tablo iki fiyatı yan yana gösterir (oran hareketi).</div>` : ''}
   </div>`;
 }
 
@@ -1301,7 +1302,8 @@ function srCiz(){
       : '';
     const modNotu = MOD_ROZET[m.mod]
       ? ` · ${MOD_ROZET[m.mod]}`
-      : (m.oranli ? '' : ' · oran yok (yalnız model)');
+      : (m.oran_kaynak === 'canli' ? ' · 📡 oranlar canlı piyasadan'
+         : (m.oranli ? '' : ' · oran yok (yalnız model)'));
     return `<div class="sr-kart" style="${i === 0 ? 'border-color:var(--sari)' : ''}">
       <div class="sr-baslik">
         <b>${i === 0 ? '👑 ' : ''}${esc(m.ev)} – ${esc(m.dep)}</b>
