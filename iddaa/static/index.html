@@ -479,7 +479,8 @@ async function haftaYukle(yenile, sessiz){
     if(!sessiz) TARAMALAR = {};
     if(!HAFTA.gunler.length){
       $('#gun-pilleri').innerHTML = '';
-      $('#hafta-liste').innerHTML = `<div class="kart bos-durum"><div class="dev">🤷</div><p>Fikstürde yaklaşan maç bulunamadı.</p></div>`;
+      $('#one-cikanlar').innerHTML = '';
+      bosFiksturAciklamasi();
       return;
     }
     _gunSecimiKoru();
@@ -495,6 +496,32 @@ async function haftaYukle(yenile, sessiz){
 // açık sekme gün ilerledikçe kendini tazeler (10 dk'da bir, sessizce)
 setInterval(() => { if(HAFTA) haftaYukle(false, true); }, 10 * 60 * 1000);
 
+async function bosFiksturAciklamasi(){
+  // Takvim boşken nedenini sistem kendisi teşhis eder: bülten arası mı, erişim engeli mi?
+  $('#hafta-liste').innerHTML = `<div class="kart bos-durum"><div class="dev">🔎</div><p>Takvim boş görünüyor, nedeni kontrol ediliyor…</p></div>`;
+  let icerik;
+  try{
+    const b = await api('/api/baglanti');
+    if(b.tamam){
+      icerik = `<div class="dev">📭</div>
+        <p><b>Bülten arası.</b> Bu haftanın maçları oynandı; veri kaynağı yeni haftanın
+        fikstürünü ve oranlarını genellikle <b>Salı–Perşembe</b> günleri yayınlar.</p>
+        <p class="ipucu">Panel arka planda kontrol etmeye devam ediyor — bülten düştüğü anda maçlar
+        burada otomatik belirecek. Bu arada 📊 Sonuçlar sekmesinden oynanan maçları inceleyebilirsiniz.</p>
+        <button class="btn ikincil" onclick="haftaYukle(true)">↻ Şimdi Tekrar Dene</button>`;
+    }else{
+      icerik = `<div class="dev">🔌</div>
+        <p><b>Veri kaynağına ulaşılamıyor.</b> ${esc(b.hata || '')}</p>
+        <p class="ipucu" style="text-align:left;white-space:pre-line">${esc(b.ipucu || '')}</p>
+        <button class="btn ikincil" onclick="haftaYukle(true)">↻ Tekrar Dene</button>`;
+    }
+  }catch(h){
+    icerik = `<div class="dev">🤷</div><p>Fikstürde yaklaşan maç bulunamadı.</p>
+      <button class="btn ikincil" onclick="haftaYukle(true)">↻ Tekrar Dene</button>`;
+  }
+  $('#hafta-liste').innerHTML = `<div class="kart bos-durum">${icerik}</div>`;
+}
+
 function pilCiz(){
   $('#gun-pilleri').innerHTML = HAFTA.gunler.map(g =>
     `<button class="gun-pil ${g.tarih === AKTIF_GUN ? 'aktif' : ''}" onclick="gunSec('${g.tarih}')">
@@ -509,6 +536,7 @@ function aktifGunMaclari(){
   return g.maclar.filter(m => !lig || m.lig === lig);
 }
 
+let OTOTARA = {};
 function gunCiz(){
   if(!HAFTA) return;
   const maclar = aktifGunMaclari();
@@ -516,6 +544,11 @@ function gunCiz(){
   if(!maclar.length){
     $('#hafta-liste').innerHTML = `<div class="kart bos-durum"><div class="dev">🤷</div><p>Bu gün için (seçili ligde) maç yok.</p></div>`;
     return;
+  }
+  // profesyonel analist modu: gün ilk kez görüntülendiğinde tarama kendiliğinden başlar
+  if(!TARAMALAR[AKTIF_GUN] && !OTOTARA[AKTIF_GUN] && maclar.some(m => m.oranlar)){
+    OTOTARA[AKTIF_GUN] = true;
+    gunTara();
   }
   $('#hafta-liste').innerHTML = maclar.map(m => `
     <div class="mac-satir ${m.basladi ? 'oynandi' : ''}" id="mac-${m.id}">
@@ -536,7 +569,9 @@ function gunCiz(){
 
 async function gunTara(){
   if(!AKTIF_GUN){ bildir('Önce bir gün seçin.', true); return; }
-  const b = $('#btn-tara'); b.disabled = true; b.textContent = '⏳ Taranıyor…';
+  const b = $('#btn-tara'); b.disabled = true; b.textContent = '⏳ Analiz ediliyor…';
+  if(!TARAMALAR[AKTIF_GUN])
+    $('#one-cikanlar').innerHTML = '<div class="iskelet" style="height:110px"></div>';
   try{
     TARAMALAR[AKTIF_GUN] = await api('/api/bulten-tara', {tarih: AKTIF_GUN});
     oneCikanCiz();
@@ -803,6 +838,13 @@ function takimSonucHTML(s){
             En iyi seçim bile ${(o.ev*100).toFixed(1)}% beklenen değerde. Değer yoksa bahis de yok; profesyonel karar budur.`
     }[o.karar];
     html += `<div class="banner ${o.karar}">${govde}</div>`;
+  }
+
+  if(s.yorum && s.yorum.length){
+    html += `<div class="kart">
+      <h2>🎙 Analist Yorumu</h2>
+      ${s.yorum.map(p => `<p style="font-size:14.5px;line-height:1.7;margin:10px 0;color:var(--metin)">${esc(p)}</p>`).join('')}
+    </div>`;
   }
 
   html += `<div class="izgara">
