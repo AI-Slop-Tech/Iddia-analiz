@@ -375,6 +375,24 @@ def uygulama_olustur():
                     hafiza[ad] = None
             return hafiza[ad]
 
+        # bulanık eşleşme koruması: takımın arşivdeki güncel ligi, maçın
+        # ligiyle uyuşmalı (ör. Hollanda maçındaki "NEC", Meksika'nın
+        # Necaxa'sına bağlanmasın). Lig kodu arşivde yoksa (ŞL, CLI gibi
+        # ligler-arası turnuvalar) kontrol atlanır.
+        son_lig = {}
+        for _, s in (
+            pd.concat(
+                [
+                    df[["HomeTeam", "Div", "Tarih"]].rename(columns={"HomeTeam": "Takim"}),
+                    df[["AwayTeam", "Div", "Tarih"]].rename(columns={"AwayTeam": "Takim"}),
+                ]
+            )
+            .sort_values("Tarih")
+            .drop_duplicates("Takim", keep="last")
+            .iterrows()
+        ):
+            son_lig[s["Takim"]] = s["Div"]
+
         mevcut = {
             (r.Tarih.date(), r.HomeTeam, r.AwayTeam) for r in fik.itertuples()
         }
@@ -382,6 +400,9 @@ def uygulama_olustur():
         for r in dis.itertuples():
             ev, dep = _esle(r.HomeTeam), _esle(r.AwayTeam)
             analiz_var = ev is not None and dep is not None
+            if analiz_var and r.Div in veri.LIGLER:
+                if son_lig.get(ev) != r.Div or son_lig.get(dep) != r.Div:
+                    analiz_var = False  # şüpheli eşleşme: yalnız listele
             anahtar = (r.Tarih.date(), ev or r.HomeTeam, dep or r.AwayTeam)
             if anahtar in mevcut:
                 continue  # oranlı bültende zaten var
