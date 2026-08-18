@@ -254,9 +254,29 @@ def poisson_tahmini(df: pd.DataFrame, ev: str, dep: str, lig_ipucu: str | None =
 
 # ------------------------------------------------------------- 4) oran kalıbı
 
+# Lig kodu → ülke grubu: kalıp analizinde "aynı ülkenin ligleri" filtresi için
+# (A/B/C ligi fark etmez, ülke karakteri ortaktır: tempo, ev avantajı, marj alışkanlığı)
+ULKE_GRUBU = {
+    "E0": "İngiltere", "E1": "İngiltere", "E2": "İngiltere", "E3": "İngiltere", "EC": "İngiltere",
+    "SC0": "İskoçya", "SC1": "İskoçya", "SC2": "İskoçya", "SC3": "İskoçya",
+    "D1": "Almanya", "D2": "Almanya", "I1": "İtalya", "I2": "İtalya",
+    "SP1": "İspanya", "SP2": "İspanya", "F1": "Fransa", "F2": "Fransa",
+    "N1": "Hollanda", "B1": "Belçika", "P1": "Portekiz", "T1": "Türkiye", "G1": "Yunanistan",
+    "ARG": "Arjantin", "AUT": "Avusturya", "BRA": "Brezilya", "CHN": "Çin",
+    "DNK": "Danimarka", "FIN": "Finlandiya", "IRL": "İrlanda", "JPN": "Japonya",
+    "MEX": "Meksika", "NOR": "Norveç", "POL": "Polonya", "ROU": "Romanya",
+    "RUS": "Rusya", "SWE": "İsveç", "SWZ": "İsviçre", "USA": "ABD",
+}
+
+
+def _ulke_kodlari(lig_ipucu: str | None) -> list[str]:
+    ulke = ULKE_GRUBU.get(str(lig_ipucu or ""))
+    return [k for k, v in ULKE_GRUBU.items() if v == ulke] if ulke else []
+
+
 def oran_kalibi(df: pd.DataFrame, oranlar: tuple[float, float, float],
                 tolerans: float = 0.02, min_mac: int = 40,
-                ornek_sayisi: int = 0) -> dict | None:
+                ornek_sayisi: int = 0, lig_ipucu: str | None = None) -> dict | None:
     """Benzer oranla açılmış geçmiş maçlarda gerçekleşen sonuç dağılımı.
 
     Karşılaştırma, bahis marjı arındırılmış olasılık uzayında yapılır; böylece
@@ -297,22 +317,46 @@ def oran_kalibi(df: pd.DataFrame, oranlar: tuple[float, float, float],
         ms_harf = ht["FTR"].map({"H": "1", "D": "0", "A": "2"})
         iyms = {k: int(v) for k, v in (iy_harf + "/" + ms_harf).value_counts().items()}
 
+    # Aynı ülkenin liglerindeki kalıp (kullanıcı isteği: "Çin maçına Çin
+    # liglerinden benzerler") — küçük örneklem yanıltmasın diye genel kalıpla
+    # birlikte sunulur ve ancak n>=15'te doldurulur.
+    ulke_kodlari = _ulke_kodlari(lig_ipucu)
+    ulke_blok = None
+    if ulke_kodlari:
+        # önce genel kalıpla aynı tolerans; örnek yetmezse ülkeye özel genişleme
+        u = D[D["Div"].isin(ulke_kodlari) & (fark <= kullanilan_tol)]
+        if len(u) < 15:
+            u = D[D["Div"].isin(ulke_kodlari) & (fark <= tolerans * 2.5)]
+        if len(u) >= 15:
+            ug = u["FTHG"] + u["FTAG"]
+            ulke_blok = {
+                "ad": ULKE_GRUBU.get(str(lig_ipucu)),
+                "n": int(len(u)),
+                "ms1": float((u["FTR"] == "H").mean()),
+                "ms0": float((u["FTR"] == "D").mean()),
+                "ms2": float((u["FTR"] == "A").mean()),
+                "gol_ort": float(ug.mean()),
+                "ust25": float((ug > 2.5).mean()),
+                "kg_var": float(((u["FTHG"] > 0) & (u["FTAG"] > 0)).mean()),
+            }
+
     ornekler = []
     if ornek_sayisi > 0:
-        # İY skoru olan maçlar önceliklidir (ek arşiv ülkeleri İY yayınlamaz;
-        # yaz döneminde en yeni eşleşmeler hep onlardan gelip tabloyu boş bırakıyordu)
-        sirali = sec.sort_values("Tarih", ascending=False)
-        iyli = sirali.dropna(subset=["HTHG", "HTAG"]).head(ornek_sayisi)
-        eksik = ornek_sayisi - len(iyli)
-        digerleri = (sirali[~sirali.index.isin(iyli.index)].head(eksik)
-                     if eksik > 0 else sirali.iloc[0:0])
-        secilen = pd.concat([iyli, digerleri]).sort_values("Tarih", ascending=False)
+        # Örnek önceliği: (1) aynı ülke + İY'li, (2) aynı ülke, (3) İY'li, (4) kalan
+        # — her katman kendi içinde en yeniden eskiye.
+        sirali = sec.sort_values("Tarih", ascending=False).copy()
+        ayni_ulke_s = (sirali["Div"].isin(ulke_kodlari)
+                       if ulke_kodlari else pd.Series(False, index=sirali.index))
+        iy_var_s = sirali[["HTHG", "HTAG"]].notna().all(axis=1)
+        sirali["oncelik"] = (~ayni_ulke_s).astype(int) * 2 + (~iy_var_s).astype(int)
+        secilen = sirali.sort_values("oncelik", kind="stable").head(ornek_sayisi)
         for s in secilen.itertuples():
             iy_var = not (pd.isna(s.HTHG) or pd.isna(s.HTAG))
             ornekler.append(
                 {
                     "tarih": s.Tarih,
                     "lig": s.Div,
+                    "ayni_ulke": bool(s.oncelik < 2),
                     "ev": s.HomeTeam,
                     "dep": s.AwayTeam,
                     "skor": f"{int(s.FTHG)}-{int(s.FTAG)}",
@@ -326,6 +370,7 @@ def oran_kalibi(df: pd.DataFrame, oranlar: tuple[float, float, float],
 
     return {
         "ornekler": ornekler,
+        "ulke": ulke_blok,
         "iyms_n": iyms_n,
         "iyms": iyms,
         "n": n,
@@ -455,7 +500,8 @@ def korner_beklentisi(df: pd.DataFrame, ev: str, dep: str,
 
 def birebir_oran_maclari(df: pd.DataFrame, oranlar: tuple[float, float, float],
                          esikler: tuple[float, ...] = (0.05, 0.10, 0.15, 0.25),
-                         min_mac: int = 25, ornek_sayisi: int = 10) -> dict | None:
+                         min_mac: int = 25, ornek_sayisi: int = 10,
+                         lig_ipucu: str | None = None) -> dict | None:
     """Birebir aynı oranla açılmış geçmiş maçlar (ham oran uzayında eşleşme).
 
     oran_kalibi'nden farkı: marj-arındırılmış olasılık bandı yerine, geçmiş
@@ -487,9 +533,30 @@ def birebir_oran_maclari(df: pd.DataFrame, oranlar: tuple[float, float, float],
     kombo = iy_harf + "/" + ms_harf
     iyms = {k: int(v) for k, v in kombo.value_counts().items()}
 
+    # Aynı ülke katmanı: en geniş eşikte ülke-içi eşleşmeler (İY yayınlayan
+    # ülkelerde çalışır; küçük örneklemde gösterilmez)
+    ulke_kodlari = _ulke_kodlari(lig_ipucu)
+    ulke_blok = None
+    if ulke_kodlari:
+        u = D[D["Div"].isin(ulke_kodlari) & (fark <= esikler[-1])]
+        if len(u) >= 12:
+            u_iy = (u["HTHG"] - u["HTAG"]).map(lambda f: "1" if f > 0 else ("0" if f == 0 else "2"))
+            u_ms = u["FTR"].map({"H": "1", "D": "0", "A": "2"})
+            ulke_blok = {
+                "ad": ULKE_GRUBU.get(str(lig_ipucu)),
+                "n": int(len(u)),
+                "esik": esikler[-1],
+                "iyms": {k: int(v) for k, v in (u_iy + "/" + u_ms).value_counts().items()},
+            }
+
     ornekler = []
     if ornek_sayisi > 0:
-        en_yakin = fark.loc[sec.index].sort_values().index[:ornek_sayisi]
+        yakinlik = fark.loc[sec.index]
+        if ulke_kodlari:
+            oncelik = (~sec["Div"].isin(ulke_kodlari)).astype(int)
+            en_yakin = sec.assign(_o=oncelik, _f=yakinlik).sort_values(["_o", "_f"]).index[:ornek_sayisi]
+        else:
+            en_yakin = yakinlik.sort_values().index[:ornek_sayisi]
         for idx in en_yakin:
             s = sec.loc[idx]
             o3 = (round(float(s["oran_ev"]), 2),
@@ -499,6 +566,7 @@ def birebir_oran_maclari(df: pd.DataFrame, oranlar: tuple[float, float, float],
                 {
                     "tarih": s["Tarih"].strftime("%d.%m.%Y"),
                     "lig": s["Div"],
+                    "ayni_ulke": bool(ulke_kodlari and s["Div"] in ulke_kodlari),
                     "ev": s["HomeTeam"],
                     "dep": s["AwayTeam"],
                     "oranlar": list(o3),
@@ -517,6 +585,7 @@ def birebir_oran_maclari(df: pd.DataFrame, oranlar: tuple[float, float, float],
         "hedef": [round(h, 2), round(b, 2), round(a, 2)],
         "hedef_iyms_adil": iyms_adil_oranlar((round(h, 2), round(b, 2), round(a, 2))),
         "iyms": iyms,
+        "ulke": ulke_blok,
         # Aynı oranlı geçmişin MS dağılımı — çapraz kombinasyon kanıtının
         # yanında maç sonucu eğilimi de okunabilsin diye.
         "ms": {
@@ -797,7 +866,8 @@ def mac_analizi(df: pd.DataFrame, ev: str, dep: str,
         elo_farki = elo[ev] - elo[dep]
         sonuc["elo"] = {"ev": elo[ev], "dep": elo[dep], "fark": elo_farki}
     if oranlar:
-        sonuc["kalip"] = oran_kalibi(df, oranlar, tolerans=tolerans, ornek_sayisi=ornek_sayisi)
+        sonuc["kalip"] = oran_kalibi(df, oranlar, tolerans=tolerans,
+                                     ornek_sayisi=ornek_sayisi, lig_ipucu=lig_ipucu)
         sonuc["deger"] = deger_analizi(oranlar, sonuc["poisson"], sonuc["kalip"], ust_alt=ust_alt)
         sonuc["oneri"] = oneri_uret(
             sonuc["deger"], sonuc["poisson"], sonuc["kalip"],

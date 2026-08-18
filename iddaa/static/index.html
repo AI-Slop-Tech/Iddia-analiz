@@ -929,13 +929,17 @@ function tahminDetayHTML(s){
     ${TAB_KOLONLAR.map(k => hucreTd(s.tahmin[k])).join('')}</tr>`;
   const ornekler = ((s.kalip && s.kalip.ornekler) || []).filter(o => o.hucre);
   satirlar += ornekler.map(o => `<tr>
-    <td class="ipucu" style="white-space:nowrap">${o.tarih} · ${esc(o.lig)}</td>
+    <td class="ipucu" style="white-space:nowrap">${o.ayni_ulke ? '<b style="color:var(--sari)">★</b> ' : ''}${o.tarih} · ${esc(o.lig)}</td>
     <td style="white-space:nowrap">${esc(o.ev)} – ${esc(o.dep)}
       <div class="ipucu">${(o.oranlar || []).map(x => x.toFixed(2)).join(' / ')}</div></td>
     ${TAB_KOLONLAR.map(k => hucreTd(o.hucre[k])).join('')}</tr>`).join('');
   return `<div class="kart">
     <h2>📋 Tahmin & Benzer Maçlarda Gerçekleşenler</h2>
-    <div class="alt-baslik">İlk satır modelin bu maç tahmini; altı, <b>benzer oranla açılan geçmiş maçlarda gerçekte ne olduğu</b> — her satırın altında o maçın açılış oranları (1 / X / 2) yazar, bu maçınkiyle kıyaslayın. İY skoru olan maçlar önceliklidir; "—" görünen nadir satırlar, İY verisi yayınlanmayan liglerdendir (ABD/Çin/İskandinav arşivleri). Tahmin ile geçmişin aynı yöne bakması sinyali güçlendirir.</div>
+    <div class="alt-baslik">İlk satır modelin bu maç tahmini; altı, <b>benzer oranla açılan geçmiş maçlarda gerçekte ne olduğu</b> — her satırın altında o maçın açılış oranları (1 / X / 2) yazar, bu maçınkiyle kıyaslayın. <b style="color:var(--sari)">★</b> işaretli satırlar <b>bu maçla aynı ülkenin liglerinden</b>dir ve en üstte sıralanır (A/B/C ligi fark etmez); "—" görünen satırlar İY verisi yayınlanmayan liglerdendir. Tahmin ile geçmişin aynı yöne bakması sinyali güçlendirir.</div>
+    ${s.kalip && s.kalip.ulke ? `<div class="ipucu" style="margin-bottom:8px">🏳️ <b>${esc(s.kalip.ulke.ad)} kalıbı</b> (${s.kalip.ulke.n} maç):
+      1 ${pct(s.kalip.ulke.ms1)} · X ${pct(s.kalip.ulke.ms0)} · 2 ${pct(s.kalip.ulke.ms2)} · Üst 2.5 ${pct(s.kalip.ulke.ust25)} · KG ${pct(s.kalip.ulke.kg_var)}
+      &nbsp;—&nbsp; genel kalıp (${s.kalip.n} maç): 1 ${pct(s.kalip.ms1)} · X ${pct(s.kalip.ms0)} · 2 ${pct(s.kalip.ms2)}.
+      İkisi aynı yöne bakıyorsa sinyal güçlüdür; ülke örneklemi küçükse genel kalıba yaslanın.</div>` : ''}
     <div style="overflow-x:auto"><table>
       <tr><th>Tarih</th><th>Maç</th>${TAB_BASLIK}</tr>
       ${satirlar}
@@ -1286,8 +1290,12 @@ function srCiz(){
     }
     const enIyi = m.one_cikan;
     const k = enIyi ? m.kombolar[enIyi] : null;
+    const ulkeK = (m.kalip && m.kalip.ulke) ? m.kalip.ulke : null;
+    const ulkeKanit = (ulkeK && enIyi)
+      ? ` 🏳️ Aynı ülkede (${esc(ulkeK.ad)}) benzer oranlı ${ulkeK.n} maçın ${(ulkeK.iyms || {})[enIyi] || 0}'i ${enIyi} bitti.`
+      : '';
     const kanit = (k && m.kalip && k.kalip_n)
-      ? `Birebir oran kanıtı (±${m.kalip.esik.toFixed(2)}): <b>${m.kalip.hedef.map(x => x.toFixed(2)).join(' / ')}</b> oranlarıyla açılmış ${k.kalip_n} maçın ${k.kalip_adet}'i ${enIyi} bitti.${srMsMetni(m.kalip)}`
+      ? `Birebir oran kanıtı (±${m.kalip.esik.toFixed(2)}): <b>${m.kalip.hedef.map(x => x.toFixed(2)).join(' / ')}</b> oranlarıyla açılmış ${k.kalip_n} maçın ${k.kalip_adet}'i ${enIyi} bitti.${ulkeKanit}${srMsMetni(m.kalip)}`
       : (m.oranli ? 'Bu oranlarla birebir eşleşen yeterli geçmiş maç yok — yalnız model konuşuyor.' : '');
     const karar = (k && k.piyasa && k.ev != null)
       ? `<div class="ipucu" style="margin-bottom:8px">💰 <b>${esc(m.piyasa.kitapci)}</b> şu an ${enIyi} için
