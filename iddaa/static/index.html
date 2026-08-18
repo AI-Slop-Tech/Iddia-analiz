@@ -328,9 +328,11 @@
       <h2>🎭 Sürpriz Radarı — İY/MS Çapraz Sonuçlar</h2>
       <div class="alt-baslik">
         Bülten İY/MS pazarının <b>9 seçeneğinin tamamı</b> her maç için hesaplanır ve adil oranıyla gösterilir:
-        1/1 · 1/0 · <b>1/2</b> · 0/1 · 0/0 · 0/2 · <b>2/1</b> · 2/0 · 2/2. İY sonucunun MS'de değiştiği 6
-        kombinasyon "sürpriz" sayılır; soluk görünen köşegen (1/1, 0/0, 2/2) sonuç koruyan normal senaryolardır.
-        ⭐ işaretli hücre, o maçta <b>olasılığı en yüksek sürpriz</b>tir — liste de buna göre sıralanır.
+        1/1 · 1/0 · <b>1/2</b> · 0/1 · 0/0 · 0/2 · <b>2/1</b> · 2/0 · 2/2. Radarın odağı, ilk yarıda bir taraf
+        öndeyken sonucun değiştiği 4 çapraz: <b>1/0 · 1/2 · 2/1 · 2/0</b> — ⭐ işaretli hücre bu dörtlüden
+        olasılığı en yüksek olanıdır ve liste buna göre sıralanır (0/1 ile 0/2 bilgi olarak gösterilir; soluk
+        köşegen 1/1, 0/0, 2/2 sonuç koruyan normal senaryolardır). Kanıt satırında ayrıca aynı oranlı geçmişin
+        <b>MS dağılımı</b> (1-X-2) yazar — çapraz sinyal ile maç sonucu eğilimini birlikte okuyun.
         İki kaynak harmanlanır: yarı-bazlı Poisson modeli +
         <b>birebir aynı oranlarla açılmış geçmiş maçlarda bu kombinasyonların gerçekte kaç kez geldiği</b>.
         Eşleşme ham oran düzeyindedir: geçmiş maçın <b>üç açılış oranı da</b> bu maçınkine ±0.05 yakın olmalı
@@ -1157,17 +1159,24 @@ async function surprizTara(){
 }
 
 const SR_SIRA = ['1/1', '1/0', '1/2', '0/1', '0/0', '0/2', '2/1', '2/0', '2/2'];
-const SR_SURPRIZ = ['1/0', '1/2', '0/1', '0/2', '2/1', '2/0'];
+const SR_ODAK = ['1/0', '1/2', '2/1', '2/0'];   // ⭐ adayları: İY'de öndeyken sonucun değiştiği çaprazlar
+const SR_NORMAL = ['1/1', '0/0', '2/2'];        // sonuç koruyan köşegen — soluk gösterilir
 
 function srHucre(ad, k, yildiz){
   if(!k) return '';
   const kanit = k.kalip_n ? `Birebir oranlı ${k.kalip_n} geçmiş maçta ${k.kalip_adet} kez geldi` : 'birebir kalıp verisi yok';
-  const sinif = 'sr-hucre' + (yildiz ? ' yildiz' : (SR_SURPRIZ.includes(ad) ? '' : ' normal'));
+  const sinif = 'sr-hucre' + (yildiz ? ' yildiz' : (SR_NORMAL.includes(ad) ? ' normal' : ''));
   return `<div class="${sinif}" title="${kanit}">
     <div class="ad">${yildiz ? '⭐ ' : ''}${ad}</div>
     <div class="p">%${(k.p * 100).toFixed(1)}</div>
     <div class="adil">${k.adil_oran ? 'adil ' + k.adil_oran : '—'}</div>
   </div>`;
+}
+
+function srMsMetni(kalip){
+  if(!kalip || !kalip.ms) return '';
+  const y = x => '%' + Math.round(x * 100);
+  return ` Aynı oranlı geçmişte MS dağılımı: 1 ${y(kalip.ms['1'])} · X ${y(kalip.ms['0'])} · 2 ${y(kalip.ms['2'])}.`;
 }
 
 function srCiz(){
@@ -1178,18 +1187,24 @@ function srCiz(){
     return;
   }
   $('#surpriz-sonuc').innerHTML = liste.map((m, i) => {
-    const enIyi = m.one_cikan ||
-      SR_SURPRIZ.reduce((a, b) => (m.kombolar[a] || {p:0}).p >= (m.kombolar[b] || {p:0}).p ? a : b);
+    const enIyi = (m.one_cikan && SR_ODAK.includes(m.one_cikan)) ? m.one_cikan :
+      SR_ODAK.reduce((a, b) => (m.kombolar[a] || {p:0}).p >= (m.kombolar[b] || {p:0}).p ? a : b);
     const k = m.kombolar[enIyi];
     const kanit = (m.kalip && k.kalip_n)
-      ? `Birebir oran kanıtı (±${m.kalip.esik.toFixed(2)}): <b>${m.kalip.hedef.map(x => x.toFixed(2)).join(' / ')}</b> oranlarıyla açılmış ${k.kalip_n} maçın ${k.kalip_adet}'i ${enIyi} bitti.`
+      ? `Birebir oran kanıtı (±${m.kalip.esik.toFixed(2)}): <b>${m.kalip.hedef.map(x => x.toFixed(2)).join(' / ')}</b> oranlarıyla açılmış ${k.kalip_n} maçın ${k.kalip_adet}'i ${enIyi} bitti.${srMsMetni(m.kalip)}`
       : (m.oranli ? 'Bu oranlarla birebir eşleşen yeterli geçmiş maç yok — yalnız model konuşuyor.' : '');
+    const tacYorum = (i === 0 && m.kalip && k.kalip_n)
+      ? `<div class="ipucu" style="margin-bottom:8px">👑 <b>Günün odak eşleşmesi:</b> model + birebir oran tarihi birlikte en güçlü çapraz sinyali bu maçta veriyor.
+         ⭐ ${enIyi} için harman olasılık %${(k.p*100).toFixed(1)} → adil oran ${k.adil_oran || '—'}; geçmişte aynı oranlarla ${k.kalip_n} maçta ${k.kalip_adet} kez gerçekleşti
+         (%${(100*k.kalip_adet/k.kalip_n).toFixed(1)}). Tam rapor için 🔬 Derin Analiz'e basın.</div>`
+      : '';
     return `<div class="sr-kart" style="${i === 0 ? 'border-color:var(--sari)' : ''}">
       <div class="sr-baslik">
         <b>${i === 0 ? '👑 ' : ''}${esc(m.ev)} – ${esc(m.dep)}</b>
         <span class="ipucu">${m.saat} · ${esc(m.lig)}${m.oranli ? '' : ' · oran yok (yalnız model)'}</span>
       </div>
       <div class="sr-grid">${SR_SIRA.map(ad => srHucre(ad, m.kombolar[ad], ad === enIyi)).join('')}</div>
+      ${tacYorum}
       ${kanit ? `<div class="ipucu" style="margin-bottom:8px">${kanit} Bülteninizde ${enIyi} oranı ${k.adil_oran ? `adil oran ${k.adil_oran}'in` : 'adil oranın'} üzerindeyse matematiksel değer var demektir.</div>` : ''}
       <div class="sr-alt">
         ${m.ornekler.length ? `<button class="mini-btn" onclick="srGecmisAc(${i})">📜 Oran Kanıtı</button>` : ''}
@@ -1206,7 +1221,7 @@ function srGecmisAc(i){
 }
 
 function srGecmisHTML(m, i){
-  const CAPRAZ = ['1/2', '2/1', '0/1', '0/2'];
+  const CAPRAZ = ['1/0', '1/2', '2/1', '2/0'];
   return `<div id="sr-gecmis-${i}" style="display:none;margin-top:8px">
     <div class="ipucu" style="margin:6px 0 4px">Bu maçın oranları: <b>${m.kalip.hedef.map(x => x.toFixed(2)).join(' / ')}</b> — altta oran yakınlığına göre en yakın eşleşmeler (sarı satırlar çapraz sürprizle bitenler):</div>
     <div style="overflow-x:auto"><table>
