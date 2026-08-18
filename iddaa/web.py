@@ -736,18 +736,20 @@ def uygulama_olustur():
             oranlar, _maks, _ua = _fikstur_oranlari(r)
             poisson = analiz.poisson_tahmini(df, r["HomeTeam"], r["AwayTeam"], lig_ipucu=r["Div"])
             model = analiz.iyms_olasiliklar(poisson)
-            kalip = analiz.oran_kalibi(df, tuple(oranlar)) if oranlar else None
+            # Birebir oran eşleşmesi: geçmiş maçın üç açılış oranı da hedefe
+            # ±eşik kadar yakın olmalı (±0.05'ten başlar, örnek yetersizse genişler).
+            birebir = analiz.birebir_oran_maclari(df, tuple(oranlar)) if oranlar else None
 
             kombolar = {}
             for k in FOKUS:
                 p_model = float(model.get(k, 0.0))
                 kalip_adet = kalip_n = None
                 p = p_model
-                if kalip and kalip.get("iyms_n", 0) > 0:
-                    kalip_n = int(kalip["iyms_n"])
-                    kalip_adet = int(kalip["iyms"].get(k, 0))
+                if birebir and birebir["n"] > 0:
+                    kalip_n = int(birebir["n"])
+                    kalip_adet = int(birebir["iyms"].get(k, 0))
                     p_kalip = kalip_adet / kalip_n
-                    w = min(kalip_n / 400.0, 1.0) * 0.5  # nadir olaylar: kalıba ancak büyük örneklemle güven
+                    w = min(kalip_n / 300.0, 1.0) * 0.5  # nadir olaylar: kalıba ancak büyük örneklemle güven
                     p = (1 - w) * p_model + w * p_kalip
                 kombolar[k] = {
                     "p": float(p),
@@ -765,6 +767,11 @@ def uygulama_olustur():
                     "dep": r["AwayTeam"],
                     "oranli": bool(oranlar),
                     "kombolar": kombolar,
+                    "kalip": (
+                        {"esik": birebir["esik"], "n": birebir["n"], "hedef": birebir["hedef"]}
+                        if birebir else None
+                    ),
+                    "ornekler": birebir["ornekler"] if birebir else [],
                     "surpriz": float(max(kombolar["1/2"]["p"], kombolar["2/1"]["p"])),
                 }
             )
