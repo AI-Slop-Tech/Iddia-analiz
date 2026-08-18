@@ -276,6 +276,7 @@
         <button class="btn" id="btn-tara" onclick="gunTara()">⚡ Günü Tara</button>
         <button class="btn ikincil" onclick="haftaYukle(true)">↻ Fikstürü Yenile</button>
       </div>
+      <div class="not" id="kaynak-notu"></div>
     </div>
     <div class="gun-pilleri" id="gun-pilleri"></div>
     <div id="one-cikanlar"></div>
@@ -536,6 +537,9 @@ async function haftaYukle(yenile, sessiz){
     }
     _gunSecimiKoru();
     pilCiz(); gunCiz(); tabloPilCiz();
+    if(HAFTA.kaynak_yayini)
+      $('#kaynak-notu').textContent =
+        `Kaynağın son bülten yayını: ${HAFTA.kaynak_yayini} — yeni tur maçları kaynak yayınladıkça (genellikle Salı–Perşembe) otomatik eklenir.`;
     if(yenile) bildir('Fikstür yenilendi.');
   }catch(h){
     if(sessiz) return;  // arka plan yenilemesi sessizce pes eder, mevcut görünüm kalır
@@ -557,6 +561,7 @@ async function bosFiksturAciklamasi(){
       icerik = `<div class="dev">📭</div>
         <p><b>Bülten arası.</b> Bu haftanın maçları oynandı; veri kaynağı yeni haftanın
         fikstürünü ve oranlarını genellikle <b>Salı–Perşembe</b> günleri yayınlar.</p>
+        ${HAFTA && HAFTA.kaynak_yayini ? `<p class="ipucu">Kaynağın son bülten yayını: <b>${esc(HAFTA.kaynak_yayini)}</b> — yani gecikme bizde değil, kaynakta.</p>` : ''}
         <p class="ipucu">Panel arka planda kontrol etmeye devam ediyor — bülten düştüğü anda maçlar
         burada otomatik belirecek. Bu arada 📊 Sonuçlar sekmesinden oynanan maçları inceleyebilirsiniz.</p>
         <button class="btn ikincil" onclick="haftaYukle(true)">↻ Şimdi Tekrar Dene</button>`;

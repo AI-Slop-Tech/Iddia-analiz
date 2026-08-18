@@ -427,6 +427,7 @@ def uygulama_olustur():
                 "bugun": simdi.strftime("%d.%m.%Y"),
                 "simdi": simdi.strftime("%H:%M"),
                 "guncelleme": time.strftime("%H:%M", time.localtime(_DURUM["fikstur_zaman"])),
+                "kaynak_yayini": veri.fikstur_kaynak_yayini(),
             }
         )
 

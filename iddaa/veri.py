@@ -578,6 +578,7 @@ def fikstur_indir(yenile: bool = False) -> str:
             raise RuntimeError(f"Fikstür indirilemedi (HTTP {yanit.status_code})")
         with open(hedef, "wb") as f:
             f.write(yanit.content)
+        _kaynak_zamani_kaydet("fixtures", yanit.headers.get("Last-Modified"))
     return hedef
 
 
@@ -597,9 +598,47 @@ def _fikstur_ek_indir(yenile: bool = False) -> str | None:
                 raise ValueError(f"HTTP {yanit.status_code}")
             with open(hedef, "wb") as f:
                 f.write(yanit.content)
+            _kaynak_zamani_kaydet("fixtures_ek", yanit.headers.get("Last-Modified"))
         except Exception:  # noqa: BLE001
             return hedef if os.path.exists(hedef) else None
     return hedef
+
+
+def _kaynak_zamani_kaydet(ad: str, last_modified: str | None) -> None:
+    """Kaynağın kendi 'son yayın' damgasını saklar (arayüzde gösterilir)."""
+    if not last_modified:
+        return
+    try:
+        with open(os.path.join(VERI_KLASORU, f"{ad}.meta"), "w", encoding="utf-8") as f:
+            f.write(last_modified)
+    except OSError:
+        pass
+
+
+def fikstur_kaynak_yayini() -> str | None:
+    """Bülten dosyalarının kaynaktaki en güncel yayın zamanı, TR saatiyle."""
+    from email.utils import parsedate_to_datetime
+
+    en_yeni = None
+    for ad in ("fixtures", "fixtures_ek"):
+        yol = os.path.join(VERI_KLASORU, f"{ad}.meta")
+        try:
+            with open(yol, encoding="utf-8") as f:
+                t = parsedate_to_datetime(f.read().strip())
+            if en_yeni is None or t > en_yeni:
+                en_yeni = t
+        except (OSError, ValueError, TypeError):
+            continue
+    if en_yeni is None:
+        return None
+    try:
+        from zoneinfo import ZoneInfo
+
+        en_yeni = en_yeni.astimezone(ZoneInfo("Europe/Istanbul"))
+    except Exception:  # noqa: BLE001
+        pass
+    gunler = ["Pzt", "Sal", "Çar", "Per", "Cum", "Cmt", "Paz"]
+    return f"{gunler[en_yeni.weekday()]} {en_yeni:%d.%m %H:%M}"
 
 
 def fikstur_yukle(ligler: list[str] | None = None,
