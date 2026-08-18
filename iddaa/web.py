@@ -500,6 +500,7 @@ def uygulama_olustur():
                 "simdi": simdi.strftime("%H:%M"),
                 "guncelleme": time.strftime("%H:%M", time.localtime(_DURUM["fikstur_zaman"])),
                 "kaynak_yayini": veri.fikstur_kaynak_yayini(),
+                "dis": dict(veri.DIS_SON_DURUM),
             }
         )
 

@@ -539,7 +539,7 @@ async function haftaYukle(yenile, sessiz){
     pilCiz(); gunCiz(); tabloPilCiz();
     if(HAFTA.kaynak_yayini)
       $('#kaynak-notu').textContent =
-        `Kaynağın son bülten yayını: ${HAFTA.kaynak_yayini} — yeni tur maçları kaynak yayınladıkça (genellikle Salı–Perşembe) otomatik eklenir.`;
+        `Kaynağın son bülten yayını: ${HAFTA.kaynak_yayini} — yeni tur maçları kaynak yayınladıkça (genellikle Salı–Perşembe) otomatik eklenir.` + disMetni(HAFTA.dis);
     if(yenile) bildir('Fikstür yenilendi.');
   }catch(h){
     if(sessiz) return;  // arka plan yenilemesi sessizce pes eder, mevcut görünüm kalır
@@ -550,6 +550,14 @@ async function haftaYukle(yenile, sessiz){
 
 // açık sekme gün ilerledikçe kendini tazeler (10 dk'da bir, sessizce)
 setInterval(() => { if(HAFTA) haftaYukle(false, true); }, 10 * 60 * 1000);
+
+function disMetni(d){
+  if(!d) return '';
+  if(!d.anahtar_var) return ' · Geniş kapsam: kapalı (FOOTBALL_DATA_ORG_KEY tanımlı değil)';
+  if(d.hata) return ` · Geniş kapsam: ⚠ ${d.hata}`;
+  if(d.mac !== null && d.mac !== undefined) return ` · Geniş kapsam: ${d.mac} maç alındı ✓ (${d.zaman})`;
+  return '';
+}
 
 async function bosFiksturAciklamasi(){
   // Takvim boşken nedenini sistem kendisi teşhis eder: bülten arası mı, erişim engeli mi?

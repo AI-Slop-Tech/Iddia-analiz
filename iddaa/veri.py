@@ -726,6 +726,10 @@ _DIS_KOD = {
 }
 
 
+# geniş kapsama katmanının son deneme durumu (arayüzde öz-teşhis için)
+DIS_SON_DURUM: dict = {"zaman": None, "mac": None, "hata": None, "anahtar_var": False}
+
+
 def dis_fikstur(gun_sayisi: int = 8, yenile: bool = False) -> pd.DataFrame | None:
     """Geniş kapsama fikstürü: football-data.org (ücretsiz anahtar, opsiyonel).
 
@@ -734,6 +738,9 @@ def dis_fikstur(gun_sayisi: int = 8, yenile: bool = False) -> pd.DataFrame | Non
     düşürür. Oran içermez; anahtar yoksa None döner (özellik uykuda).
     """
     anahtar = (os.environ.get("FOOTBALL_DATA_ORG_KEY") or "").strip()
+    DIS_SON_DURUM.update(
+        {"zaman": simdi_tr().strftime("%H:%M"), "anahtar_var": bool(anahtar), "hata": None, "mac": None}
+    )
     onbellek = os.path.join(VERI_KLASORU, "fixtures_dis.json")
     govde = None
     taze = (
@@ -749,6 +756,7 @@ def dis_fikstur(gun_sayisi: int = 8, yenile: bool = False) -> pd.DataFrame | Non
             govde = None
     if govde is None:
         if not anahtar:
+            DIS_SON_DURUM["hata"] = "FOOTBALL_DATA_ORG_KEY tanımlı değil"
             return None
         bas = simdi_tr().date()
         son = (simdi_tr() + pd.Timedelta(days=gun_sayisi)).date()
@@ -761,15 +769,18 @@ def dis_fikstur(gun_sayisi: int = 8, yenile: bool = False) -> pd.DataFrame | Non
                 proxies=proxy_ayari() or None,
             )
             if yanit.status_code != 200:
-                raise ValueError(f"HTTP {yanit.status_code}")
+                ek = " — anahtar hatalı/eksik olabilir" if yanit.status_code in (400, 403) else ""
+                raise ValueError(f"HTTP {yanit.status_code}{ek}")
             govde = yanit.json()
             os.makedirs(VERI_KLASORU, exist_ok=True)
             with open(onbellek, "w", encoding="utf-8") as f:
                 json.dump(govde, f)
-        except Exception:  # noqa: BLE001 - kapsama katmanı ana akışı asla düşürmez
+        except Exception as hata:  # noqa: BLE001 - kapsama katmanı ana akışı asla düşürmez
+            DIS_SON_DURUM["hata"] = str(hata)
             try:
                 with open(onbellek, encoding="utf-8") as f:
                     govde = json.load(f)
+                DIS_SON_DURUM["hata"] = f"canlı çekilemedi ({hata}); önbellek kullanılıyor"
             except (OSError, json.JSONDecodeError):
                 return None
 
@@ -790,6 +801,7 @@ def dis_fikstur(gun_sayisi: int = 8, yenile: bool = False) -> pd.DataFrame | Non
             continue
         satirlar.append({"Div": kod, "LigAdi": ad, "Tarih": tarih, "HomeTeam": ev, "AwayTeam": dep})
     d = pd.DataFrame(satirlar)
+    DIS_SON_DURUM["mac"] = int(len(d))
     if d.empty:
         return d
     for k in ("oran_ev", "oran_berabere", "oran_dep", "oran_ust25", "oran_alt25",
