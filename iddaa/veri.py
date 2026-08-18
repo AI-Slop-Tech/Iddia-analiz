@@ -423,6 +423,11 @@ def _ek_arsiv_oku(yol: str, kod: str) -> pd.DataFrame | None:
     c["oran_dep_maks"] = _satir_maksimum(p, ["MaxA", "MaxCA", "PSA", "PSCA", "B365A", "B365CA", "BFEA", "BFECA"])
     c["oran_ust25_maks"] = float("nan")
     c["oran_alt25_maks"] = float("nan")
+    c["oran_ev_kapanis"] = _ilk_dolu_kolon(p, ["PSCH", "B365CH", "AvgCH", "MaxCH"])
+    c["oran_berabere_kapanis"] = _ilk_dolu_kolon(p, ["PSCD", "B365CD", "AvgCD", "MaxCD"])
+    c["oran_dep_kapanis"] = _ilk_dolu_kolon(p, ["PSCA", "B365CA", "AvgCA", "MaxCA"])
+    c["oran_ust25_kapanis"] = float("nan")
+    c["oran_alt25_kapanis"] = float("nan")
     c = c.dropna(subset=["Tarih", "FTHG", "FTAG", "FTR"])
     c["FTHG"] = c["FTHG"].astype(int)
     c["FTAG"] = c["FTAG"].astype(int)
@@ -486,12 +491,22 @@ def veriyi_yukle(ligler: list[str] | None = None) -> pd.DataFrame:
         df["oran_ust25_maks"] = _satir_maks(_UST25_ORAN + ["BbMx>2.5"])
         df["oran_alt25_maks"] = _satir_maks(_ALT25_ORAN + ["BbMx<2.5"])
 
+        # KAPANIŞ oranları (CLV takibi için): keskin Pinnacle kapanışı önce,
+        # sonra Bet365 ve piyasa ortalaması kapanışları (~2019 sonrası dosyalarda var)
+        df["oran_ev_kapanis"] = _ilk_dolu_kolon(df, ["PSCH", "B365CH", "AvgCH", "MaxCH"])
+        df["oran_berabere_kapanis"] = _ilk_dolu_kolon(df, ["PSCD", "B365CD", "AvgCD", "MaxCD"])
+        df["oran_dep_kapanis"] = _ilk_dolu_kolon(df, ["PSCA", "B365CA", "AvgCA", "MaxCA"])
+        df["oran_ust25_kapanis"] = _ilk_dolu_kolon(df, ["PC>2.5", "B365C>2.5", "AvgC>2.5", "MaxC>2.5"])
+        df["oran_alt25_kapanis"] = _ilk_dolu_kolon(df, ["PC<2.5", "B365C<2.5", "AvgC<2.5", "MaxC<2.5"])
+
     kolonlar = [
         "Div", "Sezon", "Tarih", "HomeTeam", "AwayTeam", "FTHG", "FTAG", "FTR",
         "HTHG", "HTAG", *ISTATISTIK_KOLONLARI,
         "oran_ev", "oran_berabere", "oran_dep", "oran_ust25", "oran_alt25",
         "oran_ev_maks", "oran_berabere_maks", "oran_dep_maks",
         "oran_ust25_maks", "oran_alt25_maks",
+        "oran_ev_kapanis", "oran_berabere_kapanis", "oran_dep_kapanis",
+        "oran_ust25_kapanis", "oran_alt25_kapanis",
     ]
     parcalar = [df[kolonlar]]
 

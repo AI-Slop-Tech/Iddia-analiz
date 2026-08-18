@@ -1433,6 +1433,9 @@ function tahminOzetHTML(t){
     const isaret = t.tuttu === true ? '✅' : (t.tuttu === false ? '❌' : '⏳');
     parcalar.push(`<span class="rozet">🤖 ${SECIM_AD[t.secim] || esc(t.secim)}${t.oran ? ' @' + Number(t.oran).toFixed(2) : ''} ${isaret}</span>`);
   }
+  if(t.clv != null) parcalar.push(
+    `<span class="ipucu" style="white-space:nowrap">kapanış ${Number(t.kapanis_oran).toFixed(2)} ·
+     CLV <b class="${t.clv >= 0 ? 'ev-poz' : 'ev-neg'}">${t.clv >= 0 ? '+' : ''}${(t.clv * 100).toFixed(1)}%</b></span>`);
   const hucre = (ad, dogru) => dogru === undefined ? '' :
     `<span class="ipucu" style="white-space:nowrap">${ad} ${dogru ? '✓' : '✗'}</span>`;
   parcalar.push(hucre('MS', t.ms_dogru), hucre('Ü/A', t.ua_dogru), hucre('KG', t.kg_dogru));
@@ -1457,8 +1460,12 @@ async function sonuclarYukle(sessiz){
         ${k.kg_n ? rozet('KG isabet', k.kg_dogru + '/' + k.kg_n + ' (' + pct(k.kg_dogru / k.kg_n) + ')') : ''}
         ${k.secim_n ? rozet('Seçim isabeti', k.secim_tutan + '/' + k.secim_n) : ''}
         ${k.degerli_n ? `<span class="rozet">Değerli seçim P/L: <b class="${k.degerli_kar >= 0 ? 'ev-poz' : 'ev-neg'}">${k.degerli_kar.toFixed(1)} birim</b> (${k.degerli_n} bahis, ROI ${(k.degerli_kar / k.degerli_n * 100).toFixed(1)}%)</span>` : ''}
+        ${k.clv_n ? `<span class="rozet">📉 Kapanış değeri (CLV): <b class="${k.clv_ort >= 0 ? 'ev-poz' : 'ev-neg'}">${k.clv_ort >= 0 ? '+' : ''}${(k.clv_ort * 100).toFixed(1)}%</b> ort · kapanışı yenme ${k.clv_yenen}/${k.clv_n} (${pct(k.clv_yenen / k.clv_n)})</span>` : ''}
         ${s.bekleyen ? rozet('Sonuç bekleyen', s.bekleyen) : ''}
       </div>
+      ${k.clv_n ? `<div class="not">💡 CLV = alınan oran ÷ kapanış oranı − 1 (kapanış: Pinnacle/Bet365 maç başı fiyatı).
+        Ortalama CLV <b>pozitifse</b> piyasadan önce doğru fiyatı yakalıyorsunuz — kısa vadeli şans dalgalanmasından bağımsız,
+        uzun vadeli kazanmanın en güvenilir göstergesi budur. Negatifse isabet yüzdesi yüksek görünse bile fiyat geç alınıyor demektir.</div>` : ''}
     </div>` : `<div class="not" style="margin-bottom:14px">🎓 Karne henüz boş — Bu Hafta'da <b>⚡ Günü Tara</b> veya <b>📋 Tahmin Tablosu</b> çalıştırın; tahminler maç başlamadan kaydedilir ve maçlar bitince burada notlanır.</div>`;
 
     if(!s.satirlar.length){

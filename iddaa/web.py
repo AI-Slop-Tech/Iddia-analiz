@@ -1101,10 +1101,20 @@ def uygulama_olustur():
                 "ÜST 2.5": toplam > 2.5, "ALT 2.5": toplam < 2.5,
             }.get(secim)
 
+        def _kapanis_orani(secim: str | None, r) -> float | None:
+            kol = {"MS1": "oran_ev_kapanis", "MS0": "oran_berabere_kapanis",
+                   "MS2": "oran_dep_kapanis", "ÜST 2.5": "oran_ust25_kapanis",
+                   "ALT 2.5": "oran_alt25_kapanis"}.get(secim or "")
+            if not kol:
+                return None
+            deger = getattr(r, kol, None)
+            return float(deger) if deger is not None and not pd.isna(deger) else None
+
         satirlar = []
         karne = {"toplam": 0, "ms_dogru": 0, "ms_n": 0, "ua_dogru": 0, "ua_n": 0,
                  "kg_dogru": 0, "kg_n": 0, "secim_tutan": 0, "secim_n": 0,
-                 "degerli_kar": 0.0, "degerli_n": 0}
+                 "degerli_kar": 0.0, "degerli_n": 0,
+                 "clv_toplam": 0.0, "clv_n": 0, "clv_yenen": 0}
         for r in m.itertuples():
             anahtar = f"{r.Tarih.strftime('%d.%m.%Y')}|{r.HomeTeam}|{r.AwayTeam}"
             t = gunluk.get(anahtar)
@@ -1135,6 +1145,17 @@ def uygulama_olustur():
                     if t.get("karar") == "degerli":
                         karne["degerli_n"] += 1
                         karne["degerli_kar"] += (float(t["oran"]) - 1.0) if tuttu else -1.0
+                    # CLV: kayıt anında alınan oran vs kapanış oranı. Alınan oran
+                    # kapanıştan yüksekse piyasa bize doğru kapanmış demektir —
+                    # uzun vadeli kazanmanın asıl göstergesi budur.
+                    kapanis = _kapanis_orani(t.get("secim"), r)
+                    if kapanis and kapanis > 1 and t.get("oran"):
+                        clv = float(t["oran"]) / kapanis - 1.0
+                        tahmin["kapanis_oran"] = round(kapanis, 2)
+                        tahmin["clv"] = round(clv, 4)
+                        karne["clv_n"] += 1
+                        karne["clv_toplam"] += clv
+                        karne["clv_yenen"] += int(clv > 0)
 
             istatistik = {}
             for ad, (hk, ak) in (
@@ -1161,6 +1182,8 @@ def uygulama_olustur():
                     "tahmin": tahmin,
                 }
             )
+
+        karne["clv_ort"] = round(karne["clv_toplam"] / karne["clv_n"], 4) if karne["clv_n"] else None
 
         # sonucu henüz arşive düşmemiş (bekleyen) kayıtlı tahminler
         eslesen = {f"{s['tarih']}|{s['ev']}|{s['dep']}" for s in satirlar}
