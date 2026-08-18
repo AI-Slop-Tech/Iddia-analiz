@@ -8,6 +8,8 @@ sinyalleri; hangileri mevcutsa onlarla, doğal bir analist diliyle birleştirili
 
 from __future__ import annotations
 
+import zlib
+
 from .analiz import ORAN_TAVANI
 
 SECIM_AD = {
@@ -21,6 +23,36 @@ SECIM_AD = {
 
 def _y(p: float) -> str:
     return f"%{p * 100:.0f}"
+
+
+def _sec(a: dict, grup: str, secenekler: list[str]) -> str:
+    """Maça sabit ama maçtan maça değişen kalıp seçimi (yorumlar tekdüzeleşmesin)."""
+    tohum = zlib.crc32(f"{a['ev']}|{a['dep']}|{grup}".encode("utf-8"))
+    return secenekler[tohum % len(secenekler)]
+
+
+def _seri_notu(a: dict) -> str:
+    """Form serilerinden maça özgü dikkat çekici serileri çıkarır."""
+    bulgular = []
+    for f, ad in ((a["form_ev"], a["ev"]), (a["form_dep"], a["dep"])):
+        s = f["seri"]
+        if len(s) < 3:
+            continue
+        son = s[-1]
+        ayni = len(s) - len(s.rstrip(son))          # sondaki aynı sonuç sayısı
+        yenilmez = len(s) - len(s.rstrip("GB"))     # sondaki G/B zinciri
+        kazanamaz = len(s) - len(s.rstrip("BM"))    # sondaki B/M zinciri
+        if son == "G" and ayni >= 3:
+            bulgular.append(f"{ad} son {ayni} maçını da kazandı")
+        elif yenilmez >= 4:
+            bulgular.append(f"{ad} {yenilmez} maçtır yenilmiyor")
+        elif son == "M" and ayni >= 3:
+            bulgular.append(f"{ad} üst üste {ayni} maç kaybetti")
+        elif kazanamaz >= 4:
+            bulgular.append(f"{ad} {kazanamaz} maçtır kazanamıyor")
+    if not bulgular:
+        return ""
+    return "Seri notu: " + "; ".join(bulgular) + "."
 
 
 def _guc_dengesi(a: dict) -> str:
@@ -42,7 +74,11 @@ def _guc_dengesi(a: dict) -> str:
                 f"kapatılabilir bir üstünlük veriyor."
             )
         else:
-            cumleler.append("Elo reytingleri neredeyse başa baş; kâğıt üstünde dengeli bir eşleşme.")
+            cumleler.append(_sec(a, "elo-denk", [
+                "Elo reytingleri neredeyse başa baş; kâğıt üstünde dengeli bir eşleşme.",
+                "Reyting tablosu iki takımı burun buruna gösteriyor — kâğıt üstünde ayrışma yok.",
+                "Elo tarafında anlamlı bir fark yok; bu maçın kaderini gücün değil günün formu belirleyecek gibi.",
+            ]))
 
     fe, fd = a["form_ev"], a["form_dep"]
     if fe["mac"] >= 5 and fd["mac"] >= 5:
@@ -69,10 +105,15 @@ def _guc_dengesi(a: dict) -> str:
 
     fes, fds = a["form_ev_saha"], a["form_dep_saha"]
     if fes["mac"] >= 3 and fds["mac"] >= 3:
-        cumleler.append(
+        cumleler.append(_sec(a, "saha", [
             f"Saha kırılımı önemli: {ev} iç sahada son {fes['mac']} maçında {fes['puan']} puan "
-            f"({fes['seri']}), {dep} ise deplasmanda {fds['puan']} puan ({fds['seri']}) çıkardı."
-        )
+            f"({fes['seri']}), {dep} ise deplasmanda {fds['puan']} puan ({fds['seri']}) çıkardı.",
+            f"İç saha-deplasman ayrımına bakınca {ev} evinde {fes['mac']} maçta {fes['puan']} puanla "
+            f"{fes['seri']} serisi yakalamış; {dep}'in deplasman karnesi {fds['seri']} ile {fds['puan']} puan.",
+        ]))
+    seri = _seri_notu(a)
+    if seri:
+        cumleler.append(seri)
     return " ".join(cumleler)
 
 
@@ -121,10 +162,14 @@ def _gol_beklentisi(a: dict) -> str:
         tempo = "orta tempolu bir maç profili"
     else:
         tempo = "açık ve gollü bir maç profili"
-    cumleler = [
+    cumleler = [_sec(a, "gol-acilis", [
         f"Model gol beklentisini {ev} {p['lambda_ev']:.2f} – {p['lambda_dep']:.2f} {dep} "
-        f"olarak kuruyor; toplam {toplam:.1f} gol bandı {tempo} anlatıyor."
-    ]
+        f"olarak kuruyor; toplam {toplam:.1f} gol bandı {tempo} anlatıyor.",
+        f"Hücum-savunma güçleri hesaba katıldığında gol beklentisi {ev} için {p['lambda_ev']:.2f}, "
+        f"{dep} için {p['lambda_dep']:.2f}; {toplam:.1f} gollük toplam, {tempo} demek.",
+        f"Gol matematiği şöyle kuruluyor: {ev} {p['lambda_ev']:.2f} – {p['lambda_dep']:.2f} {dep}. "
+        f"Bu, {tempo} işaret eden {toplam:.1f} gollük bir bant.",
+    ])]
 
     k = a.get("kalip")
     if k:
@@ -143,9 +188,11 @@ def _gol_beklentisi(a: dict) -> str:
         cumleler.append(f"Karşılıklı gol olasılığı {_y(p['kg_var'])} ile güçlü.")
     elif p["kg_var"] <= 0.45:
         cumleler.append(f"Karşılıklı gol beklentisi zayıf ({_y(p['kg_var'])}).")
-    en_olasi = p["skorlar"][0][0] if p["skorlar"] else None
-    if en_olasi:
-        cumleler.append(f"En olası tekil skor {en_olasi}.")
+    if len(p["skorlar"]) >= 2:
+        cumleler.append(
+            f"En olası skorlar {p['skorlar'][0][0]} ve {p['skorlar'][1][0]} "
+            f"(tekil skor olasılıkları doğal olarak düşüktür; yön pazarları daha güvenilirdir)."
+        )
     return " ".join(cumleler)
 
 
@@ -188,10 +235,14 @@ def _deger(a: dict) -> str:
                 f"backtest bu tuzağı net biçimde doğruladı. Profesyonel duruş bu maçı pas geçmek."
             )
         else:
-            cumleler.append(
+            cumleler.append(_sec(a, "pas", [
                 "Bu oranlarla masada gerçek bir değer yok; en iyi seçim bile eksi beklenen değerde. "
-                "Uzun vadede kazandıran, değersiz maça para bağlamamaktır — bu maç izlemelik."
-            )
+                "Uzun vadede kazandıran, değersiz maça para bağlamamaktır — bu maç izlemelik.",
+                "Piyasa bu maçı doğru fiyatlamış görünüyor: hiçbir seçimde anlamlı bir kenar yok. "
+                "Profesyonel disiplin böyle maçlarda kuponu kapatıp beklemeyi gerektirir.",
+                "Oranlar modelin olasılıklarıyla örtüşüyor; yani bahisçiye karşı bir avantaj penceresi açık değil. "
+                "Bu maçta pas, pasif değil bilinçli bir karardır.",
+            ]))
     return " ".join(cumleler)
 
 

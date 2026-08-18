@@ -460,6 +460,7 @@ function yildizHTML(n){ return `<span class="yildizlar">${'★'.repeat(n)}${'☆
 
 /* ---------- başlangıç ---------- */
 let TAKIMLAR = [], HAFTA = null, AKTIF_GUN = null, TARAMALAR = {};
+let GEMINI_VAR = false, GEMINI_BAGLAMLAR = {}, GEMINI_SAYAC = 0;
 async function baslat(){
   try{
     const d = await api('/api/durum');
@@ -474,8 +475,10 @@ async function baslat(){
       rozet('Maç', d.toplam_mac.toLocaleString('tr-TR')) +
       rozet('Arşiv', d.ilk_tarih.slice(-4) + '–' + d.son_tarih.slice(-4)) +
       rozet('Oran kapsamı', pct1(d.oran_kapsami));
+    GEMINI_VAR = !!d.gemini;
     $('#surum-notu').textContent =
-      `İddaa Analiz v${d.surum} · veri yüklemesi: ${d.veri_zamani} · fikstür ve arşiv otomatik tazelenir`;
+      `İddaa Analiz v${d.surum} · veri yüklemesi: ${d.veri_zamani} · fikstür ve arşiv otomatik tazelenir` +
+      (GEMINI_VAR ? ' · Gemini bağlı ✨' : '');
     d.ligler.forEach(l => {
       $('#g-lig').insertAdjacentHTML('beforeend', `<option value="${esc(l.kod)}">${esc(l.ad)}</option>`);
       $('#h-lig').insertAdjacentHTML('beforeend', `<option value="${esc(l.kod)}">${esc(l.ad)}</option>`);
@@ -661,7 +664,7 @@ async function detayToggle(id, kaydir){
   kutu.innerHTML = '<div class="detay-panel yukleniyor">⏳ Maç analiz ediliyor…</div>';
   try{
     const s = await api('/api/mac-detay?id=' + id);
-    kutu.innerHTML = `<div class="detay-panel">${kitapciHTML(s)}${takimSonucHTML(s)}${tahminDetayHTML(s)}</div>`;
+    kutu.innerHTML = `<div class="detay-panel">${kitapciHTML(s)}${takimSonucHTML(s, {id})}${tahminDetayHTML(s)}</div>`;
   }catch(h){
     kutu.innerHTML = `<div class="detay-panel"><span class="ev-neg">${esc(h.message)}</span></div>`;
   }
@@ -852,7 +855,7 @@ async function takimAnaliz(){
   const b = $('#btn-takim'); b.disabled = true;
   try{
     const s = await api('/api/takim-analiz', {ev, dep, oranlar, tolerans: Number($('#tol').value)});
-    $('#takim-sonuc').innerHTML = takimSonucHTML(s);
+    $('#takim-sonuc').innerHTML = takimSonucHTML(s, {ev: s.ev, dep: s.dep, oranlar: s.oranlar});
   }catch(h){ bildir(h.message, true); }
   b.disabled = false;
 }
@@ -872,7 +875,46 @@ function formKart(f, saha, etiket){
   </div>`;
 }
 
-function takimSonucHTML(s){
+function geminiKart(gctx){
+  if(!GEMINI_VAR || !gctx) return '';
+  const gid = ++GEMINI_SAYAC;
+  GEMINI_BAGLAMLAR[gid] = gctx;
+  return `<div class="kart">
+    <h2>✨ Gemini Derin Analiz</h2>
+    <div class="alt-baslik">Maçın tüm istatistik raporu Gemini'ye gönderilir; maça özel, insan analisti üslubunda ayrıntılı yorum ve kupon önerileri döner.</div>
+    <button class="btn ikincil" id="gbtn-${gid}" onclick="geminiCalistir(${gid})">✨ Gemini Yorumu Al</button>
+    <div id="gemini-${gid}"></div>
+  </div>`;
+}
+
+async function geminiCalistir(gid){
+  const b = $('#gbtn-' + gid), kutu = $('#gemini-' + gid);
+  b.disabled = true; b.textContent = '⏳ Gemini analiz ediyor… (10-30 sn)';
+  try{
+    const s = await api('/api/gemini-yorum', GEMINI_BAGLAMLAR[gid]);
+    kutu.innerHTML = miniMarkdown(s.yorum);
+    b.style.display = 'none';
+  }catch(h){
+    bildir(h.message, true);
+    b.disabled = false; b.textContent = '✨ Gemini Yorumu Al';
+  }
+}
+
+function miniMarkdown(t){
+  let html = '';
+  for(let satir of esc(t).split('\n')){
+    satir = satir.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
+    if(/^#{1,4}\s/.test(satir))
+      html += `<div style="font-weight:800;margin:14px 0 4px;font-size:15px">${satir.replace(/^#+\s*/, '')}</div>`;
+    else if(/^\s*[-*]\s/.test(satir))
+      html += `<div style="margin:3px 0 3px 14px;line-height:1.6;font-size:14px">• ${satir.replace(/^\s*[-*]\s*/, '')}</div>`;
+    else if(satir.trim())
+      html += `<p style="margin:8px 0;line-height:1.65;font-size:14px">${satir}</p>`;
+  }
+  return html;
+}
+
+function takimSonucHTML(s, gctx){
   let html = '';
 
   if(s.oneri){
@@ -894,6 +936,7 @@ function takimSonucHTML(s){
       ${s.yorum.map(p => `<p style="font-size:14.5px;line-height:1.7;margin:10px 0;color:var(--metin)">${esc(p)}</p>`).join('')}
     </div>`;
   }
+  html += geminiKart(gctx);
 
   html += `<div class="izgara">
     ${formKart(s.form_ev, s.form_ev_saha, 'ev sahibi')}

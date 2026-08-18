@@ -21,7 +21,7 @@ import time
 import pandas as pd
 
 from . import __version__ as SURUM
-from . import analiz, backtest, kayit, veri, yorum
+from . import analiz, backtest, kayit, rapor, veri, yorum
 
 _DURUM: dict = {
     "df": None, "elo": None, "fikstur": None, "kitapcilar": [],
@@ -254,6 +254,7 @@ def uygulama_olustur():
                 "son_tarih": _t(df["Tarih"].max()),
                 "oran_kapsami": round(float(df["oran_ev"].notna().mean()), 3),
                 "surum": SURUM,
+                "gemini": bool(os.environ.get("GEMINI_API_KEY")),
                 "veri_zamani": time.strftime("%d.%m %H:%M", time.localtime(_DURUM["arsiv_zaman"])),
                 "ligler": [
                     {"kod": lig, "ad": veri.LIGLER.get(lig, lig), "mac": int(adet)}
@@ -613,6 +614,47 @@ def uygulama_olustur():
             "ust_alt": ozet["ust_alt"],
         }
         return jsonify(j)
+
+    @app.post("/api/gemini-yorum")
+    def gemini_yorumu():
+        """Maçın tam istatistik raporunu Gemini'ye gönderip analist yorumu döndürür.
+
+        Gövde: {"id": fikstür-id}  veya  {"ev","dep","oranlar"?}.
+        Anahtar sunucu ortamından okunur (GEMINI_API_KEY) — istemciden asla gelmez.
+        """
+        try:
+            df = _df()
+        except FileNotFoundError:
+            return jsonify({"hata": "Önce veriyi güncelleyin."}), 503
+        if not os.environ.get("GEMINI_API_KEY"):
+            return jsonify({"hata": "Sunucuda GEMINI_API_KEY tanımlı değil (Coolify > Environment Variables)."}), 400
+        govde = request.get_json(silent=True) or {}
+        try:
+            if govde.get("id") is not None:
+                fik, _kitapcilar = _fikstur()
+                r = fik.loc[int(govde["id"])]
+                oranlar, _maks, ust_alt = _fikstur_oranlari(r)
+                a = analiz.mac_analizi(
+                    df, r["HomeTeam"], r["AwayTeam"],
+                    oranlar=tuple(oranlar) if oranlar else None,
+                    elo=_DURUM["elo"],
+                    ust_alt=tuple(ust_alt) if ust_alt else None,
+                    lig_ipucu=r["Div"],
+                )
+            else:
+                ev = veri.takim_bul(df, str(govde.get("ev", "")))
+                dep = veri.takim_bul(df, str(govde.get("dep", "")))
+                oranlar = _oranlari_dogrula(govde.get("oranlar")) if govde.get("oranlar") else None
+                a = analiz.mac_analizi(df, ev, dep, oranlar=oranlar, elo=_DURUM["elo"])
+        except (KeyError, ValueError) as hata:
+            return jsonify({"hata": f"Maç kurulamadı: {hata}"}), 404
+
+        metin = rapor.rapor_olustur(a, lig_adi=veri.LIGLER.get(a["poisson"]["lig"], ""))
+        try:
+            from . import gemini_yorum
+            return jsonify({"yorum": gemini_yorum.yorum_al(metin)})
+        except Exception as hata:  # noqa: BLE001 - kota/anahtar hataları kullanıcıya düz metin döner
+            return jsonify({"hata": str(hata)}), 502
 
     @app.get("/api/sonuclar")
     def sonuclar():
