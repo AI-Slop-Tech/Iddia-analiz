@@ -277,6 +277,13 @@
         <button class="btn ikincil" onclick="haftaYukle(true)">↻ Fikstürü Yenile</button>
       </div>
       <div class="not" id="kaynak-notu"></div>
+      <div id="anahtar-kutu" style="display:none;margin-top:12px" class="form-satir">
+        <div class="alan" style="flex:1;min-width:220px">
+          <label>🔑 football-data.org anahtarı — takvimi ~90 maça çıkarır (panelden kaydedilir, Coolify env gerekmez)</label>
+          <input id="fd-anahtar" type="password" placeholder="anahtarı buraya yapıştır" autocomplete="off">
+        </div>
+        <button class="btn ikincil" id="btn-anahtar" onclick="anahtarKaydet()">💾 Kaydet ve Dene</button>
+      </div>
     </div>
     <div class="gun-pilleri" id="gun-pilleri"></div>
     <div id="one-cikanlar"></div>
@@ -540,6 +547,7 @@ async function haftaYukle(yenile, sessiz){
     if(HAFTA.kaynak_yayini)
       $('#kaynak-notu').textContent =
         `Kaynağın son bülten yayını: ${HAFTA.kaynak_yayini} — yeni tur maçları kaynak yayınladıkça (genellikle Salı–Perşembe) otomatik eklenir.` + disMetni(HAFTA.dis);
+    $('#anahtar-kutu').style.display = (HAFTA.dis && !HAFTA.dis.anahtar_var) ? '' : 'none';
     if(yenile) bildir('Fikstür yenilendi.');
   }catch(h){
     if(sessiz) return;  // arka plan yenilemesi sessizce pes eder, mevcut görünüm kalır
@@ -550,6 +558,19 @@ async function haftaYukle(yenile, sessiz){
 
 // açık sekme gün ilerledikçe kendini tazeler (10 dk'da bir, sessizce)
 setInterval(() => { if(HAFTA) haftaYukle(false, true); }, 10 * 60 * 1000);
+
+async function anahtarKaydet(){
+  const deger = $('#fd-anahtar').value.trim();
+  if(!deger){ bildir('Önce anahtarı yapıştırın.', true); return; }
+  const b = $('#btn-anahtar'); b.disabled = true; b.textContent = '⏳ Deneniyor…';
+  try{
+    await api('/api/ayarlar', {football_data_org_key: deger});
+    $('#fd-anahtar').value = '';
+    bildir('Anahtar kaydedildi — takvim genişletiliyor…');
+    await haftaYukle(true);
+  }catch(h){ bildir(h.message, true); }
+  b.disabled = false; b.textContent = '💾 Kaydet ve Dene';
+}
 
 function disMetni(d){
   if(!d) return '';

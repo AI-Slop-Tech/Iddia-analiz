@@ -254,8 +254,8 @@ def uygulama_olustur():
                 "son_tarih": _t(df["Tarih"].max()),
                 "oran_kapsami": round(float(df["oran_ev"].notna().mean()), 3),
                 "surum": SURUM,
-                "gemini": bool(os.environ.get("GEMINI_API_KEY")),
-                "dis_kapsam": bool(os.environ.get("FOOTBALL_DATA_ORG_KEY")),
+                "gemini": bool(veri.gizli_anahtar("GEMINI_API_KEY", "gemini_api_key")),
+                "dis_kapsam": bool(veri.gizli_anahtar("FOOTBALL_DATA_ORG_KEY", "football_data_org_key")),
                 "veri_zamani": time.strftime("%d.%m %H:%M", time.localtime(_DURUM["arsiv_zaman"])),
                 "ligler": [
                     {"kod": lig, "ad": veri.LIGLER.get(lig, lig), "mac": int(adet)}
@@ -693,6 +693,34 @@ def uygulama_olustur():
         }
         return jsonify(j)
 
+    @app.post("/api/ayarlar")
+    def ayarlar():
+        """API anahtarlarını panelden kaydeder (kalıcı diske; env gerektirmez).
+
+        Değerler asla geri okunmaz/gösterilmez; boş değer kaydı siler.
+        """
+        govde = request.get_json(silent=True) or {}
+        degisti = False
+        for ad in ("football_data_org_key", "gemini_api_key"):
+            if ad in govde:
+                veri.ayar_yaz(ad, str(govde.get(ad) or ""))
+                degisti = True
+        if not degisti:
+            return jsonify({"hata": "Kaydedilecek ayar gönderilmedi."}), 400
+        # yeni anahtar hemen denensin: kapsama önbelleğini ve bellekteki fikstürü düşür
+        try:
+            os.remove(os.path.join(veri.VERI_KLASORU, "fixtures_dis.json"))
+        except OSError:
+            pass
+        _DURUM["fikstur"] = None
+        return jsonify(
+            {
+                "tamam": True,
+                "gemini": bool(veri.gizli_anahtar("GEMINI_API_KEY", "gemini_api_key")),
+                "dis_kapsam": bool(veri.gizli_anahtar("FOOTBALL_DATA_ORG_KEY", "football_data_org_key")),
+            }
+        )
+
     @app.post("/api/gemini-yorum")
     def gemini_yorumu():
         """Maçın tam istatistik raporunu Gemini'ye gönderip analist yorumu döndürür.
@@ -704,8 +732,8 @@ def uygulama_olustur():
             df = _df()
         except FileNotFoundError:
             return jsonify({"hata": "Önce veriyi güncelleyin."}), 503
-        if not os.environ.get("GEMINI_API_KEY"):
-            return jsonify({"hata": "Sunucuda GEMINI_API_KEY tanımlı değil (Coolify > Environment Variables)."}), 400
+        if not veri.gizli_anahtar("GEMINI_API_KEY", "gemini_api_key"):
+            return jsonify({"hata": "Gemini anahtarı tanımlı değil (Bu Hafta sekmesindeki anahtar kutusundan veya GEMINI_API_KEY ile ekleyin)."}), 400
         govde = request.get_json(silent=True) or {}
         try:
             if govde.get("id") is not None:
