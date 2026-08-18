@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import difflib
 import glob
+import json
 import os
 import re
 import time
@@ -711,6 +712,89 @@ def fikstur_yukle(ligler: list[str] | None = None,
 
     f = f.sort_values("Tarih").reset_index(drop=True)
     return f, mevcut_kitapcilar
+
+
+DIS_KAPSAM_URL = "https://api.football-data.org/v4/matches"
+# football-data.org yarışma kodu -> (bizim kod, görünen ad). None ad = LIGLER'den.
+_DIS_KOD = {
+    "CL": ("ŞL", "UEFA Şampiyonlar Ligi"),
+    "PL": ("E0", None), "ELC": ("E1", None), "BL1": ("D1", None),
+    "SA": ("I1", None), "PD": ("SP1", None), "FL1": ("F1", None),
+    "DED": ("N1", None), "PPL": ("P1", None), "BSA": ("BRA", None),
+    "EC": ("EURO", "Avrupa Şampiyonası"), "WC": ("DK", "Dünya Kupası"),
+}
+
+
+def dis_fikstur(gun_sayisi: int = 8, yenile: bool = False) -> pd.DataFrame | None:
+    """Geniş kapsama fikstürü: football-data.org (ücretsiz anahtar, opsiyonel).
+
+    FOOTBALL_DATA_ORG_KEY tanımlıysa Şampiyonlar Ligi (elemeler dahil) ve
+    büyük liglerin maçlarını, oranlar yayınlanmadan günler önce takvime
+    düşürür. Oran içermez; anahtar yoksa None döner (özellik uykuda).
+    """
+    anahtar = (os.environ.get("FOOTBALL_DATA_ORG_KEY") or "").strip()
+    onbellek = os.path.join(VERI_KLASORU, "fixtures_dis.json")
+    govde = None
+    taze = (
+        os.path.exists(onbellek)
+        and not yenile
+        and time.time() - os.path.getmtime(onbellek) < FIKSTUR_TTL_SANIYE
+    )
+    if taze:
+        try:
+            with open(onbellek, encoding="utf-8") as f:
+                govde = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            govde = None
+    if govde is None:
+        if not anahtar:
+            return None
+        bas = simdi_tr().date()
+        son = (simdi_tr() + pd.Timedelta(days=gun_sayisi)).date()
+        try:
+            yanit = requests.get(
+                DIS_KAPSAM_URL,
+                params={"dateFrom": str(bas), "dateTo": str(son)},
+                headers={"X-Auth-Token": anahtar, "User-Agent": KULLANICI_AJANI},
+                timeout=30,
+                proxies=proxy_ayari() or None,
+            )
+            if yanit.status_code != 200:
+                raise ValueError(f"HTTP {yanit.status_code}")
+            govde = yanit.json()
+            os.makedirs(VERI_KLASORU, exist_ok=True)
+            with open(onbellek, "w", encoding="utf-8") as f:
+                json.dump(govde, f)
+        except Exception:  # noqa: BLE001 - kapsama katmanı ana akışı asla düşürmez
+            try:
+                with open(onbellek, encoding="utf-8") as f:
+                    govde = json.load(f)
+            except (OSError, json.JSONDecodeError):
+                return None
+
+    satirlar = []
+    for m in govde.get("matches") or []:
+        yarisma = m.get("competition") or {}
+        kod, ad = _DIS_KOD.get(yarisma.get("code"), (yarisma.get("code") or "?", yarisma.get("name")))
+        utc = pd.to_datetime(m.get("utcDate"), errors="coerce", utc=True)
+        if pd.isna(utc):
+            continue
+        try:
+            tarih = utc.tz_convert("Europe/Istanbul").tz_localize(None)
+        except Exception:  # noqa: BLE001
+            tarih = utc.tz_localize(None) + pd.Timedelta(hours=3)
+        ev = (m.get("homeTeam") or {}).get("shortName") or (m.get("homeTeam") or {}).get("name")
+        dep = (m.get("awayTeam") or {}).get("shortName") or (m.get("awayTeam") or {}).get("name")
+        if not ev or not dep:
+            continue
+        satirlar.append({"Div": kod, "LigAdi": ad, "Tarih": tarih, "HomeTeam": ev, "AwayTeam": dep})
+    d = pd.DataFrame(satirlar)
+    if d.empty:
+        return d
+    for k in ("oran_ev", "oran_berabere", "oran_dep", "oran_ust25", "oran_alt25",
+              "oran_max_ev", "oran_max_berabere", "oran_max_dep"):
+        d[k] = float("nan")
+    return d
 
 
 def takim_listesi(df: pd.DataFrame, lig: str | None = None) -> pd.DataFrame:
