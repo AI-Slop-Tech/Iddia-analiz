@@ -708,6 +708,69 @@ def uygulama_olustur():
         kayit.kaydet(gunluk_kayitlar)
         return jsonify(satirlar)
 
+    @app.post("/api/surpriz-radar")
+    def surpriz_radar():
+        """Günün maçlarını İY/MS sürpriz kombinasyonlarına göre tarar.
+
+        Her maç için "1/2", "2/1", "0/1", "0/2" olasılıkları: yarı-bazlı
+        Poisson modeli + aynı oran kalıbındaki tarihsel gerçekleşme frekansı
+        harmanı. Çıktı, çapraz sürpriz (1/2 veya 2/1) olasılığına göre sıralı.
+        """
+        try:
+            df = _df()
+        except FileNotFoundError:
+            return jsonify({"hata": "Önce veriyi güncelleyin."}), 503
+        govde = request.get_json(silent=True) or {}
+        tarih = str(govde.get("tarih", ""))
+        try:
+            fik, _kitapcilar = _fikstur()
+        except Exception as hata:  # noqa: BLE001
+            return jsonify({"hata": f"Fikstür alınamadı: {hata}"}), 502
+        hedef = fik[fik["Tarih"].dt.strftime("%d.%m.%Y") == tarih]
+
+        FOKUS = ("1/2", "2/1", "0/1", "0/2")
+        satirlar = []
+        for idx, r in hedef.iterrows():
+            if bool(r.get("analiz_yok", False) is True):
+                continue
+            oranlar, _maks, _ua = _fikstur_oranlari(r)
+            poisson = analiz.poisson_tahmini(df, r["HomeTeam"], r["AwayTeam"], lig_ipucu=r["Div"])
+            model = analiz.iyms_olasiliklar(poisson)
+            kalip = analiz.oran_kalibi(df, tuple(oranlar)) if oranlar else None
+
+            kombolar = {}
+            for k in FOKUS:
+                p_model = float(model.get(k, 0.0))
+                kalip_adet = kalip_n = None
+                p = p_model
+                if kalip and kalip.get("iyms_n", 0) > 0:
+                    kalip_n = int(kalip["iyms_n"])
+                    kalip_adet = int(kalip["iyms"].get(k, 0))
+                    p_kalip = kalip_adet / kalip_n
+                    w = min(kalip_n / 400.0, 1.0) * 0.5  # nadir olaylar: kalıba ancak büyük örneklemle güven
+                    p = (1 - w) * p_model + w * p_kalip
+                kombolar[k] = {
+                    "p": float(p),
+                    "adil_oran": round(1.0 / p, 1) if p > 1e-6 else None,
+                    "kalip_adet": kalip_adet,
+                    "kalip_n": kalip_n,
+                }
+            satirlar.append(
+                {
+                    "id": int(idx),
+                    "tarih": tarih,
+                    "saat": r["Tarih"].strftime("%H:%M"),
+                    "lig": r["Div"],
+                    "ev": r["HomeTeam"],
+                    "dep": r["AwayTeam"],
+                    "oranli": bool(oranlar),
+                    "kombolar": kombolar,
+                    "surpriz": float(max(kombolar["1/2"]["p"], kombolar["2/1"]["p"])),
+                }
+            )
+        satirlar.sort(key=lambda x: x["surpriz"], reverse=True)
+        return jsonify(satirlar)
+
     @app.get("/api/mac-detay")
     def mac_detay():
         try:
