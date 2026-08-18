@@ -711,11 +711,12 @@ def uygulama_olustur():
 
     @app.post("/api/surpriz-radar")
     def surpriz_radar():
-        """Günün maçlarını İY/MS sürpriz kombinasyonlarına göre tarar.
+        """Günün TÜM maçlarını İY/MS çapraz kombinasyonlarına göre tarar.
 
-        Her maç için "1/2", "2/1", "0/1", "0/2" olasılıkları: yarı-bazlı
-        Poisson modeli + aynı oran kalıbındaki tarihsel gerçekleşme frekansı
-        harmanı. Çıktı, çapraz sürpriz (1/2 veya 2/1) olasılığına göre sıralı.
+        Kademeli: takımlar arşivde çözülüyorsa model+kalıp harmanı; takım
+        çözülemiyor ama 1X2 oranı biliniyorsa yalnız kalıp frekansı; o da
+        yoksa Bet365'in gerçek İY/MS fiyatı tek başına gösterilir. Maç hiçbir
+        koşulda listeden düşmez — veri eksikse nedeni satırda yazar.
         """
         try:
             df = _df()
@@ -735,43 +736,69 @@ def uygulama_olustur():
         FOKUS = ("1/1", "1/0", "1/2", "0/1", "0/0", "0/2", "2/1", "2/0", "2/2")
         SURPRIZ = ("1/0", "1/2", "2/1", "2/0")
         satirlar = []
+        # İlk taramada onlarca piyasa isteği yavaş ağda yanıtı geciktirmesin;
+        # bütçe dolunca kalan maçlar piyasasız döner, sonraki tarama önbellekten tamamlar.
+        piyasa_butce_bitis = time.time() + 25.0
         for idx, r in hedef.iterrows():
-            if bool(r.get("analiz_yok", False) is True):
-                continue
+            analizsiz = bool(r.get("analiz_yok", False) is True)
             oranlar, _maks, _ua = _fikstur_oranlari(r)
-            poisson = analiz.poisson_tahmini(df, r["HomeTeam"], r["AwayTeam"], lig_ipucu=r["Div"])
-            model = analiz.iyms_olasiliklar(poisson)
             # Birebir oran eşleşmesi: geçmiş maçın üç açılış oranı da hedefe
             # ±eşik kadar yakın olmalı (±0.05'ten başlar, örnek yetersizse genişler).
             birebir = analiz.birebir_oran_maclari(df, tuple(oranlar)) if oranlar else None
+            model = None
+            if not analizsiz:
+                poisson = analiz.poisson_tahmini(df, r["HomeTeam"], r["AwayTeam"], lig_ipucu=r["Div"])
+                model = analiz.iyms_olasiliklar(poisson)
 
             kombolar = {}
             for k in FOKUS:
-                p_model = float(model.get(k, 0.0))
                 kalip_adet = kalip_n = None
-                p = p_model
                 if birebir and birebir["n"] > 0:
                     kalip_n = int(birebir["n"])
                     kalip_adet = int(birebir["iyms"].get(k, 0))
-                    p_kalip = kalip_adet / kalip_n
-                    w = min(kalip_n / 300.0, 1.0) * 0.5  # nadir olaylar: kalıba ancak büyük örneklemle güven
-                    p = (1 - w) * p_model + w * p_kalip
+                p = None
+                if model is not None:
+                    p = float(model.get(k, 0.0))
+                    if kalip_n:
+                        w = min(kalip_n / 300.0, 1.0) * 0.5  # nadir olaylar: kalıba ancak büyük örneklemle güven
+                        p = (1 - w) * p + w * (kalip_adet / kalip_n)
+                elif kalip_n and kalip_n >= 40:
+                    p = kalip_adet / kalip_n  # takım analizi yok: yalnız kalıp frekansı
                 kombolar[k] = {
-                    "p": float(p),
-                    "adil_oran": round(1.0 / p, 1) if p > 1e-6 else None,
+                    "p": float(p) if p is not None else None,
+                    "adil_oran": round(1.0 / p, 1) if p else None,
                     "kalip_adet": kalip_adet,
                     "kalip_n": kalip_n,
                 }
-            # Gerçek İY/MS piyasa oranları (odds-api.io anahtarı varsa; yoksa None)
-            piyasa = veri.iyms_piyasa(r["HomeTeam"], r["AwayTeam"], r["Div"], r["Tarih"])
+
+            # Gerçek İY/MS piyasa oranları — arşivden bağımsız çalışır, bu yüzden
+            # analiz edilemeyen maçlara bile fiyat düşürebilir.
+            piyasa = None
+            if time.time() < piyasa_butce_bitis:
+                piyasa = veri.iyms_piyasa(r["HomeTeam"], r["AwayTeam"], r["Div"], r["Tarih"])
             if piyasa:
                 for k, kombo in kombolar.items():
                     oran = piyasa["kombolar"].get(k)
                     if oran:
                         kombo["piyasa"] = oran
-                        kombo["ev"] = round(kombo["p"] * oran - 1.0, 3)
+                        if kombo["p"]:
+                            kombo["ev"] = round(kombo["p"] * oran - 1.0, 3)
 
-            one_cikan = max(SURPRIZ, key=lambda k: kombolar[k]["p"])
+            olasilikli = any(v["p"] is not None for v in kombolar.values())
+            mod = ("model" if model is not None
+                   else ("kalip" if olasilikli else ("piyasa" if piyasa else "liste")))
+            one_cikan = None
+            if any(kombolar[k]["p"] is not None for k in SURPRIZ):
+                one_cikan = max(SURPRIZ, key=lambda k: kombolar[k]["p"] or 0.0)
+            neden = None
+            if mod == "kalip":
+                neden = "takımlar arşivde çözülemedi — yalnız oran kalıbı konuşuyor"
+            elif mod == "piyasa":
+                neden = "arşiv analizi yok — yalnız Bet365 İY/MS fiyatı"
+            elif mod == "liste":
+                neden = ("takımlar arşivde çözülemedi ve oran/piyasa verisi yok"
+                         if analizsiz else "oran ve piyasa verisi henüz yayınlanmadı")
+
             satirlar.append(
                 {
                     "id": int(idx),
@@ -781,6 +808,8 @@ def uygulama_olustur():
                     "ev": r["HomeTeam"],
                     "dep": r["AwayTeam"],
                     "oranli": bool(oranlar),
+                    "mod": mod,
+                    "neden": neden,
                     "kombolar": kombolar,
                     "one_cikan": one_cikan,
                     "piyasa": (
@@ -794,10 +823,11 @@ def uygulama_olustur():
                         if birebir else None
                     ),
                     "ornekler": birebir["ornekler"] if birebir else [],
-                    "surpriz": float(kombolar[one_cikan]["p"]),
+                    "surpriz": float(kombolar[one_cikan]["p"]) if one_cikan else 0.0,
                 }
             )
-        satirlar.sort(key=lambda x: x["surpriz"], reverse=True)
+        MOD_SIRA = {"model": 0, "kalip": 1, "piyasa": 2, "liste": 3}
+        satirlar.sort(key=lambda x: (MOD_SIRA.get(x["mod"], 9), -x["surpriz"], x["saat"]))
         return jsonify(satirlar)
 
     @app.get("/api/mac-detay")

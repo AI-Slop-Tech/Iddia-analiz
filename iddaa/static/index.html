@@ -1179,14 +1179,15 @@ function srHucre(ad, k, yildiz){
   const sinif = 'sr-hucre' + (yildiz ? ' yildiz' : (SR_NORMAL.includes(ad) ? ' normal' : ''));
   let piyasa = '';
   if(k.piyasa){
-    const renk = k.ev >= 0.03 ? 'var(--yesil)' : (k.ev >= 0 ? 'var(--sari)' : 'var(--kirmizi)');
+    const renk = k.ev == null ? 'var(--soluk)'
+      : (k.ev >= 0.03 ? 'var(--yesil)' : (k.ev >= 0 ? 'var(--sari)' : 'var(--kirmizi)'));
     piyasa = `<div class="adil" style="color:${renk};font-weight:800"
-      title="beklenen değer ${k.ev >= 0 ? '+' : ''}${(k.ev*100).toFixed(1)}%">B365 ${k.piyasa.toFixed(2)}</div>`;
+      title="${k.ev == null ? 'model olasılığı yok — yalnız fiyat' : `beklenen değer ${k.ev >= 0 ? '+' : ''}${(k.ev*100).toFixed(1)}%`}">B365 ${k.piyasa.toFixed(2)}</div>`;
   }
   return `<div class="${sinif}" title="${kanit}">
     <div class="ad">${yildiz ? '⭐ ' : ''}${ad}</div>
-    <div class="p">%${(k.p * 100).toFixed(1)}</div>
-    <div class="adil">${k.adil_oran ? 'adil ' + k.adil_oran : '—'}</div>
+    <div class="p">${k.p == null ? '—' : '%' + (k.p * 100).toFixed(1)}</div>
+    <div class="adil">${k.adil_oran ? 'adil ' + k.adil_oran : ''}</div>
     ${piyasa}
   </div>`;
 }
@@ -1204,34 +1205,50 @@ function srCiz(){
     $('#surpriz-sonuc').innerHTML = `<div class="kart bos-durum"><div class="dev">🤷</div><p>Bu gün için taranabilir maç yok.</p></div>`;
     return;
   }
-  $('#surpriz-sonuc').innerHTML = liste.map((m, i) => {
-    const enIyi = (m.one_cikan && SR_ODAK.includes(m.one_cikan)) ? m.one_cikan :
-      SR_ODAK.reduce((a, b) => (m.kombolar[a] || {p:0}).p >= (m.kombolar[b] || {p:0}).p ? a : b);
-    const k = m.kombolar[enIyi];
-    const kanit = (m.kalip && k.kalip_n)
+  const MOD_ROZET = {kalip: '🧩 yalnız oran kalıbı', piyasa: '💰 yalnız Bet365 fiyatı'};
+  const hepsiListe = liste.every(m => m.mod === 'liste');
+  const ustNot = hepsiListe
+    ? `<div class="kart"><div class="alt-baslik">⚠️ Maçlar listelendi ama hiçbiri analiz edilemedi.
+       Muhtemel nedenler: arşiv eksik (üstteki <b>🔄 Veriyi Güncelle</b> ile 38 ligin arşivini indirin) ·
+       oranlar henüz yayınlanmadı · Bet365 fiyatları için 🔑 odds-api.io anahtarı gerekli (aşağıdaki kutu).</div></div>`
+    : '';
+  $('#surpriz-sonuc').innerHTML = ustNot + liste.map((m, i) => {
+    if(m.mod === 'liste'){
+      return `<div class="mac-satir" style="opacity:.65">
+        <span class="takimlar">${esc(m.ev)} – ${esc(m.dep)}</span>
+        <span class="ipucu">${m.saat} · ${esc(m.lig)}</span>
+        <span class="ipucu" style="flex-basis:100%">ℹ️ ${esc(m.neden || 'veri yok')}</span>
+      </div>`;
+    }
+    const enIyi = m.one_cikan;
+    const k = enIyi ? m.kombolar[enIyi] : null;
+    const kanit = (k && m.kalip && k.kalip_n)
       ? `Birebir oran kanıtı (±${m.kalip.esik.toFixed(2)}): <b>${m.kalip.hedef.map(x => x.toFixed(2)).join(' / ')}</b> oranlarıyla açılmış ${k.kalip_n} maçın ${k.kalip_adet}'i ${enIyi} bitti.${srMsMetni(m.kalip)}`
       : (m.oranli ? 'Bu oranlarla birebir eşleşen yeterli geçmiş maç yok — yalnız model konuşuyor.' : '');
-    const karar = k.piyasa
+    const karar = (k && k.piyasa && k.ev != null)
       ? `<div class="ipucu" style="margin-bottom:8px">💰 <b>${esc(m.piyasa.kitapci)}</b> şu an ${enIyi} için
          <b>${k.piyasa.toFixed(2)}</b> veriyor (adil ${k.adil_oran || '—'}) → beklenen değer
          <b class="${k.ev >= 0 ? 'ev-poz' : 'ev-neg'}">${k.ev >= 0 ? '+' : ''}${(k.ev*100).toFixed(1)}%</b>
          ${k.ev >= 0.05 ? '✅ değer var' : (k.ev >= 0 ? '🟡 sınırda' : '❌ bu fiyattan değersiz')}</div>`
       : '';
-    const tacYorum = (i === 0 && m.kalip && k.kalip_n)
+    const tacYorum = (i === 0 && k && m.kalip && k.kalip_n)
       ? `<div class="ipucu" style="margin-bottom:8px">👑 <b>Günün odak eşleşmesi:</b> model + birebir oran tarihi birlikte en güçlü çapraz sinyali bu maçta veriyor.
          ⭐ ${enIyi} için harman olasılık %${(k.p*100).toFixed(1)} → adil oran ${k.adil_oran || '—'}; geçmişte aynı oranlarla ${k.kalip_n} maçta ${k.kalip_adet} kez gerçekleşti
          (%${(100*k.kalip_adet/k.kalip_n).toFixed(1)}). Tam rapor için 🔬 Derin Analiz'e basın.</div>`
       : '';
+    const modNotu = MOD_ROZET[m.mod]
+      ? ` · ${MOD_ROZET[m.mod]}`
+      : (m.oranli ? '' : ' · oran yok (yalnız model)');
     return `<div class="sr-kart" style="${i === 0 ? 'border-color:var(--sari)' : ''}">
       <div class="sr-baslik">
         <b>${i === 0 ? '👑 ' : ''}${esc(m.ev)} – ${esc(m.dep)}</b>
-        <span class="ipucu">${m.saat} · ${esc(m.lig)}${m.oranli ? '' : ' · oran yok (yalnız model)'}</span>
+        <span class="ipucu">${m.saat} · ${esc(m.lig)}${modNotu}</span>
       </div>
       <div class="sr-grid">${SR_SIRA.map(ad => srHucre(ad, m.kombolar[ad], ad === enIyi)).join('')}</div>
       ${tacYorum}
       ${karar}
-      ${kanit ? `<div class="ipucu" style="margin-bottom:8px">${kanit}${karar ? '' : ` Bülteninizde ${enIyi} oranı ${k.adil_oran ? `adil oran ${k.adil_oran}'in` : 'adil oranın'} üzerindeyse matematiksel değer var demektir.`}</div>` : ''}
-      ${srDegerHTML(m, i, enIyi)}
+      ${kanit ? `<div class="ipucu" style="margin-bottom:8px">${kanit}${(karar || !k) ? '' : ` Bülteninizde ${enIyi} oranı ${k.adil_oran ? `adil oran ${k.adil_oran}'in` : 'adil oranın'} üzerindeyse matematiksel değer var demektir.`}</div>` : ''}
+      ${enIyi ? srDegerHTML(m, i, enIyi) : ''}
       <div class="sr-alt">
         ${m.ornekler.length ? `<button class="mini-btn" onclick="srGecmisAc(${i})">📜 Oran Kanıtı</button>` : ''}
         <button class="mini-btn" onclick="srDetay(${m.id}, '${m.tarih}')">🔬 Derin Analiz</button>
