@@ -324,6 +324,18 @@ def uygulama_olustur():
             except Exception as hata:  # noqa: BLE001
                 ekle("odds-api.io (Bet365 İY/MS oranları)", False, f"erişim hatası: {str(hata)[:160]}")
 
+        af_var = bool(veri.gizli_anahtar("APIFOOTBALL_KEY", "apifootball_key"))
+        if not af_var:
+            ekle("API-Football (14+ kitapçı, ŞL/UEL oranları)", False,
+                 "anahtar kayıtlı değil — 🎭 sekmesindeki kutudan ekleyin (ücretsiz: dashboard.api-football.com)")
+        else:
+            d_af = veri.AF_SON_DURUM
+            pencere = (" · Free plan penceresi: bugün ±1 gün (tüm haftayı 14 kitapçıyla taramak için Pro $19)"
+                       if d_af.get("pencere_free") else "")
+            ekle("API-Football (14+ kitapçı, ŞL/UEL oranları)", not d_af.get("hata"),
+                 (f"hata: {d_af['hata']}" if d_af.get("hata")
+                  else f"bağlı · bugün {d_af.get('bugun_istek', 0)}/90 istek kullanıldı{pencere}"))
+
         ekle("Gemini yorumu", bool(veri.gizli_anahtar("GEMINI_API_KEY", "gemini_api_key")),
              "bağlı" if veri.gizli_anahtar("GEMINI_API_KEY", "gemini_api_key")
              else "anahtar yok (isteğe bağlı özellik)")
@@ -346,7 +358,9 @@ def uygulama_olustur():
                 "surum": SURUM,
                 "gemini": bool(veri.gizli_anahtar("GEMINI_API_KEY", "gemini_api_key")),
                 "dis_kapsam": bool(veri.gizli_anahtar("FOOTBALL_DATA_ORG_KEY", "football_data_org_key")),
-                "piyasa_iyms": bool(veri.gizli_anahtar("ODDS_API_IO_KEY", "odds_api_io_key")),
+                "piyasa_iyms": bool(veri.gizli_anahtar("ODDS_API_IO_KEY", "odds_api_io_key"))
+                               or bool(veri.gizli_anahtar("APIFOOTBALL_KEY", "apifootball_key")),
+                "apifootball": bool(veri.gizli_anahtar("APIFOOTBALL_KEY", "apifootball_key")),
                 "veri_zamani": time.strftime("%d.%m %H:%M", time.localtime(_DURUM["arsiv_zaman"])),
                 "ligler": [
                     {"kod": lig, "ad": veri.LIGLER.get(lig, lig), "mac": int(adet)}
@@ -1047,7 +1061,7 @@ def uygulama_olustur():
         """
         govde = request.get_json(silent=True) or {}
         degisti = False
-        for ad in ("football_data_org_key", "gemini_api_key", "odds_api_io_key"):
+        for ad in ("football_data_org_key", "gemini_api_key", "odds_api_io_key", "apifootball_key"):
             if ad in govde:
                 veri.ayar_yaz(ad, str(govde.get(ad) or ""))
                 degisti = True
