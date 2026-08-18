@@ -728,7 +728,10 @@ def uygulama_olustur():
             return jsonify({"hata": f"Fikstür alınamadı: {hata}"}), 502
         hedef = fik[fik["Tarih"].dt.strftime("%d.%m.%Y") == tarih]
 
-        FOKUS = ("1/2", "2/1", "0/1", "0/2")
+        # Bülten İY/MS pazarının 9 seçeneğinin tamamı hesaplanır;
+        # köşegen dışı 6'sı "sürpriz" sayılır (İY sonucu MS'de değişenler).
+        FOKUS = ("1/1", "1/0", "1/2", "0/1", "0/0", "0/2", "2/1", "2/0", "2/2")
+        SURPRIZ = ("1/0", "1/2", "0/1", "0/2", "2/1", "2/0")
         satirlar = []
         for idx, r in hedef.iterrows():
             if bool(r.get("analiz_yok", False) is True):
@@ -757,6 +760,7 @@ def uygulama_olustur():
                     "kalip_adet": kalip_adet,
                     "kalip_n": kalip_n,
                 }
+            one_cikan = max(SURPRIZ, key=lambda k: kombolar[k]["p"])
             satirlar.append(
                 {
                     "id": int(idx),
@@ -767,12 +771,13 @@ def uygulama_olustur():
                     "dep": r["AwayTeam"],
                     "oranli": bool(oranlar),
                     "kombolar": kombolar,
+                    "one_cikan": one_cikan,
                     "kalip": (
                         {"esik": birebir["esik"], "n": birebir["n"], "hedef": birebir["hedef"]}
                         if birebir else None
                     ),
                     "ornekler": birebir["ornekler"] if birebir else [],
-                    "surpriz": float(max(kombolar["1/2"]["p"], kombolar["2/1"]["p"])),
+                    "surpriz": float(kombolar[one_cikan]["p"]),
                 }
             )
         satirlar.sort(key=lambda x: x["surpriz"], reverse=True)
