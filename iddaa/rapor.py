@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import textwrap
+
+from . import yorum
+
 GENISLIK = 66
 SECIM_AD = {
     "MS1": "MS 1 (ev sahibi)",
@@ -155,7 +159,12 @@ def rapor_olustur(a: dict, lig_adi: str = "") -> str:
             s.append(f"  ⛔ DEĞER YOK — bu oranlarla en iyi seçim bile {o['ev'] * 100:+.1f}% beklenen değerde.")
             s.append("     Profesyonel yaklaşım: bu maçı PAS geçmek. Değer yoksa bahis de yok.")
 
-    s.append("")
+    # -------- analist yorumu
+    s.append(_baslik("🎙 ANALİST YORUMU"))
+    for parag in yorum.olustur(a):
+        s.extend(textwrap.wrap(parag, GENISLIK - 2, initial_indent="  ", subsequent_indent="  "))
+        s.append("")
+
     s.append("─" * GENISLIK)
     s.append("ℹ  Bu rapor istatistiksel bir modeldir, garanti içermez. 18+ | Sorumlu oyun.")
     s.append("─" * GENISLIK)

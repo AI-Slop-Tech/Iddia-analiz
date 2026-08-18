@@ -21,7 +21,7 @@ import time
 import pandas as pd
 
 from . import __version__ as SURUM
-from . import analiz, backtest, kayit, veri
+from . import analiz, backtest, kayit, veri, yorum
 
 _DURUM: dict = {
     "df": None, "elo": None, "fikstur": None, "kitapcilar": [],
@@ -205,6 +205,7 @@ def _mac_json(a: dict) -> dict:
             "yildiz": int(o["yildiz"]),
             "karar": o["karar"],
         }
+    sonuc["yorum"] = yorum.olustur(a)
     return sonuc
 
 
