@@ -964,10 +964,20 @@ def _oddsapi_getir(yol: str, parametreler: dict):
     return govde
 
 
+_ONBELLEK_BELLEGI: dict = {}  # (dosya, mtime) → içerik; art arda yüzlerce okuma bedavaya gelsin
+
+
 def _oddsapi_onbellek(ad: str) -> dict:
+    yol = os.path.join(VERI_KLASORU, ad)
     try:
-        with open(os.path.join(VERI_KLASORU, ad), encoding="utf-8") as f:
-            return json.load(f)
+        mtime = os.path.getmtime(yol)
+        anahtar = _ONBELLEK_BELLEGI.get(ad)
+        if anahtar and anahtar[0] == mtime:
+            return dict(anahtar[1])  # sığ kopya: çağıranın üst düzey eklemeleri belleği kirletmesin
+        with open(yol, encoding="utf-8") as f:
+            icerik = json.load(f)
+        _ONBELLEK_BELLEGI[ad] = (mtime, icerik)
+        return dict(icerik)
     except (OSError, json.JSONDecodeError):
         return {}
 

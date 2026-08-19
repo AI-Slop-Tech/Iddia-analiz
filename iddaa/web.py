@@ -727,6 +727,78 @@ def uygulama_olustur():
         birlesik = pd.concat([fik, pd.DataFrame(satirlar)], ignore_index=True)
         return birlesik.sort_values("Tarih").reset_index(drop=True)
 
+    def _piyasa_fuzyonu_uygula(fik: pd.DataFrame) -> int:
+        """Önbellekteki piyasa 1X2'lerini oransız fikstür satırlarına işler.
+
+        Yalnız önbellek okur (ağ yok, hızlı); ağı arka plan ısıtıcısı yapar.
+        Doldurulan satırlar OranKaynak="canli" ile işaretlenir — bülten, tablo
+        ve detay oranları doğal kolonlardan görür.
+        """
+        if "OranKaynak" not in fik.columns:
+            fik["OranKaynak"] = None
+        simdi = veri.simdi_tr()
+        pencere = (fik["Tarih"] >= simdi.normalize()) & \
+                  (fik["Tarih"] < simdi.normalize() + pd.Timedelta(days=2))
+        oransiz = pencere & fik["oran_ev"].isna() if "oran_ev" in fik.columns else pencere
+        dolan = 0
+        for idx in fik.index[oransiz]:
+            r = fik.loc[idx]
+            try:
+                pk = veri.iyms_piyasa(r["HomeTeam"], r["AwayTeam"], r["Div"], r["Tarih"],
+                                      sadece_onbellek=True)
+            except Exception:  # noqa: BLE001
+                continue
+            if not (pk and pk.get("ms")):
+                continue
+            fik.loc[idx, ["oran_ev", "oran_berabere", "oran_dep"]] = pk["ms"]
+            if pk.get("ms_maks"):
+                fik.loc[idx, ["oran_max_ev", "oran_max_berabere", "oran_max_dep"]] = pk["ms_maks"]
+            if pk.get("ust_alt25"):
+                fik.loc[idx, ["oran_ust25", "oran_alt25"]] = pk["ust_alt25"]
+            fik.loc[idx, "OranKaynak"] = "canli"
+            dolan += 1
+        return dolan
+
+    def _piyasa_isit_baslat(fik: pd.DataFrame) -> None:
+        """Bugün+yarının oransız maçları için piyasa oranlarını ARKA PLANDA çeker.
+
+        Kullanıcı hiçbir düğmeye basmadan önbellek dolar; bitince fikstür süresi
+        eskitilir ve bir sonraki bülten çağrısı oranları satırlara işler.
+        """
+        if _DURUM.get("piyasa_isitma"):
+            return
+        if not (veri.gizli_anahtar("APIFOOTBALL_KEY", "apifootball_key")
+                or veri.gizli_anahtar("ODDS_API_IO_KEY", "odds_api_io_key")):
+            return
+        simdi = veri.simdi_tr()
+        pencere = (fik["Tarih"] >= simdi.normalize()) & \
+                  (fik["Tarih"] < simdi.normalize() + pd.Timedelta(days=2))
+        oransiz = fik.loc[pencere & fik["oran_ev"].isna(),
+                          ["HomeTeam", "AwayTeam", "Div", "Tarih"]]
+        if oransiz.empty:
+            return
+        hedefler = [tuple(x) for x in oransiz.itertuples(index=False)]
+        # kota önce en kıymetli maçlara: Avrupa kupaları + Süper Lig başa
+        oncelik = ("ŞL", "EL", "KL", "T1", "TK")
+        hedefler.sort(key=lambda h: (h[2] not in oncelik, h[3]))
+        _DURUM["piyasa_isitma"] = True
+
+        def _isit():
+            try:
+                son = time.time() + 120  # üst sınır: 2 dk
+                for ev, dep, lig, tarih in hedefler:
+                    if time.time() > son:
+                        break
+                    try:
+                        veri.iyms_piyasa(ev, dep, lig, tarih)  # ağ; önbelleğe yazar
+                    except Exception:  # noqa: BLE001
+                        continue
+                _DURUM["fikstur_zaman"] = 0.0  # sıradaki bülten oranları işlesin
+            finally:
+                _DURUM["piyasa_isitma"] = False
+
+        threading.Thread(target=_isit, daemon=True, name="iddaa-piyasa-isitma").start()
+
     def _fikstur(yenile: bool = False, bellek_ttl: bool = False):
         """bellek_ttl=True: listeleme çağrıları için TTL dolduysa yeniden oku.
         Detay/tarama çağrıları mevcut kopyayı kullanır ki satır id'leri kaymasın."""
@@ -740,6 +812,11 @@ def uygulama_olustur():
             try:
                 fik = _af_kapsami_ekle(df, fik)
             except Exception:  # noqa: BLE001 — kapsama katmanı bülteni asla düşürmesin
+                pass
+            try:
+                _piyasa_fuzyonu_uygula(fik)      # önbellekte ne varsa satırlara işle
+                _piyasa_isit_baslat(fik)         # eksikleri arka planda çek
+            except Exception:  # noqa: BLE001
                 pass
             _DURUM["fikstur"], _DURUM["kitapcilar"] = fik, kitapcilar
             _DURUM["fikstur_zaman"] = time.time()
@@ -809,6 +886,7 @@ def uygulama_olustur():
         return jsonify(
             {
                 "gunler": gunler,
+                "piyasa_isitma": bool(_DURUM.get("piyasa_isitma")),
                 "bugun": simdi.strftime("%d.%m.%Y"),
                 "simdi": simdi.strftime("%H:%M"),
                 "guncelleme": time.strftime("%H:%M", time.localtime(_DURUM["fikstur_zaman"])),
@@ -1018,7 +1096,9 @@ def uygulama_olustur():
             piyasa = None
             if time.time() < piyasa_butce_bitis:
                 piyasa = veri.iyms_piyasa(r["HomeTeam"], r["AwayTeam"], r["Div"], r["Tarih"])
-            oran_kaynak = "bulten" if oranlar else None
+            satir_kaynagi = r.get("OranKaynak")
+            oran_kaynak = (satir_kaynagi if isinstance(satir_kaynagi, str) and satir_kaynagi
+                           else ("bulten" if oranlar else None))
             if not oranlar and piyasa and piyasa.get("ms"):
                 oranlar, oran_kaynak = piyasa["ms"], "canli"
             # Birebir oran eşleşmesi: geçmiş maçın üç açılış oranı da hedefe
@@ -1132,7 +1212,9 @@ def uygulama_olustur():
         # oranı yayınlanmamışsa canlı 1X2 ile tam analiz yapılır.
         piyasa_k = veri.iyms_piyasa(r["HomeTeam"], r["AwayTeam"], r["Div"], r["Tarih"],
                                     sadece_onbellek=True)
-        oran_kaynak = "bulten" if oranlar else None
+        satir_kaynagi = r.get("OranKaynak")
+        oran_kaynak = (satir_kaynagi if isinstance(satir_kaynagi, str) and satir_kaynagi
+                       else ("bulten" if oranlar else None))
         if not oranlar and piyasa_k and piyasa_k.get("ms"):
             oranlar, oran_kaynak = piyasa_k["ms"], "canli"
             maks = maks or piyasa_k.get("ms_maks")
