@@ -535,37 +535,52 @@ def _normalize(isim: str) -> str:
     return re.sub(r"[^a-z0-9]", "", isim.translate(tr).lower())
 
 
-def takim_bul(df: pd.DataFrame, isim: str) -> str:
-    """Kullanıcının yazdığı ismi veri setindeki resmi takım adına eşler."""
+def takim_cozucu(df: pd.DataFrame, hizli: bool = False):
+    """İsim eşleme hazırlığını (aday haritası + maç sayıları) BİR KEZ ödeyen çözücü.
+
+    takim_bul her çağrıda 280 bin satırlık listeyi yeniden kuruyordu; yüzlerce
+    ismi art arda eşleyen kapsama katmanları bunu kullanır. hizli=True difflib
+    aramalarını atlar (tam/lakap/alt-dize eşleşmesi yeter): dünya fikstüründeki
+    yüzlerce yabancı ismi elerken difflib başına ~50 ms ödememek için.
+    """
     adaylar = pd.unique(pd.concat([df["HomeTeam"], df["AwayTeam"]]))
     norm_map = {_normalize(a): a for a in adaylar}
-    hedef = _normalize(isim)
+    sayilar = df["HomeTeam"].value_counts().add(df["AwayTeam"].value_counts(), fill_value=0)
 
-    if hedef in norm_map:
-        return norm_map[hedef]
-    if hedef in TAKMA_ADLAR and _normalize(TAKMA_ADLAR[hedef]) in norm_map:
-        return norm_map[_normalize(TAKMA_ADLAR[hedef])]
+    def bul(isim: str) -> str:
+        hedef = _normalize(isim)
+        if hedef in norm_map:
+            return norm_map[hedef]
+        if hedef in TAKMA_ADLAR and _normalize(TAKMA_ADLAR[hedef]) in norm_map:
+            return norm_map[_normalize(TAKMA_ADLAR[hedef])]
 
-    icinde_gecen = [v for k, v in norm_map.items() if hedef in k or k in hedef]
-    if len(icinde_gecen) == 1:
-        return icinde_gecen[0]
+        icinde_gecen = [v for k, v in norm_map.items() if hedef in k or k in hedef]
+        if len(icinde_gecen) == 1:
+            return icinde_gecen[0]
 
-    yakin = difflib.get_close_matches(hedef, norm_map.keys(), n=5, cutoff=0.75)
-    if len(yakin) >= 1 and not icinde_gecen:
-        return norm_map[yakin[0]]
-    if icinde_gecen:
-        # Birden fazla kısmi eşleşme: en çok maçı olanı seç (büyük kulüp önceliği).
-        sayilar = {
-            t: int(((df["HomeTeam"] == t) | (df["AwayTeam"] == t)).sum()) for t in icinde_gecen
-        }
-        return max(sayilar, key=sayilar.get)
+        if not hizli:
+            yakin = difflib.get_close_matches(hedef, norm_map.keys(), n=5, cutoff=0.75)
+            if len(yakin) >= 1 and not icinde_gecen:
+                return norm_map[yakin[0]]
+        if icinde_gecen:
+            # Birden fazla kısmi eşleşme: en çok maçı olanı seç (büyük kulüp önceliği).
+            return max(icinde_gecen, key=lambda t: float(sayilar.get(t, 0.0)))
 
-    oneriler = [norm_map[y] for y in difflib.get_close_matches(hedef, norm_map.keys(), n=5, cutoff=0.5)]
-    ek = f" Şunlardan birini mi kastettiniz: {', '.join(oneriler)}?" if oneriler else ""
-    raise ValueError(
-        f"'{isim}' takımı veri setinde bulunamadı.{ek} "
-        f"Tüm isimler için: python tahmin.py takimlar"
-    )
+        if hizli:
+            raise ValueError(f"'{isim}' takımı veri setinde bulunamadı.")
+        oneriler = [norm_map[y] for y in difflib.get_close_matches(hedef, norm_map.keys(), n=5, cutoff=0.5)]
+        ek = f" Şunlardan birini mi kastettiniz: {', '.join(oneriler)}?" if oneriler else ""
+        raise ValueError(
+            f"'{isim}' takımı veri setinde bulunamadı.{ek} "
+            f"Tüm isimler için: python tahmin.py takimlar"
+        )
+
+    return bul
+
+
+def takim_bul(df: pd.DataFrame, isim: str) -> str:
+    """Kullanıcının yazdığı ismi veri setindeki resmi takım adına eşler."""
+    return takim_cozucu(df)(isim)
 
 
 def simdi_tr() -> pd.Timestamp:
@@ -1322,7 +1337,11 @@ def iy_hasadi() -> dict:
 
 
 def _iy_yamalarini_uygula(df: pd.DataFrame) -> int:
-    """Depodaki İY skorlarını, HT'si eksik arşiv satırlarına güvenli anahtarla işler."""
+    """Depodaki İY skorlarını, HT'si eksik arşiv satırlarına güvenli anahtarla işler.
+
+    Vektörel: (gün ±1, MS skoru) anahtarıyla birleştirilir, yalnız küçük aday
+    kümesinde takım adı bulanık doğrulanır. (Döngülü sürüm 21 sn tutuyordu.)
+    """
     depo = _iy_deposunu_oku()
     yamalar = [y for y in depo.values() if y.get("kaynak") != "isaret" and y.get("hthg") is not None]
     if not yamalar:
@@ -1330,25 +1349,39 @@ def _iy_yamalarini_uygula(df: pd.DataFrame) -> int:
     eksik = df["HTHG"].isna()
     if not eksik.any():
         return 0
-    alt = df.loc[eksik, ["Tarih", "HomeTeam", "AwayTeam", "FTHG", "FTAG"]]
-    uygulanan = 0
-    for y in yamalar:
-        try:
-            t = pd.Timestamp(y["tarih"])
-            f_ev, f_dep = int(y["fthg"]), int(y["ftag"])
-        except (TypeError, ValueError):
+
+    y = pd.DataFrame(yamalar)
+    for k in ("fthg", "ftag", "hthg", "htag"):
+        y[k] = pd.to_numeric(y[k], errors="coerce")
+    y["_t"] = pd.to_datetime(y["tarih"], errors="coerce")
+    y = y.dropna(subset=["fthg", "ftag", "hthg", "htag", "_t"])
+    if y.empty:
+        return 0
+    genis = pd.concat([y.assign(_g=y["_t"] + pd.Timedelta(days=d)) for d in (-1, 0, 1)],
+                      ignore_index=True)
+
+    alt = (df.loc[eksik, ["Tarih", "HomeTeam", "AwayTeam", "FTHG", "FTAG"]]
+           .reset_index().rename(columns={"index": "kaynak_idx"}))
+    alt["_g"] = alt["Tarih"].dt.normalize()
+    aday = alt.merge(genis, left_on=["_g", "FTHG", "FTAG"],
+                     right_on=["_g", "fthg", "ftag"], how="inner")
+    if aday.empty:
+        return 0
+
+    hedef_h, hedef_a, kullanilan = {}, {}, set()
+    for r in aday.itertuples():
+        if r.kaynak_idx in kullanilan:
             continue
-        aday = alt[(alt["FTHG"] == f_ev) & (alt["FTAG"] == f_dep)
-                   & ((alt["Tarih"] - t).abs() <= pd.Timedelta(days=1))]
-        for idx, satir in aday.iterrows():
-            if (_oddsapi_takim_puani(satir["HomeTeam"], y["ev"]) >= 0.5
-                    and _oddsapi_takim_puani(satir["AwayTeam"], y["dep"]) >= 0.5):
-                df.loc[idx, "HTHG"] = float(y["hthg"])
-                df.loc[idx, "HTAG"] = float(y["htag"])
-                alt = alt.drop(idx)
-                uygulanan += 1
-                break
-    return uygulanan
+        if (_oddsapi_takim_puani(str(r.HomeTeam), str(r.ev)) >= 0.5
+                and _oddsapi_takim_puani(str(r.AwayTeam), str(r.dep)) >= 0.5):
+            kullanilan.add(r.kaynak_idx)
+            hedef_h[r.kaynak_idx] = float(r.hthg)
+            hedef_a[r.kaynak_idx] = float(r.htag)
+    if hedef_h:
+        idxler = list(hedef_h)
+        df.loc[idxler, "HTHG"] = pd.Series(hedef_h)
+        df.loc[idxler, "HTAG"] = pd.Series(hedef_a)
+    return len(hedef_h)
 
 
 # ------------------------------------------------ API-Football (api-sports.io): 3. anahtar
@@ -1412,18 +1445,29 @@ def _af_getir(yol: str, parametreler: dict):
     return govde
 
 
+# AF turnuva kimliği → bizim lig kodumuz (bülten kapsama katmanı için beyaz liste)
+AF_LIG_ESLEME = {2: "ŞL", 3: "EL", 848: "KL", 203: "T1", 206: "TK"}
+AF_LIG_ADLARI = {"ŞL": "UEFA Şampiyonlar Ligi", "EL": "UEFA Avrupa Ligi",
+                 "KL": "UEFA Konferans Ligi", "TK": "Türkiye Kupası"}
+
+
 def _af_gun_fiksturu(gun: str, sadece_onbellek: bool = False) -> list:
     """Günün tüm dünya fikstürü — TEK istek, 6 saat önbellek. gun: YYYY-MM-DD."""
     onbellek = _oddsapi_onbellek("af_fikstur.json")
     kayit = onbellek.get(gun)
-    if kayit and time.time() - kayit.get("zaman", 0) < _AF_GUN_TTL:
+    eski_bicim = bool(kayit and kayit.get("veri") and "ts" not in kayit["veri"][0])
+    if kayit and not eski_bicim and time.time() - kayit.get("zaman", 0) < _AF_GUN_TTL:
         return kayit["veri"]
     if sadece_onbellek:
-        return (kayit or {}).get("veri", [])
+        return [] if eski_bicim else (kayit or {}).get("veri", [])
     govde = _af_getir("/fixtures", {"date": gun, "timezone": "UTC"})
     maclar = [
         {
             "id": r["fixture"]["id"],
+            "ts": r["fixture"].get("date"),
+            "lig_id": (r.get("league") or {}).get("id"),
+            "lig_ad": (r.get("league") or {}).get("name"),
+            "ulke": (r.get("league") or {}).get("country"),
             "ev": (r["teams"]["home"] or {}).get("name"),
             "dep": (r["teams"]["away"] or {}).get("name"),
             "durum": (r["fixture"]["status"] or {}).get("short"),

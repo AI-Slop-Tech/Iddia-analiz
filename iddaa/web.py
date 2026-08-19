@@ -69,11 +69,11 @@ def _bakim_dongusu() -> None:
             pass
         try:
             if _DURUM["df"] is not None:
-                fik, kitapcilar = veri.fikstur_yukle(
-                    ligler=sorted(set(_DURUM["df"]["Div"].unique()) | set(veri.EK_LIGLER))
-                )
-                _DURUM["fikstur"], _DURUM["kitapcilar"] = fik, kitapcilar
-                _DURUM["fikstur_zaman"] = time.time()
+                # dosya önbelleğini tazele (6 saatlik TTL'e uyar); bellek kopyasını
+                # DOĞRUDAN yazma — dış/AF kapsama katmanlarını atlayarak eziyordu.
+                # Sadece süreyi eskit: bir sonraki bülten çağrısı tam zincirle kurar.
+                veri.fikstur_indir()
+                _DURUM["fikstur_zaman"] = 0.0
         except Exception:  # noqa: BLE001
             pass
 
@@ -558,11 +558,12 @@ def uygulama_olustur():
             return fik
 
         hafiza: dict = {}
+        cozucu = veri.takim_cozucu(df)  # harita bir kez kurulur (isim başına değil)
 
         def _esle(ad: str):
             if ad not in hafiza:
                 try:
-                    hafiza[ad] = veri.takim_bul(df, ad)
+                    hafiza[ad] = cozucu(ad)
                 except ValueError:
                     hafiza[ad] = None
             return hafiza[ad]
@@ -610,6 +611,122 @@ def uygulama_olustur():
         birlesik = pd.concat([fik, pd.DataFrame(satirlar)], ignore_index=True)
         return birlesik.sort_values("Tarih").reset_index(drop=True)
 
+    def _af_kapsami_ekle(df: pd.DataFrame, fik: pd.DataFrame) -> pd.DataFrame:
+        """API-Football günlük dünya fikstürünü bültene 3. katman olarak katar.
+
+        CSV kaynağı kupa/eleme maçlarını bilmez, football-data.org ücretsizi
+        eleme-playoff vermez — Fenerbahçe'nin Avrupa maçları bu yüzden
+        görünmüyordu. AF'nin gün penceresi (Free: bugün ±1) buradan girer.
+        Sel önleme: yalnız beyaz listedeki turnuvalar (ŞL/UEL/KL/T1/TK) VEYA
+        iki takımı da arşive güvenle eşleşen maçlar eklenir; üst sınır 120.
+        """
+        if not veri.gizli_anahtar("APIFOOTBALL_KEY", "apifootball_key"):
+            return fik
+        simdi = veri.simdi_tr()
+        gunler_utc = sorted({(simdi - pd.Timedelta(hours=3)).strftime("%Y-%m-%d"),
+                             (simdi + pd.Timedelta(hours=21)).strftime("%Y-%m-%d")})
+        kayitlar = []
+        for g in gunler_utc:
+            try:
+                kayitlar.extend(veri._af_gun_fiksturu(g))
+            except Exception:  # noqa: BLE001 — pencere/kota hatası bülteni düşürmesin
+                continue
+        if not kayitlar:
+            return fik
+
+        hafiza: dict = {}
+        cozucu = veri.takim_cozucu(df)  # harita bir kez kurulur (isim başına değil)
+
+        def _esle(ad: str):
+            if ad not in hafiza:
+                try:
+                    hafiza[ad] = cozucu(ad)
+                except ValueError:
+                    hafiza[ad] = None
+            return hafiza[ad]
+
+        son_lig = {}
+        for _, s in (
+            pd.concat(
+                [
+                    df[["HomeTeam", "Div", "Tarih"]].rename(columns={"HomeTeam": "Takim"}),
+                    df[["AwayTeam", "Div", "Tarih"]].rename(columns={"AwayTeam": "Takim"}),
+                ]
+            )
+            .sort_values("Tarih")
+            .drop_duplicates("Takim", keep="last")
+            .iterrows()
+        ):
+            son_lig[s["Takim"]] = s["Div"]
+
+        parca_bellek: dict = {}
+
+        def _parcala(ad: str) -> frozenset:
+            if ad not in parca_bellek:
+                parca_bellek[ad] = frozenset(veri._oddsapi_takim_parcalari(ad))
+            return parca_bellek[ad]
+
+        def _ayni_takim(a: str, b: str) -> bool:
+            # hızlı tekilleştirme: parça kesişimi yeter (difflib yok — 700×90
+            # karşılaştırmada difflib bülten kurulumunu 50 sn'ye çıkarıyordu)
+            A, B = _parcala(a), _parcala(b)
+            return bool(A and B and (A & B))
+
+        gun_haritasi: dict = {}
+        for r in fik.itertuples():
+            gun_haritasi.setdefault(r.Tarih.date(), []).append((str(r.HomeTeam), str(r.AwayTeam)))
+
+        # dünya fikstüründeki yüzlerce yabancı isim için difflib'siz hızlı çözücü
+        hafiza.clear()
+        cozucu = veri.takim_cozucu(df, hizli=True)
+
+        satirlar = []
+        for m in kayitlar:
+            if len(satirlar) >= 120:
+                break
+            if m.get("durum") in ("PST", "CANC", "ABD", "AWD", "WO"):
+                continue
+            try:
+                t = pd.Timestamp(str(m.get("ts", "")))
+                if t.tzinfo is not None:
+                    t = t.tz_convert("UTC").tz_localize(None)
+                tarih = t + pd.Timedelta(hours=3)  # UTC → TR
+            except Exception:  # noqa: BLE001
+                continue
+            if tarih < simdi.normalize():
+                continue
+            kod = veri.AF_LIG_ESLEME.get(m.get("lig_id"))
+            ev, dep = _esle(str(m.get("ev") or "")), _esle(str(m.get("dep") or ""))
+            if kod is None:
+                # beyaz liste dışı: yalnız iki takımı da arşive oturan maçlar
+                if not (ev and dep):
+                    continue
+                kod = son_lig.get(ev, "AF")
+                if kod in veri.LIGLER and (son_lig.get(ev) != son_lig.get(dep)):
+                    kod = "AF"  # ligler-arası (kupa benzeri): kod iddiasında bulunma
+            analiz_var = bool(ev and dep)
+            # aynı gün + aynı ikili bültende zaten varsa (CSV/fd.org) ekleme
+            ayni_gun = gun_haritasi.get(tarih.date(), [])
+            e_ad, d_ad = ev or str(m.get("ev")), dep or str(m.get("dep"))
+            if any(_ayni_takim(e_ad, me) and _ayni_takim(d_ad, md) for me, md in ayni_gun):
+                continue
+            gun_haritasi.setdefault(tarih.date(), []).append((e_ad, d_ad))
+            satirlar.append(
+                {
+                    "Tarih": tarih,
+                    "Div": kod,
+                    "HomeTeam": e_ad,
+                    "AwayTeam": d_ad,
+                    "LigAdi": veri.AF_LIG_ADLARI.get(kod)
+                              or f"{m.get('ulke') or ''} {m.get('lig_ad') or ''}".strip(),
+                    "analiz_yok": not analiz_var,
+                }
+            )
+        if not satirlar:
+            return fik
+        birlesik = pd.concat([fik, pd.DataFrame(satirlar)], ignore_index=True)
+        return birlesik.sort_values("Tarih").reset_index(drop=True)
+
     def _fikstur(yenile: bool = False, bellek_ttl: bool = False):
         """bellek_ttl=True: listeleme çağrıları için TTL dolduysa yeniden oku.
         Detay/tarama çağrıları mevcut kopyayı kullanır ki satır id'leri kaymasın."""
@@ -620,6 +737,10 @@ def uygulama_olustur():
                 ligler=sorted(set(df["Div"].unique()) | set(veri.EK_LIGLER)), yenile=yenile
             )
             fik = _dis_kapsami_ekle(df, fik, yenile)
+            try:
+                fik = _af_kapsami_ekle(df, fik)
+            except Exception:  # noqa: BLE001 — kapsama katmanı bülteni asla düşürmesin
+                pass
             _DURUM["fikstur"], _DURUM["kitapcilar"] = fik, kitapcilar
             _DURUM["fikstur_zaman"] = time.time()
         return _DURUM["fikstur"], _DURUM["kitapcilar"]
