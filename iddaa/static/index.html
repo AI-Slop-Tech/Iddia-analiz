@@ -662,7 +662,9 @@ async function haftaYukle(yenile, sessiz){
     pilCiz(); gunCiz(); tabloPilCiz(); srPilCiz();
     if(HAFTA.kaynak_yayini)
       $('#kaynak-notu').textContent =
-        `Kaynağın son bülten yayını: ${HAFTA.kaynak_yayini} — yeni tur maçları kaynak yayınladıkça (genellikle Salı–Perşembe) otomatik eklenir.` + disMetni(HAFTA.dis);
+        `Kaynağın son bülten yayını: ${HAFTA.kaynak_yayini} — yeni tur maçları kaynak yayınladıkça (genellikle Salı–Perşembe) otomatik eklenir.` + disMetni(HAFTA.dis) +
+        (HAFTA.piyasa_isitma ? ' · 📡 piyasa oranları arka planda yükleniyor, 1-2 dk içinde görünür…' : '');
+    if(HAFTA.piyasa_isitma) setTimeout(() => haftaYukle(false, true), 45000);
     $('#anahtar-kutu').style.display = (HAFTA.dis && !HAFTA.dis.anahtar_var) ? '' : 'none';
     if(yenile) bildir('Fikstür yenilendi.');
   }catch(h){
