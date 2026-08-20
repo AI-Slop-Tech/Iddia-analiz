@@ -650,6 +650,9 @@ async function haftaYukle(yenile, sessiz){
   try{
     HAFTA = await api('/api/bulten' + (yenile ? '?yenile=1' : ''));
     if(!sessiz) TARAMALAR = {};
+    // bülten yenilendiğinde maç kimlikleri kayabilir — detay önbelleği tazelenir
+    Object.keys(MAC_DETAY_CACHE).forEach(k => delete MAC_DETAY_CACHE[k]);
+    TARAMA_ACIK = {};
     if(!HAFTA.gunler.length){
       $('#gun-pilleri').innerHTML = '';
       $('#one-cikanlar').innerHTML = '';
@@ -787,30 +790,86 @@ async function gunTara(){
   b.disabled = false; b.textContent = '⚡ Günü Tara';
 }
 
+let TARAMA_TUM = false, TARAMA_OYN = [], TARAMA_ACIK = {};
+function taramaSatir(m, soluk){
+  return `
+    <div class="one-cikan ${m.karar}" ${soluk ? 'style="opacity:.55"' : ''}>
+      <span>${m.basladi ? '▶' : KARAR_ISARET[m.karar]}</span>
+      <span class="ipucu">${m.saat} · ${esc(m.lig)}</span>
+      <span style="font-weight:700;flex:1;min-width:170px">${esc(m.ev)} – ${esc(m.dep)}</span>
+      <span>${SECIM_AD[m.secim] || esc(m.secim)} @ <b>${(m.en_iyi_oran || m.oran).toFixed(2)}</b></span>
+      <span class="ipucu">${m.kalip_n ? m.kalip_n + ' benzer maç' : ''}</span>
+      ${yildizHTML(m.yildiz)}
+      <span class="buyukev ${m.ev_max >= 0 ? 'ev-poz' : 'ev-neg'}">${(m.ev_max*100).toFixed(1)}%</span>
+      <button class="mini-btn" onclick="${soluk ? `detayToggle(${m.id}, true)` : `taramaDetayToggle(${m.id})`}">🔬 ${soluk ? 'Detay' : 'Tam analiz'}</button>
+    </div>
+    ${soluk ? '' : `<div id="tdetay-${m.id}"></div>`}`;
+}
 function oneCikanCiz(){
   const sonuc = TARAMALAR[AKTIF_GUN];
   if(!sonuc){ $('#one-cikanlar').innerHTML = ''; return; }
   const lig = $('#h-lig').value;
   const liste = sonuc.filter(m => !lig || m.lig === lig);
+  const oyn = liste.filter(m => m.karar !== 'pas' && !m.basladi);      // oynanabilir öneriler
+  const gizli = liste.filter(m => m.karar === 'pas' || m.basladi);     // değersiz ya da başlamış
+  TARAMA_OYN = oyn.map(m => m.id);
+  const pasN = gizli.filter(m => !m.basladi).length,
+        basN = gizli.filter(m => m.basladi).length;
+  const ozet = [pasN ? `⛔ ${pasN} maçta değer yok` : '', basN ? `▶ ${basN} maç başladı` : '']
+               .filter(Boolean).join(' · ');
   $('#one-cikanlar').innerHTML = `<div class="kart">
-    <h2>⚡ Günün Taraması <span class="ipucu">(en iyi piyasa oranına göre değer sırasıyla)</span></h2>
-    <div class="alt-baslik">✅ değerli = liste oranıyla EV ≥ +%8 (3 sezonluk backtestte kârlı tek bant) · 🟡 sınırda = +%4–%8 · ⛔ pas.
-      Model piyasadan en çok ±5 puan ayrışır; ✅ bilerek nadirdir. Yüksek oranlı seçimlerde tekil isabet ~%30-35 normaldir — hedef seri kârı, maç başı isabet değil.</div>
-    ${liste.map(m => `
-      <div class="one-cikan ${m.karar}">
-        <span>${KARAR_ISARET[m.karar]}</span>
-        <span class="ipucu">${m.saat} · ${esc(m.lig)}</span>
-        <span style="font-weight:700;flex:1;min-width:170px">${esc(m.ev)} – ${esc(m.dep)}</span>
-        <span>${SECIM_AD[m.secim] || esc(m.secim)} @ <b>${(m.en_iyi_oran || m.oran).toFixed(2)}</b></span>
-        <span class="ipucu">${m.kalip_n ? m.kalip_n + ' benzer maç' : ''}</span>
-        ${yildizHTML(m.yildiz)}
-        <span class="buyukev ${m.ev_max >= 0 ? 'ev-poz' : 'ev-neg'}">${(m.ev_max*100).toFixed(1)}%</span>
-        <button class="mini-btn" onclick="detayToggle(${m.id}, true)">🔬 Detay</button>
-      </div>`).join('')}
+    <h2>⚡ Günün Taraması <span class="ipucu">(yalnız oynanabilir öneriler — değer sırasıyla)</span></h2>
+    <div class="alt-baslik">✅ değerli = liste oranıyla EV ≥ +%8 (3 sezonluk backtestte kârlı tek bant) · 🟡 sınırda = +%4–%8.
+      Değersiz ve başlamış maçlar gizlenir. Yüksek oranlı seçimlerde tekil isabet ~%30-35 normaldir — hedef seri kârı, maç başı isabet değil.</div>
+    ${oyn.length > 1 ? `<div style="margin:8px 0"><button class="mini-btn" id="btn-tum-analiz" onclick="taramaHepsiniAc()">📖 ${oyn.length} önerinin tam analizini aç</button></div>` : ''}
+    ${oyn.map(m => taramaSatir(m, false)).join('')}
+    ${!oyn.length ? `<div class="bos-durum" style="padding:14px 0"><p>Bugün oynanabilir değer yok — <b>pas da bir karardır</b>; değersiz bahse girmemek kasayı korur.</p></div>` : ''}
+    ${gizli.length ? `<div class="alt-baslik" style="cursor:pointer;user-select:none;margin-top:10px" onclick="TARAMA_TUM=!TARAMA_TUM;oneCikanCiz()">${ozet} — ${TARAMA_TUM ? '▾ gizle' : '▸ göster'}</div>` : ''}
+    ${TARAMA_TUM ? gizli.map(m => taramaSatir(m, true)).join('') : ''}
   </div>`;
+  // yeniden çizimde daha önce açık olan tam analizler (önbellekten) geri açılır
+  Object.keys(TARAMA_ACIK).forEach(id => {
+    if(TARAMA_ACIK[id] && MAC_DETAY_CACHE[id] && $('#tdetay-' + id)) taramaDetayToggle(+id);
+  });
+}
+
+async function taramaDetayToggle(id){
+  const kutu = $('#tdetay-' + id);
+  if(!kutu) return;
+  if(kutu.innerHTML){ kutu.innerHTML = ''; TARAMA_ACIK[id] = false; return; }
+  kutu.innerHTML = '<div class="detay-panel yukleniyor">⏳ Tam analiz hazırlanıyor…</div>';
+  try{
+    const s = await macDetayGetir(id);
+    kutu.innerHTML = `<div class="detay-panel">${s.kismi
+      ? kismiDetayHTML(s)
+      : kitapciHTML(s) + takimSonucHTML(s, {id}) + kornerHTML(s) + tahminDetayHTML(s)}</div>`;
+    TARAMA_ACIK[id] = true;
+  }catch(h){
+    kutu.innerHTML = `<div class="detay-panel"><span class="ev-neg">${esc(h.message)}</span></div>`;
+  }
+}
+
+async function taramaHepsiniAc(){
+  const b = $('#btn-tum-analiz');
+  if(b) b.disabled = true;
+  let n = 0;
+  for(const id of TARAMA_OYN){
+    const kutu = $('#tdetay-' + id);
+    if(kutu && !kutu.innerHTML) await taramaDetayToggle(id);
+    n += 1;
+    if(b) b.textContent = `⏳ ${n}/${TARAMA_OYN.length} analiz…`;
+  }
+  if(b) b.textContent = '📖 Tüm analizler açık';
 }
 
 let ACIK_DETAY = null;
+const MAC_DETAY_CACHE = {};
+async function macDetayGetir(id){
+  if(MAC_DETAY_CACHE[id]) return MAC_DETAY_CACHE[id];
+  const s = await api('/api/mac-detay?id=' + id);
+  MAC_DETAY_CACHE[id] = s;
+  return s;
+}
 async function detayToggle(id, kaydir){
   const kutu = $('#detay-' + id);
   if(!kutu){ return; }
@@ -820,7 +879,7 @@ async function detayToggle(id, kaydir){
   if(kaydir){ const satir = $('#mac-' + id); if(satir) satir.scrollIntoView({behavior:'smooth', block:'center'}); }
   kutu.innerHTML = '<div class="detay-panel yukleniyor">⏳ Maç analiz ediliyor…</div>';
   try{
-    const s = await api('/api/mac-detay?id=' + id);
+    const s = await macDetayGetir(id);
     kutu.innerHTML = s.kismi
       ? `<div class="detay-panel">${kismiDetayHTML(s)}</div>`
       : `<div class="detay-panel">${kitapciHTML(s)}${takimSonucHTML(s, {id})}${kornerHTML(s)}${tahminDetayHTML(s)}</div>`;
