@@ -809,6 +809,19 @@ def oneri_uret(deger: dict, poisson: dict, kalip: dict | None,
     en_iyi = max(adaylar or deger["satirlar"], key=lambda s: s["ev"])
     secim = en_iyi["secim"]
 
+    # Azınlık-ihtimal değer bahsi açıklaması: seçimin model olasılığı %50'nin
+    # altındaysa (ör. kalıp tablosu Üst derken Alt önerilmesi) bu bir çelişki
+    # değil fiyat oyunudur — ama kartta AÇIKÇA söylenmezse çelişki gibi okunur.
+    # (Böyle seçimleri elemek denendi: backtest kârı düşürdü — bkz. backtest.py.)
+    azinlik_notu = None
+    if en_iyi["ev"] >= 0.04 and en_iyi["model"] < 0.5:
+        ters = {"ÜST 2.5": "Alt", "ALT 2.5": "Üst",
+                "MS1": "başka bir sonuç", "MS0": "başka bir sonuç", "MS2": "başka bir sonuç"}
+        azinlik_notu = (f"Dikkat — azınlık ihtimale değer bahsi: model bu seçime %{en_iyi['model'] * 100:.0f} "
+                        f"veriyor (piyasa %{en_iyi['piyasa'] * 100:.0f} fiyatlıyor); muhtemel sonuç yine "
+                        f"{ters.get(secim, 'diğer taraf')}. Kazanç tek maçtan değil, fiyat hatasının "
+                        f"seride birikmesinden beklenir — bu bahsin yatması normaldir.")
+
     yildiz = 1
     if secim in ("MS1", "MS0", "MS2"):
         if max(["ms1", "ms0", "ms2"], key=lambda k: poisson[k]).upper() == secim:
@@ -853,6 +866,7 @@ def oneri_uret(deger: dict, poisson: dict, kalip: dict | None,
         "kelly": en_iyi["kelly"],
         "yildiz": yildiz,
         "karar": karar,
+        "azinlik_notu": azinlik_notu,
     }
 
 
