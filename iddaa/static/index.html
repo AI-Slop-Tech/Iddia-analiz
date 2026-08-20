@@ -649,10 +649,13 @@ async function haftaYukle(yenile, sessiz){
     $('#hafta-liste').innerHTML = '<div class="iskelet"></div>'.repeat(6);
   try{
     HAFTA = await api('/api/bulten' + (yenile ? '?yenile=1' : ''));
-    if(!sessiz) TARAMALAR = {};
-    // bülten yenilendiğinde maç kimlikleri kayabilir — detay önbelleği tazelenir
-    Object.keys(MAC_DETAY_CACHE).forEach(k => delete MAC_DETAY_CACHE[k]);
-    TARAMA_ACIK = {};
+    if(!sessiz){
+      // yalnız elle yenilemede sıfırlanır; arka plan tazelemeleri (45 sn piyasa
+      // ısıtması, 10 dk periyodik) açık analiz panellerini KAPATMAMALI
+      TARAMALAR = {};
+      Object.keys(MAC_DETAY_CACHE).forEach(k => delete MAC_DETAY_CACHE[k]);
+      TARAMA_ACIK = {};
+    }
     if(!HAFTA.gunler.length){
       $('#gun-pilleri').innerHTML = '';
       $('#one-cikanlar').innerHTML = '';
@@ -775,6 +778,14 @@ function gunCiz(){
         : `<button class="mini-btn" onclick="detayToggle(${m.id})">🔬 Detay</button>`}
     </div>
     <div id="detay-${m.id}"></div>`).join('');
+  // arka plan tazelemesi açık paneli kapatmasın: önbellekten anında geri çizilir
+  if(ACIK_DETAY !== null && MAC_DETAY_CACHE[ACIK_DETAY]){
+    const kutu = $('#detay-' + ACIK_DETAY), satir = $('#mac-' + ACIK_DETAY),
+          s = MAC_DETAY_CACHE[ACIK_DETAY];
+    if(kutu && satir && s.ev && satir.textContent.includes(s.ev))
+      kutu.innerHTML = detayPanelHTML(s, ACIK_DETAY);
+    else ACIK_DETAY = null;
+  }
 }
 
 async function gunTara(){
@@ -840,9 +851,7 @@ async function taramaDetayToggle(id){
   kutu.innerHTML = '<div class="detay-panel yukleniyor">⏳ Tam analiz hazırlanıyor…</div>';
   try{
     const s = await macDetayGetir(id);
-    kutu.innerHTML = `<div class="detay-panel">${s.kismi
-      ? kismiDetayHTML(s)
-      : kitapciHTML(s) + takimSonucHTML(s, {id}) + kornerHTML(s) + tahminDetayHTML(s)}</div>`;
+    kutu.innerHTML = detayPanelHTML(s, id);
     TARAMA_ACIK[id] = true;
   }catch(h){
     kutu.innerHTML = `<div class="detay-panel"><span class="ev-neg">${esc(h.message)}</span></div>`;
@@ -880,12 +889,16 @@ async function detayToggle(id, kaydir){
   kutu.innerHTML = '<div class="detay-panel yukleniyor">⏳ Maç analiz ediliyor…</div>';
   try{
     const s = await macDetayGetir(id);
-    kutu.innerHTML = s.kismi
-      ? `<div class="detay-panel">${kismiDetayHTML(s)}</div>`
-      : `<div class="detay-panel">${kitapciHTML(s)}${takimSonucHTML(s, {id})}${kornerHTML(s)}${tahminDetayHTML(s)}</div>`;
+    kutu.innerHTML = detayPanelHTML(s, id);
   }catch(h){
     kutu.innerHTML = `<div class="detay-panel"><span class="ev-neg">${esc(h.message)}</span></div>`;
   }
+}
+
+function detayPanelHTML(s, id){
+  return `<div class="detay-panel">${s.kismi
+    ? kismiDetayHTML(s)
+    : kitapciHTML(s) + takimSonucHTML(s, {id}) + kornerHTML(s) + tahminDetayHTML(s)}</div>`;
 }
 
 function kitapciHTML(s){
@@ -1270,7 +1283,9 @@ function takimSonucHTML(s, gctx){
       pas: `<div class="buyuk">⛔ DEĞER YOK — pas geçin</div>
             En iyi seçim bile ${(o.ev*100).toFixed(1)}% beklenen değerde. Değer yoksa bahis de yok; profesyonel karar budur.`
     }[o.karar];
-    html += `<div class="banner ${o.karar}">${govde}</div>`;
+    const azinlik = (o.azinlik_notu && o.karar !== 'pas')
+      ? `<div class="ipucu" style="display:block;margin-top:6px">⚖️ ${esc(o.azinlik_notu)}</div>` : '';
+    html += `<div class="banner ${o.karar}">${govde}${azinlik}</div>`;
   }
 
   if(s.yorum && s.yorum.length){

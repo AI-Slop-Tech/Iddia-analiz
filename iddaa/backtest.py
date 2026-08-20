@@ -194,6 +194,9 @@ def backtest_calistir(df: pd.DataFrame, sezon_sayisi: int = 3, lig: str | None =
                     ku = k_ust if w_kalip > 0 else po_ust
                     mu = w_poisson * po_ust + w_kalip * ku + W_PIYASA * adil_ust
                     mu = adil_ust + max(-MAKS_AYRISMA, min(MAKS_AYRISMA, mu - adil_ust))
+                    # not: kalıp yönüyle çelişen tarafı elemek denendi ve kârı DÜŞÜRDÜ
+                    # (eşik 0.08: 589→470 bahis, ROI +4.6→+4.4; eşik 0.10: +4.7→+1.2).
+                    # Azınlık-ihtimal değer bahisleri gerçek kenar taşıyor — elenmez.
                     adaylar.append(("ÜST 2.5", float(o_u), mu, bool(ust_g[i]), _maks(r.oran_ust25_maks, float(o_u))))
                     adaylar.append(("ALT 2.5", float(o_a), 1 - mu, not bool(ust_g[i]), _maks(r.oran_alt25_maks, float(o_a))))
 

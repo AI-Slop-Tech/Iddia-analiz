@@ -180,10 +180,22 @@ def _gol_beklentisi(a: dict) -> str:
                 f"ile, benzer oranla açılan {k['n']} tarihsel maç da {_y(k['ust25'])} ile {yon} 2.5'i destekliyor."
             )
         elif abs(p["ust25"] - k["ust25"]) >= 0.08:
-            cumleler.append(
-                f"Alt/Üst tarafında sinyaller ayrışıyor (Poisson {_y(p['ust25'])} Üst derken tarihsel "
-                f"kalıp {_y(k['ust25'])} diyor) — bu pazara mesafeli durmakta fayda var."
-            )
+            o = a.get("oneri")
+            if o and o["secim"] in ("ÜST 2.5", "ALT 2.5") and o["karar"] != "pas":
+                # yorum, kartın başlığıyla çelişmemeli: öneri bu pazardaysa
+                # ayrışma "uzak dur" değil, fiyat-hatası gerekçesiyle anlatılır
+                taraf = "Üst" if o["secim"].startswith("ÜST") else "Alt"
+                cumleler.append(
+                    f"Alt/Üst tarafında sinyaller ayrışıyor (Poisson {_y(p['ust25'])} Üst derken tarihsel "
+                    f"kalıp {_y(k['ust25'])} diyor); öneri yine de {taraf} 2.5 — çünkü mesele hangi sonucun "
+                    f"daha muhtemel olduğu değil, kitapçının hangi tarafı yanlış fiyatladığı. "
+                    f"Muhtemel sonuç öbür taraf olsa bile fiyat {taraf}'ta hatalıysa uzun vadeli kâr oradadır."
+                )
+            else:
+                cumleler.append(
+                    f"Alt/Üst tarafında sinyaller ayrışıyor (Poisson {_y(p['ust25'])} Üst derken tarihsel "
+                    f"kalıp {_y(k['ust25'])} diyor) — bu pazara mesafeli durmakta fayda var."
+                )
     if p["kg_var"] >= 0.6:
         cumleler.append(f"Karşılıklı gol olasılığı {_y(p['kg_var'])} ile güçlü.")
     elif p["kg_var"] <= 0.45:
