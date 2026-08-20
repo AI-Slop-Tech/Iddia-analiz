@@ -820,7 +820,9 @@ async function detayToggle(id, kaydir){
   kutu.innerHTML = '<div class="detay-panel yukleniyor">⏳ Maç analiz ediliyor…</div>';
   try{
     const s = await api('/api/mac-detay?id=' + id);
-    kutu.innerHTML = `<div class="detay-panel">${kitapciHTML(s)}${takimSonucHTML(s, {id})}${kornerHTML(s)}${tahminDetayHTML(s)}</div>`;
+    kutu.innerHTML = s.kismi
+      ? `<div class="detay-panel">${kismiDetayHTML(s)}</div>`
+      : `<div class="detay-panel">${kitapciHTML(s)}${takimSonucHTML(s, {id})}${kornerHTML(s)}${tahminDetayHTML(s)}</div>`;
   }catch(h){
     kutu.innerHTML = `<div class="detay-panel"><span class="ev-neg">${esc(h.message)}</span></div>`;
   }
@@ -919,6 +921,47 @@ function tabloDetay(id){
   sekmeAc('hafta');
   if(AKTIF_GUN !== AKTIF_TABLO_GUN) gunSec(AKTIF_TABLO_GUN);
   detayToggle(id, true);
+}
+
+function kismiKalipHTML(s){
+  const k = s.kalip;
+  const ornekler = (k.ornekler || []).filter(o => o.hucre);
+  return `<div class="kart"><h2>📋 Benzer Oranla Açılan Maçlarda Gerçekleşenler</h2>
+    <div class="alt-baslik">${k.n} benzer maç: 1 ${pct(k.ms1)} · X ${pct(k.ms0)} · 2 ${pct(k.ms2)} ·
+      Üst 2.5 ${pct(k.ust25)} · KG ${pct(k.kg_var)} — takım modeli kurulamasa da oran kalıbı takımdan bağımsız çalışır.</div>
+    ${ornekler.length ? `<div style="overflow-x:auto"><table>
+      <tr><th>Tarih</th><th>Maç</th>${TAB_BASLIK}</tr>
+      ${ornekler.map(o => `<tr>
+        <td class="ipucu" style="white-space:nowrap">${o.ayni_ulke ? '<b style="color:var(--sari)">★</b> ' : ''}${o.tarih} · ${esc(o.lig)}</td>
+        <td style="white-space:nowrap">${esc(o.ev)} – ${esc(o.dep)}
+          <div class="ipucu">${(o.oranlar || []).map(x => x.toFixed(2)).join(' / ')}</div></td>
+        ${TAB_KOLONLAR.map(c => hucreTd(o.hucre[c])).join('')}</tr>`).join('')}
+    </table></div>` : ''}</div>`;
+}
+
+function kismiDetayHTML(s){
+  const taraf = t => `<div class="kart"><h2>🧾 ${esc(t.arsiv_adi)} — son ${t.maclar.length} maç (geçmiş)</h2>
+    <div style="overflow-x:auto"><table>
+      <tr><th>Tarih</th><th>Lig</th><th>Maç</th><th class="orta">Skor</th><th class="orta">Sonuç</th></tr>
+      ${t.maclar.map(m => `<tr>
+        <td class="ipucu" style="white-space:nowrap">${m.tarih}</td><td>${esc(m.lig)}</td>
+        <td style="white-space:nowrap">${esc(m.ev)} – ${esc(m.dep)}</td>
+        <td class="orta skor">${m.skor}</td>
+        <td class="orta"><b class="${m.sonuc === 'G' ? 'ev-poz' : (m.sonuc === 'M' ? 'ev-neg' : '')}">${m.sonuc}</b></td>
+      </tr>`).join('')}
+    </table></div></div>`;
+  const SIRA = ['1/1', '1/0', '1/2', '0/1', '0/0', '0/2', '2/1', '2/0', '2/2'];
+  const iyms = s.iyms ? `<div class="kart"><h2>🎭 Piyasa İY/MS Fiyatları</h2>
+    <div class="rozetler">${SIRA.filter(k => s.iyms[k]).map(k =>
+      `<span class="rozet"><b>${k}</b> ${s.iyms[k].oran.toFixed(2)}
+        <span class="ipucu">${esc(kitapciKisa(s.iyms[k].kitapci))}</span></span>`).join('')}</div>
+  </div>` : '';
+  return `<div class="not" style="margin-bottom:10px">ℹ️ ${esc(s.neden)}</div>
+    ${kitapciHTML(s)}
+    ${s.kalip ? kismiKalipHTML(s) : ''}
+    ${kornerHTML(s)}
+    ${iyms}
+    ${(s.taraflar || []).map(taraf).join('')}`;
 }
 
 function kitapciKisa(ad){
