@@ -967,6 +967,7 @@ def uygulama_olustur():
                     "yildiz": int(o["yildiz"]),
                     "karar": o["karar"],
                     "kalip_n": int(a["kalip"]["n"]) if a["kalip"] else 0,
+                    "basladi": bool(r["Tarih"] <= simdi),
                 }
             )
             if r["Tarih"] > simdi:  # karne dürüstlüğü: yalnız başlamamış maç kaydedilir
