@@ -713,7 +713,21 @@ def elo_hesapla(df: pd.DataFrame, k: float = 20.0, ev_avantaji: float = 60.0) ->
 
 # ------------------------------------------------------------ değer + öneri
 
-W_PIYASA = 0.35     # model karışımında piyasa (marj arındırılmış oran) payı
+W_PIYASA = 0.50      # model karışımında piyasa (marj arındırılmış oran) payı
+MAKS_AYRISMA = 0.05  # model, piyasadan sonuç başına en çok bu kadar ayrışabilir
+                     # (backtest kanıtı: serbest ayrışma her eşikte zarar yazdı)
+
+
+def ayrismayi_sinirla(model: dict, adil: dict) -> dict:
+    """Model olasılıklarını piyasa etrafında ±MAKS_AYRISMA banda kırpar.
+
+    Piyasa (özellikle kapanış) uzun vadede en iyi tekil tahmincidir; +%15'lik
+    "değer" iddiaları neredeyse her zaman model hatasıdır. Kırpma sahte değer
+    işaretlerini keser, gerçek küçük kenarları korur."""
+    kirpik = {k: adil[k] + max(-MAKS_AYRISMA, min(MAKS_AYRISMA, model[k] - adil[k]))
+              for k in model}
+    toplam = sum(kirpik.values())
+    return {k: v / toplam for k, v in kirpik.items()}
 ORAN_TAVANI = 3.60  # sürpriz oran filtresi: bu oranın üstü öneriye giremez
                     # (yüksek oranların sistematik pahalı fiyatlandığı — favorite-longshot
                     # bias — hem literatürde hem kendi backtest'imizde doğrulandı)
@@ -747,6 +761,7 @@ def deger_analizi(oranlar: tuple[float, float, float], poisson: dict,
     }
     norm = sum(model.values())
     model = {k: v / norm for k, v in model.items()}
+    model = ayrismayi_sinirla(model, p_adil)
 
     marj = sum(1 / v for v in o.values()) - 1.0
 
@@ -771,6 +786,7 @@ def deger_analizi(oranlar: tuple[float, float, float], poisson: dict,
         adil_ust = q_u / (q_u + q_a)
         kalip_ust = kalip["ust25"] if kalip else poisson["ust25"]
         m_ust = w_poisson * poisson["ust25"] + w_kalip * kalip_ust + W_PIYASA * adil_ust
+        m_ust = adil_ust + max(-MAKS_AYRISMA, min(MAKS_AYRISMA, m_ust - adil_ust))
         satirlar.append(_satir("ÜST 2.5", o_ust, adil_ust, m_ust))
         satirlar.append(_satir("ALT 2.5", o_alt, 1 - adil_ust, 1 - m_ust))
         model_p["ÜST 2.5"] = m_ust
@@ -813,15 +829,17 @@ def oneri_uret(deger: dict, poisson: dict, kalip: dict | None,
             yildiz += 1
         if kalip and (kalip["ust25"] > 0.53) == ust_secildi and abs(kalip["ust25"] - 0.5) > 0.03:
             yildiz += 1
-    if en_iyi["ev"] >= 0.05:
+    if en_iyi["ev"] >= 0.08:
         yildiz += 1
     if poisson["uyarilar"]:
         yildiz -= 1
     yildiz = max(1, min(5, yildiz))
 
-    if en_iyi["ev"] >= 0.04:
+    # Eşikler backtest kanıtına göre: kalibreli modelde +%8 üzeri işaretler
+    # 3 sezonda +%4.6/+%8.1 ROI yazdı; altı bant tarihte zarardaydı.
+    if en_iyi["ev"] >= 0.08:
         karar = "degerli"
-    elif en_iyi["ev"] >= 0.01:
+    elif en_iyi["ev"] >= 0.04:
         karar = "sinirda"
     else:
         karar = "pas"

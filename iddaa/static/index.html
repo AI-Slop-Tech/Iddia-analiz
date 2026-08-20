@@ -794,7 +794,8 @@ function oneCikanCiz(){
   const liste = sonuc.filter(m => !lig || m.lig === lig);
   $('#one-cikanlar').innerHTML = `<div class="kart">
     <h2>⚡ Günün Taraması <span class="ipucu">(en iyi piyasa oranına göre değer sırasıyla)</span></h2>
-    <div class="alt-baslik">✅ değerli · 🟡 sınırda · ⛔ değer yok — yıldız, sinyallerin (Poisson, kalıp, form, Elo) aynı yöne bakma derecesi</div>
+    <div class="alt-baslik">✅ değerli = liste oranıyla EV ≥ +%8 (3 sezonluk backtestte kârlı tek bant) · 🟡 sınırda = +%4–%8 · ⛔ pas.
+      Model piyasadan en çok ±5 puan ayrışır; ✅ bilerek nadirdir. Yüksek oranlı seçimlerde tekil isabet ~%30-35 normaldir — hedef seri kârı, maç başı isabet değil.</div>
     ${liste.map(m => `
       <div class="one-cikan ${m.karar}">
         <span>${KARAR_ISARET[m.karar]}</span>
@@ -1203,7 +1204,8 @@ function takimSonucHTML(s, gctx){
     const o = s.oneri, y = yildizHTML(o.yildiz);
     const govde = {
       degerli: `<div class="buyuk">✅ DEĞERLİ BAHİS: ${SECIM_AD[o.secim] || esc(o.secim)} @ ${o.oran.toFixed(2)}</div>
-                Beklenen değer <b class="ev-poz">+${(o.ev*100).toFixed(1)}%</b> · Önerilen kasa payı (çeyrek Kelly): %${(o.kelly*100).toFixed(1)} · Güven: ${y}`,
+                Beklenen değer <b class="ev-poz">+${(o.ev*100).toFixed(1)}%</b> · Önerilen kasa payı (çeyrek Kelly): %${(o.kelly*100).toFixed(1)} · Güven: ${y}
+                <div class="ipucu" style="margin-top:4px">EV ≥ +%8 bandı, 3 sezonluk backtestte kârlı çıkan tek banttır; yine de tekil maç garantisi değildir.</div>`,
       sinirda: `<div class="buyuk">🟡 SINIRDA: ${SECIM_AD[o.secim] || esc(o.secim)} @ ${o.oran.toFixed(2)}</div>
                 Beklenen değer +${(o.ev*100).toFixed(1)}% — küçük avantaj var ama hata payının içinde. Güven: ${y}`,
       pas: `<div class="buyuk">⛔ DEĞER YOK — pas geçin</div>
