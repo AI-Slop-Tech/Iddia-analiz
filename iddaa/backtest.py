@@ -21,7 +21,7 @@ import math
 import numpy as np
 import pandas as pd
 
-from .analiz import W_PIYASA, YARI_OMUR_GUN
+from .analiz import MAKS_AYRISMA, W_PIYASA, YARI_OMUR_GUN, ayrismayi_sinirla
 
 _FAKTORIYEL = [1, 1, 2, 6, 24, 120, 720, 5040, 40320]
 _MAKS_GOL = 8
@@ -176,6 +176,9 @@ def backtest_calistir(df: pd.DataFrame, sezon_sayisi: int = 3, lig: str | None =
                 m2 = w_poisson * po2 + w_kalip * k2 + W_PIYASA * p2a[i]
                 norm = m1 + m0 + m2
                 m1, m0, m2 = m1 / norm, m0 / norm, m2 / norm
+                sinirli = ayrismayi_sinirla({"1": m1, "0": m0, "2": m2},
+                                            {"1": p1a[i], "0": p0a[i], "2": p2a[i]})
+                m1, m0, m2 = sinirli["1"], sinirli["0"], sinirli["2"]
 
                 def _maks(deger_, yedek):
                     return float(deger_) if not pd.isna(deger_) else yedek
@@ -190,6 +193,7 @@ def backtest_calistir(df: pd.DataFrame, sezon_sayisi: int = 3, lig: str | None =
                     adil_ust = (1 / o_u) / (1 / o_u + 1 / o_a)
                     ku = k_ust if w_kalip > 0 else po_ust
                     mu = w_poisson * po_ust + w_kalip * ku + W_PIYASA * adil_ust
+                    mu = adil_ust + max(-MAKS_AYRISMA, min(MAKS_AYRISMA, mu - adil_ust))
                     adaylar.append(("ÜST 2.5", float(o_u), mu, bool(ust_g[i]), _maks(r.oran_ust25_maks, float(o_u))))
                     adaylar.append(("ALT 2.5", float(o_a), 1 - mu, not bool(ust_g[i]), _maks(r.oran_alt25_maks, float(o_a))))
 
