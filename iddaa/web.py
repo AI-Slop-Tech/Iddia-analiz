@@ -630,7 +630,11 @@ def uygulama_olustur():
             try:
                 kayitlar.extend(veri._af_gun_fiksturu(g))
             except Exception:  # noqa: BLE001 — pencere/kota hatası bülteni düşürmesin
-                continue
+                try:
+                    # kota/ağ yoksa bayat önbellek hiç yoktan iyidir
+                    kayitlar.extend(veri._af_gun_fiksturu(g, sadece_onbellek=True))
+                except Exception:  # noqa: BLE001
+                    continue
         if not kayitlar:
             return fik
 
@@ -1205,7 +1209,67 @@ def uygulama_olustur():
         except (ValueError, KeyError):
             return jsonify({"hata": "Maç bulunamadı; bülteni yenileyin."}), 404
         if bool(r.get("analiz_yok", False) is True):
-            return jsonify({"hata": "Bu maçın takımları istatistik arşivimizin kapsamı dışında; listeleyebiliyor ama analiz edemiyoruz."}), 400
+            # KISMİ ANALİZ: rakibin ligi arşivde olmasa da elimizdekini göster —
+            # çözülen tarafın son maçları (geçmişi), oran kalıbı, kitapçı panosu,
+            # piyasa İY/MS fiyatları. (Beşiktaş–Kauno Žalgiris tipi kupa maçları.)
+            oranlar, maks, ust_alt = _fikstur_oranlari(r)
+            piyasa_k = veri.iyms_piyasa(r["HomeTeam"], r["AwayTeam"], r["Div"], r["Tarih"],
+                                        sadece_onbellek=True)
+            if not oranlar and piyasa_k and piyasa_k.get("ms"):
+                oranlar = piyasa_k["ms"]
+                maks = maks or piyasa_k.get("ms_maks")
+                ust_alt = ust_alt or piyasa_k.get("ust_alt25")
+
+            cozucu = veri.takim_cozucu(df, hizli=True)
+            taraflar = []
+            for ad in (r["HomeTeam"], r["AwayTeam"]):
+                try:
+                    arsiv_ad = cozucu(str(ad))
+                except ValueError:
+                    continue
+                sec = df[(df["HomeTeam"] == arsiv_ad) | (df["AwayTeam"] == arsiv_ad)] \
+                    .sort_values("Tarih", ascending=False).head(10)
+                maclar = []
+                for s in sec.itertuples():
+                    evde = s.HomeTeam == arsiv_ad
+                    sonuc = "G" if (s.FTR == ("H" if evde else "A")) else ("B" if s.FTR == "D" else "M")
+                    maclar.append({
+                        "tarih": s.Tarih.strftime("%d.%m.%Y"), "lig": s.Div,
+                        "ev": s.HomeTeam, "dep": s.AwayTeam,
+                        "skor": f"{int(s.FTHG)}-{int(s.FTAG)}", "sonuc": sonuc,
+                    })
+                taraflar.append({"ad": str(ad), "arsiv_adi": arsiv_ad, "maclar": maclar})
+
+            kalip = (analiz.oran_kalibi(df, tuple(oranlar), ornek_sayisi=12)
+                     if oranlar else None)
+            korner_piyasa = None
+            if piyasa_k and piyasa_k.get("korner"):
+                korner_piyasa = {"kitapci": piyasa_k.get("korner_kitapci"),
+                                 "barem": sorted(piyasa_k["korner"],
+                                                 key=lambda x: x["cizgi"])[:7]}
+            ozet = _mac_ozeti(idx, r, kitapcilar)
+            if oranlar and not ozet["oranlar"]:
+                ozet["oranlar"] = oranlar
+            if piyasa_k and piyasa_k.get("ms"):
+                ozet["kitapcilar"][f"{piyasa_k.get('ms_kitapci') or 'Piyasa'} (canlı)"] = piyasa_k["ms"]
+            iyms_fiyatlar = (
+                {k: {"oran": v, "kitapci": piyasa_k["kombo_kitapci"].get(k)}
+                 for k, v in piyasa_k["kombolar"].items()}
+                if piyasa_k and piyasa_k.get("kombolar") else None
+            )
+            return jsonify({
+                "kismi": True,
+                "ev": r["HomeTeam"], "dep": r["AwayTeam"],
+                "neden": "Rakip takımın ligi 38 liglik arşivde yok — tam model kurulamıyor; "
+                         "eldeki her şey aşağıda: çözülen tarafın geçmişi, oran kalıbı ve piyasa fiyatları.",
+                "fikstur": {"tarih": r["Tarih"].strftime("%d.%m.%Y"), "saat": ozet["saat"],
+                            "kitapcilar": ozet["kitapcilar"], "maks": maks,
+                            "ust_alt": ust_alt, "oran_kaynak": r.get("OranKaynak") or ("canli" if piyasa_k and piyasa_k.get("ms") else None)},
+                "kalip": _kalip_json(kalip),
+                "taraflar": taraflar,
+                "iyms": iyms_fiyatlar,
+                "korner": {"model": None, "kalip": None, "piyasa": korner_piyasa} if korner_piyasa else None,
+            })
 
         oranlar, maks, ust_alt = _fikstur_oranlari(r)
         # API füzyonu: aynı pakette İY/MS + korner + canlı 1X2 gelir; bülten
