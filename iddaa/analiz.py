@@ -696,6 +696,66 @@ def tahmin_hucreleri(poisson: dict, kalip: dict | None = None) -> dict:
     }
 
 
+def guvenli_secimler(a: dict, sinir: float = 0.70) -> list[dict]:
+    """Fiyatlanabilir TÜM çekirdek pazarları tek listede toplar, olasılığa göre sıralar.
+
+    "En garantiye yakın" arayışı içindir: sıralama anahtarı modelin olasılığıdır,
+    beklenen değer değil. Gerçek oranı bilinen pazarlarda (MS, Üst/Alt) o oran ve
+    EV de eklenir; bilinmeyenlerde yalnız adil oran (1/p) verilir — kullanıcı
+    bültendeki gerçek fiyatla kıyaslar. Garanti diye bir şey yoktur; bu liste
+    yalnız "en yüksek olasılıklı taraf"ı gösterir, düşük oranlı favorilerin
+    çoğu zaman negatif değerli olduğu da unutulmamalıdır.
+    """
+    p = a["poisson"]
+    kalip = a.get("kalip")
+    d = a.get("deger")
+    adaylar: list[dict] = []
+
+    def ekle(pazar: str, olasilik: float, oran: float | None = None) -> None:
+        if olasilik >= sinir:
+            kayit = {"pazar": pazar, "p": float(olasilik),
+                     "adil": round(1.0 / max(olasilik, 1e-6), 2),
+                     "oran": round(float(oran), 2) if oran else None}
+            if oran:
+                kayit["ev"] = float(olasilik) * float(oran) - 1.0
+            adaylar.append(kayit)
+
+    if d:  # piyasa çapalı model olasılıkları — en iyi kalibre kaynağımız
+        for s in d["satirlar"]:
+            ekle(s["secim"], s["model"], s["oran"])
+        mp = d["model_p"]
+        p1, p0, p2 = mp["MS1"], mp["MS0"], mp["MS2"]
+    else:
+        p1, p0, p2 = p["ms1"], p["ms0"], p["ms2"]
+
+    # çifte şans: iki sonucu birden kapsar — "garanti" arayışının doğal adresi
+    ekle("ÇŞ 1X", p1 + p0)
+    ekle("ÇŞ 12", p1 + p2)
+    ekle("ÇŞ X2", p0 + p2)
+
+    kg = p["kg_var"]
+    ust = p["ust25"]
+    if kalip:  # tahmin tablosuyla aynı ruh: kalıpla 50/50 harman
+        kg = 0.5 * kg + 0.5 * kalip["kg_var"]
+        ust = 0.5 * ust + 0.5 * kalip["ust25"]
+    ekle("KG VAR", kg)
+    ekle("KG YOK", 1 - kg)
+    if not d:
+        ekle("ÜST 2.5", ust)
+        ekle("ALT 2.5", 1 - ust)
+
+    iy = p.get("iy") or {}
+    if "ust05" in iy:
+        ekle("İY 0.5 ÜST", iy["ust05"])
+        ekle("İY 0.5 ALT", 1 - iy["ust05"])
+    if "ust15" in iy:
+        ekle("İY 1.5 ÜST", iy["ust15"])
+        ekle("İY 1.5 ALT", 1 - iy["ust15"])
+
+    adaylar.sort(key=lambda x: -x["p"])
+    return adaylar
+
+
 def gercek_hucreler(fthg: int, ftag: int, hthg: int | None, htag: int | None) -> dict:
     """Oynanmış bir maçın tahmin tablosu kolonlarındaki gerçekleşmiş değerleri."""
     def sonuc(a: int, b: int) -> str:

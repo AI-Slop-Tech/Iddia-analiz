@@ -114,6 +114,37 @@ def _pazar_sonucu(pazar: str, r) -> str:
 
     if p in ("MS1", "MS0", "MS2"):
         return "tuttu" if p[-1] == ftr else "yatti"
+    if p.startswith(("ÇS", "CS", "ÇŞ")):  # çifte şans: "ÇŞ 1X" / "ÇŞ 12" / "ÇŞ X2"
+        kapsam = {"1X": ("1", "0"), "12": ("1", "2"), "X2": ("0", "2")}.get(p.split()[-1])
+        if kapsam:
+            return "tuttu" if ftr in kapsam else "yatti"
+        return "belirsiz"
+    if p.startswith("IY "):  # "İY 0.5 ÜST" / "İY 1.5 ALT" (İ→I dönüşümü sonrası)
+        parcalar = p.split()
+        if len(parcalar) == 3:
+            try:
+                cizgi = float(parcalar[1])
+            except ValueError:
+                return "belirsiz"
+            if pd.isna(r.get("HTHG")) or pd.isna(r.get("HTAG")):
+                return "belirsiz"
+            iy_toplam = int(r["HTHG"]) + int(r["HTAG"])
+            ust_geldi = iy_toplam > cizgi
+            return "tuttu" if ust_geldi == parcalar[2].startswith(("U", "Ü")) else "yatti"
+        return "belirsiz"
+    if p.startswith("KORNER"):  # "KORNER ÜST 9.5" / "KORNER ALT 9.5"
+        parcalar = p.split()
+        if len(parcalar) == 3:
+            try:
+                cizgi = float(parcalar[2])
+            except ValueError:
+                return "belirsiz"
+            if pd.isna(r.get("HC")) or pd.isna(r.get("AC")):
+                return "belirsiz"
+            korner = int(r["HC"]) + int(r["AC"])
+            ust_geldi = korner > cizgi
+            return "tuttu" if ust_geldi == parcalar[1].startswith(("U", "Ü")) else "yatti"
+        return "belirsiz"
     if p.startswith(("UST", "ÜST")) and "2.5" in p:
         return "tuttu" if toplam > 2.5 else "yatti"
     if p.startswith("ALT") and "2.5" in p:
