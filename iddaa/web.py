@@ -63,6 +63,10 @@ def _bakim_dongusu() -> None:
                     veri.iy_hasadi()
                 except Exception:  # noqa: BLE001
                     pass
+                try:
+                    veri.kupa_hasadi()
+                except Exception:  # noqa: BLE001
+                    pass
                 _df(zorla=True)
                 _DURUM["fikstur"] = None  # yeni veriyle yeniden okunsun
         except Exception:  # noqa: BLE001 - bakım hatası servisi düşürmesin
@@ -296,6 +300,10 @@ def uygulama_olustur():
             ekle("Maç arşivi", True,
                  f"{len(df):,} maç · {df['Div'].nunique()} lig · yükleme: "
                  f"{time.strftime('%d.%m %H:%M', time.localtime(_DURUM['arsiv_zaman']))}")
+            sl_n = int((df["Div"] == "ŞL").sum())
+            ekle("Avrupa kupası arşivi (ŞL)", sl_n > 0,
+                 f"{sl_n} Şampiyonlar Ligi maçı (football-data.org, son ~3 sezon)"
+                 if sl_n else "henüz toplanmadı — 🔄 Veriyi Güncelle toplar (fd.org anahtarı gerekir)")
         except FileNotFoundError:
             df = None
             ekle("Maç arşivi", False, "veri indirilmemiş — üstteki 🔄 Veriyi Güncelle'ye basın")
@@ -405,6 +413,10 @@ def uygulama_olustur():
             return jsonify({"hata": str(hata), "indirilen": hata.ozet.get("indirilen", 0)}), 502
         try:
             veri.iy_hasadi()  # ek ülke İY skorları yan kaynaklardan depoya
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            veri.kupa_hasadi()  # ŞL sonuç arşivi (football-data.org)
         except Exception:  # noqa: BLE001
             pass
         try:

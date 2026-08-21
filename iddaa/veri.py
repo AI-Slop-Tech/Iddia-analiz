@@ -25,8 +25,10 @@ import json
 import os
 import re
 import time
+import unicodedata
 import warnings
 
+import numpy as np
 import pandas as pd
 import requests
 
@@ -273,6 +275,38 @@ TAKMA_ADLAR = {
     "nec": "Nijmegen",
     "bayernmunih": "Bayern Munich",
     "borussiadortmund": "Dortmund",
+    # football-data.org'un resmi uzun adları (kupa arşivi bağlantısı için)
+    "fcinternazionalemilano": "Inter",
+    "internazionalemilano": "Inter",
+    "sportingclubedeportugal": "Sp Lisbon",
+    "sportingcp": "Sp Lisbon",
+    "sportlisboaebenfica": "Benfica",
+    "olympiquedemarseille": "Marseille",
+    "olympiquelyonnais": "Lyon",
+    "brugge": "Club Brugge",
+    "clubatleticodemadrid": "Ath Madrid",
+    "atleticodemadrid": "Ath Madrid",
+    "psv": "PSV Eindhoven",
+    "realsociedaddefutbol": "Sociedad",
+    "realsociedad": "Sociedad",
+    "feyenoordrotterdam": "Feyenoord",
+    "eintrachtfrankfurt": "Ein Frankfurt",
+    "bayer04leverkusen": "Leverkusen",
+    "bayerleverkusen": "Leverkusen",
+    "wolverhamptonwanderers": "Wolves",
+    "brightonhovealbion": "Brighton",
+    "newcastleunited": "Newcastle",
+    "tottenhamhotspur": "Tottenham",
+    "athleticclub": "Ath Bilbao",
+    "unionsaintgilloise": "St. Gilloise",
+    "royaleunionsaintgilloise": "St. Gilloise",
+    "kobenhavn": "FC Copenhagen",
+    "fckobenhavn": "FC Copenhagen",
+    "redbullsalzburg": "Salzburg",
+    "stadebrestois29": "Brest",
+    "brestois": "Brest",
+    "sportingclubedebraga": "Sp Braga",
+    "sportingbraga": "Sp Braga",
 }
 
 
@@ -288,11 +322,15 @@ def sezon_kodlari(sezon_sayisi: int) -> list[str]:
     return [f"{y % 100:02d}{(y + 1) % 100:02d}" for y in range(bas, bas - sezon_sayisi, -1)]
 
 
-def indir(ligler: list[str] | None = None, sezon_sayisi: int = 11, yenile: bool = False) -> dict:
+def indir(ligler: list[str] | None = None, sezon_sayisi: int = 26, yenile: bool = False) -> dict:
     """Seçilen liglerin sezon CSV'lerini indirir ve data/ altında önbelleğe alır.
 
     Güncel sezon dosyası her çağrıda tazelenir; eski sezonlar değişmediği için
     yalnızca eksikse indirilir (yenile=True hepsini yeniden indirir).
+
+    26 sezon: 2001/02'den bugüne — bu aralıkta ana lig dosyalarında kitapçı
+    oranları (B365/WH/IW zinciri) mevcut, birebir oran kalıbı havuzu böylece
+    çeyrek asrı kapsar. Daha eskisi oran içermediği için katılmaz.
     """
     ligler = ligler or VARSAYILAN_LIGLER
     os.makedirs(VERI_KLASORU, exist_ok=True)
@@ -451,6 +489,11 @@ def veriyi_yukle(ligler: list[str] | None = None) -> pd.DataFrame:
         p = _tek_dosya_oku(yol)
         if p is None or "Div" not in p.columns:
             continue
+        if "HomeTeam" not in p.columns and "HT" in p.columns:
+            # 2001-2005 arası kimi dosyalar (ör. Yunanistan) HT/AT adını kullanır
+            p = p.rename(columns={"HT": "HomeTeam", "AT": "AwayTeam"})
+        if "HomeTeam" not in p.columns or "AwayTeam" not in p.columns:
+            continue
         p = p[p["Div"] == lig_kodu].dropna(subset=["Date", "HomeTeam", "AwayTeam"]).copy()
         if p.empty:
             continue
@@ -527,12 +570,27 @@ def veriyi_yukle(ligler: list[str] | None = None) -> pd.DataFrame:
         _iy_yamalarini_uygula(birlesik)
     except Exception:  # noqa: BLE001 — yama katmanı asıl yüklemeyi asla düşürmesin
         pass
+    try:
+        kupa = _kupa_yukle(birlesik)
+        if kupa is not None and not kupa.empty:
+            birlesik = pd.concat([birlesik, kupa], ignore_index=True) \
+                .sort_values("Tarih").reset_index(drop=True)
+    except Exception:  # noqa: BLE001 — kupa katmanı asıl yüklemeyi asla düşürmesin
+        pass
     return birlesik
 
 
 def _normalize(isim: str) -> str:
     tr = str.maketrans("çğıöşüÇĞİÖŞÜ", "cgiosuCGIOSU")
-    return re.sub(r"[^a-z0-9]", "", isim.translate(tr).lower())
+    # NFKD'nin ayrıştıramadığı bağımsız harfler (ø, æ, ł, ß...) elle katlanır
+    tr.update({ord(a): b for a, b in (("ø", "o"), ("Ø", "O"), ("æ", "ae"), ("Æ", "AE"),
+                                      ("ł", "l"), ("Ł", "L"), ("đ", "d"), ("Đ", "D"),
+                                      ("ß", "ss"))})
+    duz = isim.translate(tr)
+    # kalan aksanlar (é, š, ø...) ASCII'ye katlanır — "Atlético" ile "Atletico"
+    # aynı anahtara düşsün; yoksa takma ad/tam eşleşme aksan yüzünden ıskalar
+    duz = unicodedata.normalize("NFKD", duz).encode("ascii", "ignore").decode("ascii")
+    return re.sub(r"[^a-z0-9]", "", duz.lower())
 
 
 def takim_cozucu(df: pd.DataFrame, hizli: bool = False):
@@ -1344,6 +1402,156 @@ def iy_hasadi() -> dict:
         json.dump(depo, f, ensure_ascii=False)
     os.replace(gecici, IY_YAMA_DOSYASI)
     return {"depo": len(depo), "yeni": len(depo) - once, "hata": hata}
+
+
+# ---------------- Avrupa kupası arşivi (football-data.org, ücretsiz katman) ----
+#
+# football-data.co.uk yalnız lig maçlarını yayınlar; Şampiyonlar Ligi gibi
+# kupalar arşivde yoktur. football-data.org'un ücretsiz katmanı ŞL'nin son
+# ~3 sezonunu (İY skorları dahil) verir — kalıcı depoda biriktirilir ve
+# arşive Div="ŞL" satırları olarak eklenir. Oran kolonları boş kalır: kupa
+# satırları form/H2H/Poisson besler, değer analizi bülten oranıyla yapılır.
+
+KUPA_DOSYASI = os.path.join(VERI_KLASORU, "kupa_maclari.json")
+KUPA_YARISMALARI = {"CL": "ŞL"}  # fd.org yarışma kodu -> arşiv Div kodu
+
+
+def _kupa_deposunu_oku() -> dict:
+    try:
+        with open(KUPA_DOSYASI, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def kupa_hasadi() -> dict:
+    """Avrupa kupası sonuçlarını football-data.org'dan toplayıp depoya ekler.
+
+    Geçmiş sezonlar bir kez çekilir; cari sezon her hasatta tazelenir.
+    Ücretsiz katmanın vermediği eski sezonlar (403) sessizce atlanır.
+    """
+    depo = _kupa_deposunu_oku()
+    once = len(depo)
+    anahtar = gizli_anahtar("FOOTBALL_DATA_ORG_KEY", "football_data_org_key")
+    if not anahtar:
+        return {"depo": once, "yeni": 0, "hata": "football-data.org anahtarı yok"}
+
+    hata = None
+    cari = guncel_sezon_baslangic_yili()
+    try:
+        for fd_kod, div in KUPA_YARISMALARI.items():
+            for yil in range(cari, cari - 5, -1):
+                isaret = f"_{fd_kod}_{yil}"
+                if depo.get(isaret) and yil != cari:
+                    continue  # geçmiş sezon zaten depoda
+                yanit = requests.get(
+                    f"https://api.football-data.org/v4/competitions/{fd_kod}/matches",
+                    params={"season": yil}, headers={"X-Auth-Token": anahtar},
+                    timeout=ZAMAN_ASIMI,
+                )
+                if yanit.status_code in (403, 404):
+                    continue  # ücretsiz katman sınırı ya da sezon henüz açılmadı
+                if yanit.status_code != 200:
+                    break
+                sezon_kodu = f"{yil % 100:02d}{(yil + 1) % 100:02d}"
+                for m in yanit.json().get("matches", []):
+                    if m.get("status") != "FINISHED":
+                        continue
+                    ms = (m.get("score") or {}).get("fullTime") or {}
+                    iy = (m.get("score") or {}).get("halfTime") or {}
+                    ev = (m.get("homeTeam") or {}).get("name")
+                    dep = (m.get("awayTeam") or {}).get("name")
+                    if ms.get("home") is None or not ev or not dep:
+                        continue
+                    a = f"{str(m.get('utcDate', ''))[:10]}|{ev}|{dep}"
+                    depo.setdefault(a, {
+                        "tarih": str(m.get("utcDate", ""))[:10],
+                        "ev": ev, "dep": dep, "div": div, "sezon": sezon_kodu,
+                        "fthg": ms.get("home"), "ftag": ms.get("away"),
+                        "hthg": iy.get("home"), "htag": iy.get("away"),
+                    })
+                depo[isaret] = {"kaynak": "isaret"}
+                time.sleep(6.5)  # ücretsiz katman: dakikada 10 istek
+    except Exception as h:  # noqa: BLE001
+        hata = f"fdorg: {str(h)[:120]}"
+
+    os.makedirs(VERI_KLASORU, exist_ok=True)
+    gecici = KUPA_DOSYASI + ".tmp"
+    with open(gecici, "w", encoding="utf-8") as f:
+        json.dump(depo, f, ensure_ascii=False)
+    os.replace(gecici, KUPA_DOSYASI)
+    return {"depo": len(depo), "yeni": len(depo) - once, "hata": hata}
+
+
+def _kupa_yukle(taban: pd.DataFrame) -> pd.DataFrame | None:
+    """Kupa deposunu arşiv şemasına çevirir; isimleri arşiv yazımına bağlar.
+
+    fd.org adları ("PSG") arşiv adlarına ("Paris SG") çözülür ki bir takımın
+    lig + kupa geçmişi tek kimlikte toplansın; çözülemeyen (arşiv dışı Avrupa
+    takımı) adlar olduğu gibi kalır ve analize yeni takım olarak katılır.
+    """
+    kayitlar = [k for k in _kupa_deposunu_oku().values() if k.get("kaynak") != "isaret"]
+    if not kayitlar:
+        return None
+
+    # Muhafazakâr isim çözümü: yalnız tam eşleşme, takma ad ve çok yüksek
+    # eşikli difflib. Alt-dize kuralı BİLEREK yok — "Paris Saint-Germain FC"
+    # içindeki "aris" gibi zehirli eşleşmeler kupa satırını yanlış takıma yazar.
+    adaylar = pd.unique(pd.concat([taban["HomeTeam"], taban["AwayTeam"]]))
+    norm_map = {_normalize(a): a for a in adaylar}
+    kirp = {"fc", "cf", "afc", "cfc", "sk", "sc", "ac", "as", "ss", "ssc", "kv",
+            "bk", "if", "fk", "sv", "club", "clube", "de", "losc", "cp", "krc",
+            "rsc", "royale", "royal", "cd", "ca", "vfb", "bsc", "bv", "gnk", "nk",
+            "osc", "racing", "stade", "pae", "sfp",
+            "1899", "1909", "04", "05", "09"}
+
+    def _temizle(ad: str) -> str:
+        parcalar = [p for p in re.split(r"\s+", str(ad).strip()) if p]
+        while len(parcalar) > 1 and _normalize(parcalar[0]) in kirp:
+            parcalar.pop(0)
+        while len(parcalar) > 1 and _normalize(parcalar[-1]) in kirp:
+            parcalar.pop()
+        return " ".join(parcalar)
+
+    _onbellek: dict[str, str] = {}
+
+    def _coz(ad: str) -> str:
+        if ad in _onbellek:
+            return _onbellek[ad]
+        temiz = _temizle(ad)
+        sonuc = None
+        for aday in (str(ad), temiz):
+            n = _normalize(aday)
+            if n in norm_map:
+                sonuc = norm_map[n]
+                break
+            if n in TAKMA_ADLAR and _normalize(TAKMA_ADLAR[n]) in norm_map:
+                sonuc = norm_map[_normalize(TAKMA_ADLAR[n])]
+                break
+        if sonuc is None:
+            yakin = difflib.get_close_matches(_normalize(temiz), norm_map.keys(),
+                                              n=1, cutoff=0.87)
+            sonuc = norm_map[yakin[0]] if yakin else temiz
+        _onbellek[ad] = sonuc
+        return sonuc
+
+    k = pd.DataFrame(kayitlar)
+    k["Tarih"] = pd.to_datetime(k["tarih"], errors="coerce")
+    k = k.dropna(subset=["Tarih"])
+    k["HomeTeam"] = k["ev"].map(_coz)
+    k["AwayTeam"] = k["dep"].map(_coz)
+    k["FTHG"] = pd.to_numeric(k["fthg"], errors="coerce")
+    k["FTAG"] = pd.to_numeric(k["ftag"], errors="coerce")
+    k = k.dropna(subset=["FTHG", "FTAG"])
+    k["FTHG"] = k["FTHG"].astype(int)
+    k["FTAG"] = k["FTAG"].astype(int)
+    k["FTR"] = np.where(k["FTHG"] > k["FTAG"], "H",
+                        np.where(k["FTHG"] == k["FTAG"], "D", "A"))
+    k["HTHG"] = pd.to_numeric(k["hthg"], errors="coerce")
+    k["HTAG"] = pd.to_numeric(k["htag"], errors="coerce")
+    k["Div"] = k["div"]
+    k["Sezon"] = k["sezon"]
+    return k.reindex(columns=taban.columns)
 
 
 def _iy_yamalarini_uygula(df: pd.DataFrame) -> int:
