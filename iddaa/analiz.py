@@ -679,6 +679,7 @@ def tahmin_hucreleri(poisson: dict, kalip: dict | None = None) -> dict:
         p2 = 0.5 * p2 + 0.5 * kalip["ms2"]
         t = p1 + p0 + p2
         p1, p0, p2 = p1 / t, p0 / t, p2 / t
+    p_kg = min(0.98, p_kg + KG_DUZELTME)  # pazar karnesinde ölçülen sapma düzeltmesi
 
     iy = poisson["iy"]
     return {
@@ -738,6 +739,7 @@ def guvenli_secimler(a: dict, sinir: float = 0.70) -> list[dict]:
     if kalip:  # tahmin tablosuyla aynı ruh: kalıpla 50/50 harman
         kg = 0.5 * kg + 0.5 * kalip["kg_var"]
         ust = 0.5 * ust + 0.5 * kalip["ust25"]
+    kg = min(0.98, kg + KG_DUZELTME)  # pazar karnesinde ölçülen sapma düzeltmesi
     ekle("KG VAR", kg)
     ekle("KG YOK", 1 - kg)
     if not d:
@@ -816,6 +818,14 @@ def ayrismayi_sinirla(model: dict, adil: dict) -> dict:
               for k in model}
     toplam = sum(kirpik.values())
     return {k: v / toplam for k, v in kirpik.items()}
+KG_DUZETME_NOTU = """Pazar karnesi (3 sezon, 18.933 maç) her pazarda ölçüldü:
+MS2/ÇŞ1X sapma +0.7 puan (Brier 0.190, en iyi bildiğimiz pazar), MS0 -0.3,
+MS1 -0.4, Üst2.5 -1.0, KG -2.0 puan (Brier 0.247, en zayıfı). KG'deki
+sistematik eksiklik ölçülen değeriyle düzeltilir; bahis kararı üreten
+piyasa çapalı yol (deger_analizi) BİLEREK dokunulmadan bırakıldı — ROI
+bantları o haliyle doğrulandı, 1 puanlık kayma için riske atılmaz."""
+KG_DUZELTME = 0.020  # karnede ölçülen KG VAR eksik-tahmini (52.1% model → 54.1% gerçek)
+
 ORAN_TAVANI = 3.60  # sürpriz oran filtresi: bu oranın üstü öneriye giremez
                     # (yüksek oranların sistematik pahalı fiyatlandığı — favorite-longshot
                     # bias — hem literatürde hem kendi backtest'imizde doğrulandı)

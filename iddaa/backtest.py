@@ -118,6 +118,7 @@ def backtest_calistir(df: pd.DataFrame, sezon_sayisi: int = 3, lig: str | None =
     res_d = (D["FTR"] == "D").to_numpy()
     res_a = (D["FTR"] == "A").to_numpy()
     ust_g = ((D["FTHG"] + D["FTAG"]) > 2.5).to_numpy()
+    kg_g = ((D["FTHG"] > 0) & (D["FTAG"] > 0)).to_numpy()
 
     lig_durum: dict[str, _Durum] = {}
     evde: dict[str, _Durum] = {}
@@ -131,6 +132,8 @@ def backtest_calistir(df: pd.DataFrame, sezon_sayisi: int = 3, lig: str | None =
     secimler = []      # modelin her test maçındaki en iyi adayı
     taban_satirlar = []  # kıyas stratejileri için (hep MS1, hep favori)
     kalite_kayitlari = []  # olasılık kalitesi: (poisson, karışım, gerçekleşen) üçlüleri
+    pazar_karne: dict[str, dict] = {}   # pazar bazlı "ne kadar biliyoruz" ölçümü
+    guvenli_karne = {"n": 0, "p": 0.0, "isabet": 0}  # en yüksek olasılıklı pazar stratejisi
 
     kayitlar = list(D.itertuples())
     for i, r in enumerate(kayitlar):
@@ -187,6 +190,46 @@ def backtest_calistir(df: pd.DataFrame, sezon_sayisi: int = 3, lig: str | None =
                                          p1a[i], p0a[i], p2a[i],
                                          float(res_h[i]), float(res_d[i]), float(res_a[i])))
 
+                # ---- pazar karnesi: her pazarda "ne kadar biliyoruz?" ----
+                # canlı sistemdeki karışımların birebir aynısı kullanılır ki
+                # ölçüm, ekranda gösterilen olasılıkların ta kendisini test etsin
+                o_u, o_a = getattr(r, "oran_ust25", float("nan")), getattr(r, "oran_alt25", float("nan"))
+                ust_p = None
+                if not (pd.isna(o_u) or pd.isna(o_a)) and min(o_u, o_a) > 1.0:
+                    adil_ust = (1 / o_u) / (1 / o_u + 1 / o_a)
+                    ku = k_ust if w_kalip > 0 else po_ust
+                    ust_p = w_poisson * po_ust + w_kalip * ku + _a.W_PIYASA * adil_ust
+                    ust_p = adil_ust + max(-_a.MAKS_AYRISMA, min(_a.MAKS_AYRISMA, ust_p - adil_ust))
+                po_kg = (1 - math.exp(-lam_ev)) * (1 - math.exp(-lam_dep))
+                kg_p = 0.5 * po_kg + 0.5 * float(kg_g[:i][m].mean()) if w_kalip > 0 else po_kg
+                pazar_p = {
+                    "MS1": (m1, bool(res_h[i])),
+                    "MS0": (m0, bool(res_d[i])),
+                    "MS2": (m2, bool(res_a[i])),
+                    "ÇŞ 1X": (m1 + m0, bool(res_h[i] or res_d[i])),
+                    "ÇŞ 12": (m1 + m2, bool(res_h[i] or res_a[i])),
+                    "ÇŞ X2": (m0 + m2, bool(res_d[i] or res_a[i])),
+                    "KG VAR": (kg_p, bool(kg_g[i])),
+                    "KG YOK": (1 - kg_p, not bool(kg_g[i])),
+                }
+                if ust_p is not None:
+                    pazar_p["ÜST 2.5"] = (ust_p, bool(ust_g[i]))
+                    pazar_p["ALT 2.5"] = (1 - ust_p, not bool(ust_g[i]))
+                for ad, (pp, tuttu_mu) in pazar_p.items():
+                    K = pazar_karne.setdefault(ad, {"n": 0, "p": 0.0, "isabet": 0, "brier": 0.0})
+                    K["n"] += 1
+                    K["p"] += pp
+                    K["isabet"] += int(tuttu_mu)
+                    K["brier"] += (pp - int(tuttu_mu)) ** 2
+                # "en yüksek olasılıklı pazar" (güvenli kupon modu) ayrıca ölçülür:
+                # 1.12 altı dolgu fiyatlar canlı sistemde eleniyor -> p<=0.89 sınırı
+                uygun = [(ad, pp, t) for ad, (pp, t) in pazar_p.items() if pp <= 0.89]
+                if uygun:
+                    _, gp, gt = max(uygun, key=lambda x: x[1])
+                    guvenli_karne["n"] += 1
+                    guvenli_karne["p"] += gp
+                    guvenli_karne["isabet"] += int(gt)
+
                 def _maks(deger_, yedek):
                     return float(deger_) if not pd.isna(deger_) else yedek
 
@@ -195,12 +238,8 @@ def backtest_calistir(df: pd.DataFrame, sezon_sayisi: int = 3, lig: str | None =
                     ("MS0", float(r.oran_berabere), m0, bool(res_d[i]), _maks(r.oran_berabere_maks, float(r.oran_berabere))),
                     ("MS2", float(r.oran_dep), m2, bool(res_a[i]), _maks(r.oran_dep_maks, float(r.oran_dep))),
                 ]
-                o_u, o_a = getattr(r, "oran_ust25", float("nan")), getattr(r, "oran_alt25", float("nan"))
-                if not (pd.isna(o_u) or pd.isna(o_a)) and min(o_u, o_a) > 1.0:
-                    adil_ust = (1 / o_u) / (1 / o_u + 1 / o_a)
-                    ku = k_ust if w_kalip > 0 else po_ust
-                    mu = w_poisson * po_ust + w_kalip * ku + _a.W_PIYASA * adil_ust
-                    mu = adil_ust + max(-_a.MAKS_AYRISMA, min(_a.MAKS_AYRISMA, mu - adil_ust))
+                if ust_p is not None:
+                    mu = ust_p
                     # not: kalıp yönüyle çelişen tarafı elemek denendi ve kârı DÜŞÜRDÜ
                     # (eşik 0.08: 589→470 bahis, ROI +4.6→+4.4; eşik 0.10: +4.7→+1.2).
                     # Azınlık-ihtimal değer bahisleri gerçek kenar taşıyor — elenmez.
@@ -334,6 +373,20 @@ def backtest_calistir(df: pd.DataFrame, sezon_sayisi: int = 3, lig: str | None =
         "ozet": {**_rapor(oynanan), "maks_dusus": maks_dusus},
         "esik_tablosu": esik_tablosu,
         "kalite": kalite,
+        "pazarlar": sorted(
+            ({"pazar": ad,
+              "n": K["n"],
+              "model": K["p"] / K["n"],
+              "gercek": K["isabet"] / K["n"],
+              "sapma": K["p"] / K["n"] - K["isabet"] / K["n"],
+              "brier": K["brier"] / K["n"]}
+             for ad, K in pazar_karne.items() if K["n"] > 0),
+            key=lambda x: x["brier"],
+        ),
+        "guvenli_mod": ({"n": guvenli_karne["n"],
+                         "model": guvenli_karne["p"] / guvenli_karne["n"],
+                         "gercek": guvenli_karne["isabet"] / guvenli_karne["n"]}
+                        if guvenli_karne["n"] else None),
         "secim_kirilim": _kirilim("secim"),
         "lig_kirilim": _kirilim("lig", en_cok=10),
         "sezon_kirilim": _kirilim("sezon"),
