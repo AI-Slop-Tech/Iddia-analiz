@@ -848,6 +848,7 @@ function oneCikanCiz(){
     ${oyn.length > 1 ? `<div style="margin:8px 0"><button class="mini-btn" id="btn-tum-analiz" onclick="taramaHepsiniAc()">📖 ${oyn.length} önerinin tam analizini aç</button></div>` : ''}
     ${oyn.map(m => taramaSatir(m, false)).join('')}
     ${sistemKuponuHTML(oyn)}
+    ${guvenliKuponHTML(liste)}
     ${!oyn.length ? `<div class="bos-durum" style="padding:14px 0"><p>Bugün oynanabilir değer yok — <b>pas da bir karardır</b>; değersiz bahse girmemek kasayı korur.</p></div>` : ''}
     ${gizli.length ? `<div class="alt-baslik" style="cursor:pointer;user-select:none;margin-top:10px" onclick="TARAMA_TUM=!TARAMA_TUM;oneCikanCiz()">${ozet} — ${TARAMA_TUM ? '▾ gizle' : '▸ göster'}</div>` : ''}
     ${TARAMA_TUM ? gizli.map(m => taramaSatir(m, true)).join('') : ''}
@@ -992,6 +993,40 @@ async function kuponSekmesiCiz(){
 }
 kuponRozetGuncelle();
 
+let GUVENLI_SON = [];
+function guvenliKuponHTML(liste){
+  GUVENLI_SON = liste.filter(m => m.guvenli && !m.basladi)
+    .map(m => ({...m.guvenli, id: m.id, saat: m.saat, lig: m.lig, ev: m.ev, dep: m.dep}))
+    .sort((a, b) => b.p - a.p).slice(0, 5);
+  const adaylar = GUVENLI_SON;
+  if(adaylar.length < 2) return '';
+  const pKombine = adaylar.reduce((x, s) => x * s.p, 1);
+  const hepsiGercek = adaylar.every(s => s.oran);
+  const toplamOran = adaylar.reduce((x, s) => x * (s.oran || s.adil), 1);
+  return `<div style="border-top:1px solid var(--cizgi);margin-top:14px;padding-top:10px">
+    <h2>🛡 Günün Güvenli Kuponu <span class="ipucu">(her maçın EN yüksek olasılıklı pazarı — tutma şansı odaklı, değer odaklı değil)</span></h2>
+    ${adaylar.map(s => `<div class="one-cikan" style="border:none;padding:6px 0">
+      <span class="ipucu">${s.saat} · ${esc(s.lig)}</span>
+      <span style="flex:1;min-width:150px">${esc(s.ev)} – ${esc(s.dep)}</span>
+      <span><b>${esc(s.pazar)}</b> ${s.oran ? '@ ' + s.oran.toFixed(2) : '≈ ' + s.adil.toFixed(2) + ' <span class="ipucu">(adil)</span>'}</span>
+      <span class="ev-poz" style="font-weight:800">%${(s.p*100).toFixed(0)}</span>
+      <button class="mini-btn" onclick="guvenliKupona(${s.id})">➕</button>
+    </div>`).join('')}
+    <div class="ipucu" style="display:block;margin-top:6px">${adaylar.length}'li kombine: tutma şansı <b>%${(pKombine*100).toFixed(0)}</b> ·
+      toplam oran ${hepsiGercek ? '' : '≈ '}<b>${toplamOran.toFixed(2)}</b>${hepsiGercek ? '' : ' (adil oranlar dahil; bülten fiyatınız farklı olabilir)'}
+      <button class="mini-btn" onclick="guvenliHepsiKupona()">➕ Hepsini kupona ekle</button></div>
+    <div class="not">"Garanti" diye bir şey yoktur: yüksek olasılık ≠ kesinlik, ve düşük oranlı favoriler çoğu zaman değer taşımaz.
+      Bu bölüm kâr maksimizasyonu değil, <b>tutma olasılığı</b> en yüksek kombinasyon içindir (ÇŞ = çifte şans). Kâr odaklı seçimler yukarıdaki ✅/🟡 bantlarındadır.</div>
+  </div>`;
+}
+function guvenliKupona(id){
+  const s = GUVENLI_SON.find(x => x.id === id);
+  if(!s) return;
+  kuponaEkle({tarih: AKTIF_GUN, saat: s.saat, lig: s.lig, ev: s.ev, dep: s.dep,
+              pazar: s.pazar, oran: s.oran || s.adil, kaynak: 'guvenli'});
+}
+function guvenliHepsiKupona(){ GUVENLI_SON.forEach(s => guvenliKupona(s.id)); }
+
 function kombinasyonlar(n, k){
   const sonuc = [], sec = [];
   (function geri(bas){
@@ -1104,7 +1139,39 @@ async function detayToggle(id, kaydir){
 function detayPanelHTML(s, id){
   return `<div class="detay-panel">${s.kismi
     ? kismiDetayHTML(s)
-    : kitapciHTML(s) + takimSonucHTML(s, {id}) + kornerHTML(s) + tahminDetayHTML(s)}</div>`;
+    : kitapciHTML(s) + takimSonucHTML(s, {id}) + guvenliHTML(s, id) + kornerHTML(s, id) + tahminDetayHTML(s)}</div>`;
+}
+
+function guvenliHTML(s, id){
+  if(!s.guvenli || !s.guvenli.length) return '';
+  return `<div class="kart"><h2>🛡 En Yüksek Olasılıklı Pazarlar</h2>
+    <div class="alt-baslik">"En garantiye yakın" arayışı için tüm çekirdek pazarlar (MS, çifte şans, Alt/Üst, KG, İY gol çizgileri)
+      tek sırada — sıralama <b>olasılığa</b> göredir, değere değil. Gerçek oranı bilinmeyenlerde ≈ adil oran gösterilir;
+      bülteninizdeki fiyatla kıyaslayın. Yüksek olasılık ≠ garanti; düşük oranlı favoriler çoğu zaman değer taşımaz.</div>
+    ${s.guvenli.map((g, gi) => `<div class="one-cikan" style="border:none;padding:5px 0">
+      <span class="ev-poz" style="min-width:44px;font-weight:800">%${(g.p*100).toFixed(0)}</span>
+      <span style="flex:1;min-width:120px"><b>${esc(g.pazar)}</b></span>
+      <span>${g.oran
+        ? '@ ' + g.oran.toFixed(2) + (g.ev != null ? ` <span class="ipucu">(EV ${g.ev >= 0 ? '+' : ''}${(g.ev*100).toFixed(1)}%)</span>` : '')
+        : '≈ ' + g.adil.toFixed(2) + ' <span class="ipucu">(adil)</span>'}</span>
+      <button class="mini-btn" onclick="detayGuvenliKupona(${id}, ${gi})">➕</button>
+    </div>`).join('')}</div>`;
+}
+
+function detayGuvenliKupona(id, gi){
+  const s = MAC_DETAY_CACHE[id];
+  if(!s || !s.guvenli || !s.guvenli[gi]) return;
+  const g = s.guvenli[gi], f = s.fikstur || {};
+  kuponaEkle({tarih: f.tarih || AKTIF_GUN, saat: f.saat || '', lig: '', ev: s.ev, dep: s.dep,
+              pazar: g.pazar, oran: g.oran || g.adil, kaynak: 'guvenli'});
+}
+
+function kornerKupona(id, cizgi, taraf, oran){
+  const s = MAC_DETAY_CACHE[id];
+  if(!s) return;
+  const f = s.fikstur || {};
+  kuponaEkle({tarih: f.tarih || AKTIF_GUN, saat: f.saat || '', lig: '', ev: s.ev, dep: s.dep,
+              pazar: `KORNER ${taraf === 'ust' ? 'ÜST' : 'ALT'} ${cizgi}`, oran, kaynak: 'korner'});
 }
 
 function kitapciHTML(s){
@@ -1249,7 +1316,7 @@ function kitapciKisa(ad){
   return s.length > 6 ? s.slice(0, 6) : s;
 }
 
-function kornerHTML(s){
+function kornerHTML(s, id){
   const c = s.korner;
   if(!c || (!c.model && !c.piyasa && !c.kalip)) return '';
   const m = c.model;
@@ -1261,12 +1328,15 @@ function kornerHTML(s){
   const tablo = (c.piyasa && c.piyasa.barem && c.piyasa.barem.length)
     ? `<div class="ipucu" style="margin-top:8px"><b>${esc(kitapciKisa(c.piyasa.kitapci))}</b> korner baremi — model olasılığı ve beklenen değerle (✅ pozitifse matematik sizden yana):</div>
       <div style="overflow-x:auto"><table>
-        <tr><th class="orta">Çizgi</th><th class="orta">Üst</th><th class="orta">Alt</th><th class="orta">Model Üst</th><th class="orta">EV Üst</th><th class="orta">EV Alt</th></tr>
+        <tr><th class="orta">Çizgi</th><th class="orta">Üst</th><th class="orta">Alt</th><th class="orta">Model Üst</th><th class="orta">EV Üst</th><th class="orta">EV Alt</th>${id != null ? '<th class="orta">Kupon</th>' : ''}</tr>
         ${c.piyasa.barem.map(b => `<tr>
           <td class="orta"><b>${b.cizgi}</b></td>
           <td class="orta">${b.ust.toFixed(2)}</td><td class="orta">${b.alt.toFixed(2)}</td>
           <td class="orta">${b.p_ust != null ? '%' + (b.p_ust * 100).toFixed(0) : '—'}</td>
           <td class="orta">${evKutu(b.ev_ust)}</td><td class="orta">${evKutu(b.ev_alt)}</td>
+          ${id != null ? `<td class="orta" style="white-space:nowrap">
+            <button class="mini-btn" onclick="kornerKupona(${id}, ${b.cizgi}, 'ust', ${b.ust})">Ü➕</button>
+            <button class="mini-btn" onclick="kornerKupona(${id}, ${b.cizgi}, 'alt', ${b.alt})">A➕</button></td>` : ''}
         </tr>`).join('')}
       </table></div>` : '';
   return `<div class="kart">
@@ -1628,6 +1698,40 @@ function srMsMetni(kalip){
   return ` Aynı oranlı geçmişte MS dağılımı: 1 ${y(kalip.ms['1'])} · X ${y(kalip.ms['0'])} · 2 ${y(kalip.ms['2'])}.`;
 }
 
+let SR_ONERI = null;
+function srGununOnerisi(liste){
+  // "iyice araştırılmış" günün sürprizi: odak kombolar içinde model olasılığı,
+  // pozitif piyasa değeri ve birebir kanıt (n>=30) birlikte puanlanır
+  const adaylar = [];
+  liste.forEach(m => {
+    if(m.mod === 'liste' || !m.kombolar) return;
+    SR_ODAK.forEach(ad => {
+      const k = m.kombolar[ad];
+      if(!k || !k.p) return;
+      const kanitli = (k.kalip_n || 0) >= 30;
+      const evBonus = (k.piyasa && k.ev != null) ? Math.max(0, k.ev) : 0;
+      // gerçek (oynanabilir) fiyat + pozitif değer, salt yüksek olasılığı geçer
+      adaylar.push({m, ad, k, skor: k.p * (1 + 2 * evBonus) * (kanitli ? 1.25 : 1) * (k.piyasa ? 1.15 : 1)});
+    });
+  });
+  if(!adaylar.length){ SR_ONERI = null; return ''; }
+  const s = adaylar.sort((a, b) => b.skor - a.skor)[0];
+  const oran = s.k.piyasa || Number(s.k.adil_oran) || Math.round(100 / s.k.p) / 100;
+  SR_ONERI = {tarih: AKTIF_SR_GUN, saat: s.m.saat || '', lig: s.m.lig || '',
+              ev: s.m.ev, dep: s.m.dep, pazar: 'İY/MS ' + s.ad, oran};
+  return `<div class="kart" style="border-color:#b45309">
+    <h2>🎯 Günün Sürpriz Önerisi</h2>
+    <div style="font-weight:700;font-size:15px">${esc(s.m.ev)} – ${esc(s.m.dep)}
+      <span class="ipucu">${s.m.saat || ''} · ${esc(s.m.lig || '')}</span></div>
+    <div style="margin:6px 0">İY/MS <b>${s.ad}</b> — model olasılığı <b>%${(s.k.p*100).toFixed(1)}</b> ·
+      adil oran <b>${s.k.adil_oran || (1/s.k.p).toFixed(1)}</b>${s.k.piyasa ? ` · piyasa <b>${s.k.piyasa.toFixed(2)}</b>${s.k.ev != null ? ` <span class="${s.k.ev >= 0 ? 'ev-poz' : 'ev-neg'}">(EV ${s.k.ev >= 0 ? '+' : ''}${(s.k.ev*100).toFixed(1)}%)</span>` : ''}` : ''}
+      ${(s.k.kalip_n || 0) >= 30 ? `<div class="ipucu">📜 Kanıt: birebir oranla açılmış ${s.k.kalip_n} maçın ${s.k.kalip_adet || 0}'i ${s.ad} bitti.</div>` : ''}</div>
+    <button class="mini-btn" onclick="if(SR_ONERI) kuponaEkle(SR_ONERI)">➕ Kupona ekle</button>
+    <div class="not">Sürprizler doğaları gereği düşük olasılıklıdır (~%${(s.k.p*100).toFixed(0)}) — çoğunun yatması normaldir,
+      kazanç nadir ama yüksek ödemeden gelir. Küçük ve ayrı bir kasayla oynanır. Bu kart günün en güçlü model + kanıt + fiyat birleşimini seçer.</div>
+  </div>`;
+}
+
 function srCiz(){
   const liste = SR_SONUCLAR[AKTIF_SR_GUN];
   if(!liste){ $('#surpriz-sonuc').innerHTML = ''; return; }
@@ -1642,7 +1746,7 @@ function srCiz(){
        Muhtemel nedenler: arşiv eksik (üstteki <b>🔄 Veriyi Güncelle</b> ile 38 ligin arşivini indirin) ·
        oranlar henüz yayınlanmadı · Bet365 fiyatları için 🔑 odds-api.io anahtarı gerekli (aşağıdaki kutu).</div></div>`
     : '';
-  $('#surpriz-sonuc').innerHTML = ustNot + liste.map((m, i) => {
+  $('#surpriz-sonuc').innerHTML = ustNot + srGununOnerisi(liste) + liste.map((m, i) => {
     if(m.mod === 'liste'){
       return `<div class="mac-satir" style="opacity:.65">
         <span class="takimlar">${esc(m.ev)} – ${esc(m.dep)}</span>
