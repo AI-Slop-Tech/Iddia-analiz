@@ -838,6 +838,27 @@ def uygulama_olustur():
             _DURUM["fikstur_zaman"] = time.time()
         return _DURUM["fikstur"], _DURUM["kitapcilar"]
 
+
+    def _sinyal(r, oranlar, maks, ust_alt, model_p=None):
+        """Konsensüs sapması sinyali — backtest kanıtlı ana motor.
+
+        Liste oranı zaten piyasa ortalamasıdır (fikstür Avg'yi önceler), en iyi
+        fiyat oran_max_* kolonundan gelir. Model, yalnız VETO görevi görür.
+        """
+        try:
+            ua_maks = (_num(r.get("oran_ust25_maks")), _num(r.get("oran_alt25_maks")))
+            if any(x is None for x in ua_maks):
+                ua_maks = None
+            return analiz.sinyal_tara(
+                tuple(oranlar) if oranlar else None,
+                tuple(maks) if maks else None,
+                tuple(ust_alt) if ust_alt else None,
+                ua_maks,
+                model_p,
+            )
+        except Exception:  # noqa: BLE001 — sinyal katmanı taramayı düşürmesin
+            return None
+
     def _fikstur_oranlari(r):
         """Satırdan (analiz, en iyi, üst/alt) oran üçlülerini çıkarır."""
         oranlar = [_num(r["oran_ev"]), _num(r["oran_berabere"]), _num(r["oran_dep"])]
@@ -918,8 +939,8 @@ def uygulama_olustur():
             return maks[1] if maks else None
         if secim == "MS2":
             return maks[2] if maks else None
-        kolon = "Max>2.5" if secim.startswith("ÜST") else "Max<2.5"
-        return _num(r.get(kolon))
+        kolon = "oran_ust25_maks" if secim.startswith("ÜST") else "oran_alt25_maks"
+        return _num(r.get(kolon)) or _num(r.get("Max>2.5" if secim.startswith("ÜST") else "Max<2.5"))
 
     @app.post("/api/bulten-tara")
     def bulten_tara():
@@ -964,6 +985,7 @@ def uygulama_olustur():
             en_iyi = _en_iyi_oran(r, o["secim"], maks)
             model_p = a["deger"]["model_p"].get(o["secim"], 0.0)
             ev_max = model_p * en_iyi - 1.0 if en_iyi else o["ev"]
+            sinyal = _sinyal(r, oranlar, maks, ust_alt, a["deger"]["model_p"])
             sonuclar.append(
                 {
                     "id": int(idx),
@@ -984,6 +1006,7 @@ def uygulama_olustur():
                     # 0.55'e inince 1.80'e kadar adil oranlı taraflar da girer
                     # ve hedef toplam orana ulaşmak mümkün olur
                     "guvenli": analiz.guvenli_secimler(a, sinir=0.55)[:4],
+                    "sinyal": sinyal,
                 }
             )
             if r["Tarih"] > simdi:  # karne dürüstlüğü: yalnız başlamamış maç kaydedilir
@@ -1004,7 +1027,10 @@ def uygulama_olustur():
                     }
                 )
         kayit.kaydet(gunluk_kayitlar)
-        sonuclar.sort(key=lambda x: x["ev_max"], reverse=True)
+        # sinyalli maçlar en üstte (backtest kanıtlı motor), sonra değer sırası
+        sonuclar.sort(key=lambda x: (x.get("sinyal") is not None,
+                                     (x.get("sinyal") or {}).get("ev", 0.0),
+                                     x["ev_max"]), reverse=True)
         return jsonify(sonuclar)
 
     def _hucreler_json(h: dict) -> dict:
@@ -1363,6 +1389,8 @@ def uygulama_olustur():
             "oran_kaynak": oran_kaynak,
         }
         j["guvenli"] = analiz.guvenli_secimler(a)[:6]
+        j["sinyal"] = _sinyal(r, oranlar, maks, ust_alt,
+                              (a.get("deger") or {}).get("model_p"))
         return jsonify(j)
 
     @app.post("/api/ayarlar")

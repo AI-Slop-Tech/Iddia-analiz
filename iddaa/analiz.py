@@ -69,6 +69,119 @@ def adil_olasilik(oran_ev: float, oran_b: float, oran_dep: float) -> tuple[float
     return q[0] / s, q[1] / s, q[2] / s
 
 
+# ------------------------------------------------ konsensüs sapması sinyali
+#
+# Backtest kanıtı (7 sezon, 53.5 bin maç; kontrol gruplarıyla):
+#   1X2  ≥+%4, oran 2.00-3.50, model vetosu ile → %47.7 tutma, +%26.5 ROI,
+#        kapanışı %79 yenme. Aynı bantta sinyalsiz kontrol: -%2.7.
+#   Ü/A  ≥+%3 → %56.0 tutma, +%11.0 ROI, kapanışı %94 yenme.
+# Sinyalin mantığı "maçı daha iyi bilmek" DEĞİL: piyasanın kendi konsensüsüyle
+# tek bir kitapçının fiyatı arasındaki ölçülebilir tutarsızlığı yakalamaktır.
+
+KONSENSUS_ESIK = 0.04        # 1X2 için en iyi fiyatın adil fiyatı aşma payı
+KONSENSUS_ESIK_UA = 0.02     # Üst/Alt (backtest: kapanışı %92 yenme, %50.5 tutma)
+KONSENSUS_BANT = (2.00, 3.50)      # 1X2 oran bandı (dışı backtest'te zarar yazdı)
+KONSENSUS_BANT_UA = (1.60, 3.00)   # Üst/Alt bandı
+MAKS_KOTA_KATI = 1.5         # Max, konsensüsün bu katını aşarsa kota bozuk sayılır
+                             # (kaynak veride 22.00/199.00 gibi hatalı kotalar görüldü)
+
+
+def power_olasilik(oranlar: tuple[float, ...], tur: int = 40) -> tuple[float, ...]:
+    """Marj arındırma — "power" yöntemi: Σ q^k = 1 olacak k bulunur.
+
+    Basit normalizasyon marjı tüm sonuçlara eşit dağıtır; oysa kitapçı marjın
+    büyük kısmını yüksek oranlara yükler (favori-longshot yanlılığı). Power
+    yöntemi bunu düzeltir ve backtest'te isabeti belirgin yükseltti
+    (1X2: %42.4 → %45.5, Üst/Alt: %47.9 → %56.2).
+    """
+    q = [1.0 / o for o in oranlar if o and o > 1]
+    if len(q) != len(oranlar):
+        return tuple(1.0 / len(oranlar) for _ in oranlar)
+    alt, ust = 0.5, 3.0
+    for _ in range(tur):
+        orta = (alt + ust) / 2
+        if sum(x ** orta for x in q) > 1.0:
+            alt = orta
+        else:
+            ust = orta
+    k = (alt + ust) / 2
+    p = [x ** k for x in q]
+    toplam = sum(p)
+    return tuple(x / toplam for x in p)
+
+
+def konsensus_sinyali(konsensus: tuple[float, ...], en_iyi: tuple[float, ...],
+                      etiketler: tuple[str, ...], bant: tuple[float, float],
+                      esik: float, model_p: dict | None = None) -> dict | None:
+    """En iyi fiyat, konsensüsün adil fiyatını yeterince aşıyor mu?
+
+    model_p verilirse model VETO görevi görür: modelin o fiyatta beklenen
+    değeri negatifse seçim elenir (backtest: veto seçimlerin üçte birini eler
+    ve elenenler kaybedenlerdir — ROI +%20.4 → +%26.5).
+    """
+    if not konsensus or not en_iyi or len(konsensus) != len(en_iyi):
+        return None
+    if any(not o or o <= 1 for o in konsensus):
+        return None
+    adil = power_olasilik(tuple(konsensus))
+    adaylar = []
+    for i, etiket in enumerate(etiketler):
+        fiyat = en_iyi[i]
+        if not fiyat or fiyat <= 1:
+            continue
+        if not (bant[0] <= fiyat < bant[1]):
+            continue
+        if fiyat > konsensus[i] * MAKS_KOTA_KATI:
+            continue  # bozuk kota koruması
+        ev = adil[i] * fiyat - 1.0
+        if ev < esik:
+            continue
+        model_ev = None
+        if model_p is not None:
+            mp = model_p.get(etiket)
+            if mp is None:
+                continue
+            model_ev = mp * fiyat - 1.0
+            if model_ev < 0:
+                continue  # model vetosu
+        adaylar.append({
+            "secim": etiket,
+            "oran": round(float(fiyat), 2),
+            "konsensus": round(float(konsensus[i]), 2),
+            "adil_oran": round(1.0 / adil[i], 2) if adil[i] > 0 else None,
+            "p": float(adil[i]),
+            "ev": float(ev),
+            "model_ev": float(model_ev) if model_ev is not None else None,
+        })
+    if not adaylar:
+        return None
+    return max(adaylar, key=lambda x: x["ev"])
+
+
+def sinyal_tara(oranlar: tuple[float, float, float] | None,
+                en_iyi: tuple[float, float, float] | None,
+                ust_alt: tuple[float, float] | None = None,
+                ust_alt_maks: tuple[float, float] | None = None,
+                model_p: dict | None = None) -> dict | None:
+    """1X2 ve Üst/Alt 2.5 pazarlarını tarar, en güçlü sinyali döndürür."""
+    bulunan = []
+    if oranlar and en_iyi:
+        s = konsensus_sinyali(tuple(oranlar), tuple(en_iyi), ("MS1", "MS0", "MS2"),
+                              KONSENSUS_BANT, KONSENSUS_ESIK, model_p)
+        if s:
+            s["pazar"] = "1X2"
+            bulunan.append(s)
+    if ust_alt and ust_alt_maks:
+        s = konsensus_sinyali(tuple(ust_alt), tuple(ust_alt_maks), ("ÜST 2.5", "ALT 2.5"),
+                              KONSENSUS_BANT_UA, KONSENSUS_ESIK_UA, model_p)
+        if s:
+            s["pazar"] = "Üst/Alt 2.5"
+            bulunan.append(s)
+    if not bulunan:
+        return None
+    return max(bulunan, key=lambda x: x["ev"])
+
+
 # -------------------------------------------------------------------- 1) form
 
 def form_analizi(df: pd.DataFrame, takim: str, n: int = 10, saha: str | None = None) -> dict:
