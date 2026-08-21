@@ -560,6 +560,7 @@ function sekmeAc(ad){
   document.querySelectorAll('.sekme').forEach(x => x.classList.toggle('aktif', x.dataset.s === ad));
   document.querySelectorAll('section').forEach(x => x.classList.toggle('aktif', x.id === 's-' + ad));
   if(ad === 'kupon') kuponSekmesiCiz();
+  if(ad === 'tablo' && AKTIF_TABLO_GUN && !TABLOLAR[AKTIF_TABLO_GUN]) tabloOlustur();
 }
 
 function barSatir(etiket, p, renk, sagEk=''){
@@ -683,6 +684,7 @@ async function haftaYukle(yenile, sessiz){
         `Kaynağın son bülten yayını: ${HAFTA.kaynak_yayini} — yeni tur maçları kaynak yayınladıkça (genellikle Salı–Perşembe) otomatik eklenir.` + disMetni(HAFTA.dis) +
         (HAFTA.piyasa_isitma ? ' · 📡 piyasa oranları arka planda yükleniyor, 1-2 dk içinde görünür…' : '');
     if(HAFTA.piyasa_isitma) setTimeout(() => haftaYukle(false, true), 45000);
+    setTimeout(haftaOtoTara, 2500);  // haftanın kalan günleri kendiliğinden taranır
     $('#anahtar-kutu').style.display = (HAFTA.dis && !HAFTA.dis.anahtar_var) ? '' : 'none';
     if(yenile) bildir('Fikstür yenilendi.');
   }catch(h){
@@ -798,6 +800,26 @@ function gunCiz(){
       kutu.innerHTML = detayPanelHTML(s, ACIK_DETAY);
     else ACIK_DETAY = null;
   }
+}
+
+// Haftalık otomatik tarama: kullanıcı hiçbir butona basmadan tüm günlerin
+// analizi arka planda sırayla hazırlanır; gün değiştirince sonuç anında gelir.
+let HAFTA_OTO_CALISIYOR = false;
+async function haftaOtoTara(){
+  if(HAFTA_OTO_CALISIYOR || !HAFTA) return;
+  HAFTA_OTO_CALISIYOR = true;
+  try{
+    for(const g of (HAFTA.gunler || []).map(x => x.tarih)){
+      if(TARAMALAR[g]) continue;
+      try{
+        const r = await api('/api/bulten-tara', {tarih: g});
+        // oranlar hâlâ ısınıyorken gelen boş sonuç önbelleğe alınmaz ki
+        // piyasa dolunca otomatik yeniden denensin
+        if(r.length || !HAFTA.piyasa_isitma) TARAMALAR[g] = r;
+        if(g === AKTIF_GUN) oneCikanCiz();
+      }catch(_h){ /* gün taranamadıysa sessiz geç; elle Günü Tara hâlâ çalışır */ }
+    }
+  }finally{ HAFTA_OTO_CALISIYOR = false; }
 }
 
 async function gunTara(){
@@ -993,30 +1015,71 @@ async function kuponSekmesiCiz(){
 }
 kuponRozetGuncelle();
 
-let GUVENLI_SON = [];
+let GUVENLI_SON = [], GUVENLI_HEDEF = 3;
+function guvenliHedefSec(h){ GUVENLI_HEDEF = h; oneCikanCiz(); }
+
+function guvenliKuponKur(liste, hedef){
+  // maç başına seçenek havuzu; 1.12 altı "dolgu" fiyatlar elenir (riski
+  // çarpar, orana neredeyse hiç katkı vermez)
+  const maclar = liste.filter(m => Array.isArray(m.guvenli) && m.guvenli.length && !m.basladi)
+    .map(m => ({id: m.id, saat: m.saat, lig: m.lig, ev: m.ev, dep: m.dep,
+                sec: m.guvenli.filter(g => (g.oran || g.adil) >= 1.12)
+                       .slice().sort((a, b) => b.p - a.p)}))
+    .filter(m => m.sec.length);
+  maclar.sort((a, b) => b.sec[0].p - a.sec[0].p);
+
+  const b_oran = s => s.oran || s.adil;
+  const bacaklar = [];
+  let oran = 1;
+  for(const m of maclar){                       // en olası bacaklarla başla
+    if(bacaklar.length >= 6 || oran >= hedef) break;
+    bacaklar.push({...m.sec[0], id: m.id, saat: m.saat, lig: m.lig, ev: m.ev, dep: m.dep, _sec: m.sec});
+    oran *= b_oran(m.sec[0]);
+  }
+  // hedefin altındaysak: en az olasılık kaybıyla en çok oran kazandıran
+  // bacak-değişimini uygula (aynı maçın daha yüksek oranlı pazarına geç)
+  let deneme = 0;
+  while(oran < hedef && deneme < 12){
+    deneme++;
+    let enIyi = null;
+    bacaklar.forEach((b, i) => {
+      (b._sec || []).forEach(s => {
+        if(b_oran(s) <= b_oran(b) || s.p <= 0) return;
+        const verim = Math.log(b_oran(s) / b_oran(b)) / Math.max(1e-6, Math.log(b.p / s.p));
+        if(!enIyi || verim > enIyi.verim) enIyi = {i, s, verim};
+      });
+    });
+    if(!enIyi) break;
+    const eski = bacaklar[enIyi.i];
+    oran = oran / b_oran(eski) * b_oran(enIyi.s);
+    bacaklar[enIyi.i] = {...enIyi.s, id: eski.id, saat: eski.saat, lig: eski.lig, ev: eski.ev, dep: eski.dep, _sec: eski._sec};
+  }
+  return {bacaklar, oran, p: bacaklar.reduce((x, b) => x * b.p, 1)};
+}
+
 function guvenliKuponHTML(liste){
-  GUVENLI_SON = liste.filter(m => m.guvenli && !m.basladi)
-    .map(m => ({...m.guvenli, id: m.id, saat: m.saat, lig: m.lig, ev: m.ev, dep: m.dep}))
-    .sort((a, b) => b.p - a.p).slice(0, 5);
-  const adaylar = GUVENLI_SON;
-  if(adaylar.length < 2) return '';
-  const pKombine = adaylar.reduce((x, s) => x * s.p, 1);
-  const hepsiGercek = adaylar.every(s => s.oran);
-  const toplamOran = adaylar.reduce((x, s) => x * (s.oran || s.adil), 1);
+  const k = guvenliKuponKur(liste, GUVENLI_HEDEF);
+  GUVENLI_SON = k.bacaklar;
+  if(k.bacaklar.length < 2) return '';
+  const hepsiGercek = k.bacaklar.every(s => s.oran);
+  const cip = h => `<button class="mini-btn" style="${GUVENLI_HEDEF === h ? 'background:var(--grad);color:#04121f' : ''}"
+    onclick="guvenliHedefSec(${h})">${h}+</button>`;
   return `<div style="border-top:1px solid var(--cizgi);margin-top:14px;padding-top:10px">
-    <h2>🛡 Günün Güvenli Kuponu <span class="ipucu">(her maçın EN yüksek olasılıklı pazarı — tutma şansı odaklı, değer odaklı değil)</span></h2>
-    ${adaylar.map(s => `<div class="one-cikan" style="border:none;padding:6px 0">
+    <h2>🛡 Günün Güvenli Kuponu <span class="ipucu">(tutma şansı odaklı — hedef toplam orana en az riskle ulaşan kombinasyon)</span></h2>
+    <div class="ipucu" style="display:block;margin:4px 0 8px">Hedef toplam oran: ${cip(2)} ${cip(3)} ${cip(5)}</div>
+    ${k.bacaklar.map(s => `<div class="one-cikan" style="border:none;padding:6px 0">
       <span class="ipucu">${s.saat} · ${esc(s.lig)}</span>
       <span style="flex:1;min-width:150px">${esc(s.ev)} – ${esc(s.dep)}</span>
       <span><b>${esc(s.pazar)}</b> ${s.oran ? '@ ' + s.oran.toFixed(2) : '≈ ' + s.adil.toFixed(2) + ' <span class="ipucu">(adil)</span>'}</span>
       <span class="ev-poz" style="font-weight:800">%${(s.p*100).toFixed(0)}</span>
       <button class="mini-btn" onclick="guvenliKupona(${s.id})">➕</button>
     </div>`).join('')}
-    <div class="ipucu" style="display:block;margin-top:6px">${adaylar.length}'li kombine: tutma şansı <b>%${(pKombine*100).toFixed(0)}</b> ·
-      toplam oran ${hepsiGercek ? '' : '≈ '}<b>${toplamOran.toFixed(2)}</b>${hepsiGercek ? '' : ' (adil oranlar dahil; bülten fiyatınız farklı olabilir)'}
+    <div class="ipucu" style="display:block;margin-top:6px">${k.bacaklar.length}'li kombine: tutma şansı <b>%${(k.p*100).toFixed(0)}</b> ·
+      toplam oran ${hepsiGercek ? '' : '≈ '}<b>${k.oran.toFixed(2)}</b>${k.oran < GUVENLI_HEDEF ? ' <span class="ev-neg">(bugünkü havuzla hedefe tam ulaşılamadı)</span>' : ''}${hepsiGercek ? '' : ' · ≈ işaretli adil oranlar bülten fiyatınızla değişir'}
       <button class="mini-btn" onclick="guvenliHepsiKupona()">➕ Hepsini kupona ekle</button></div>
-    <div class="not">"Garanti" diye bir şey yoktur: yüksek olasılık ≠ kesinlik, ve düşük oranlı favoriler çoğu zaman değer taşımaz.
-      Bu bölüm kâr maksimizasyonu değil, <b>tutma olasılığı</b> en yüksek kombinasyon içindir (ÇŞ = çifte şans). Kâr odaklı seçimler yukarıdaki ✅/🟡 bantlarındadır.</div>
+    <div class="not">Nasıl kurulur: her maçın pazarları (MS, çifte şans, Alt/Üst, KG, İY çizgileri) olasılığa göre sıralanır,
+      1.12 altındaki "dolgu" fiyatlar elenir, en olası bacaklarla başlanır ve hedef orana <b>en az olasılık kaybıyla</b> ulaşana dek
+      bacaklar daha yüksek oranlı pazarlarla değiştirilir. "Garanti" yoktur: yüksek olasılık ≠ kesinlik; kâr odaklı seçimler ✅/🟡 bantlarındadır.</div>
   </div>`;
 }
 function guvenliKupona(id){
@@ -1062,6 +1125,7 @@ function sistemKuponuHTML(oyn){
   if(oyn.length < 2) return '';
   const secimler = oyn.slice().sort((a, b) => b.ev_degeri - a.ev_degeri).slice(0, 6)
     .map(m => ({ad: `${m.ev} – ${m.dep}`, secim: SECIM_AD[m.secim] || m.secim, oran: m.oran,
+                ev_degeri: m.ev_degeri, kalip_n: m.kalip_n || 0, yildiz: m.yildiz || 1,
                 p: Math.min(0.95, Math.max(0.02, (1 + m.ev_degeri) / m.oran))}));
   const n = secimler.length;
   const satirlar = [];
@@ -1070,7 +1134,11 @@ function sistemKuponuHTML(oyn){
   return `
   <div style="border-top:1px solid var(--cizgi);margin-top:14px;padding-top:10px">
     <h2>🎫 Sistem Kuponu <span class="ipucu">(yalnız işaretli seçimlerden${oyn.length > 6 ? ' — EV sırasına göre ilk 6' : ''}; bültenin tamamından değil)</span></h2>
-    ${secimler.map(s => `<div class="ipucu" style="display:block">• ${esc(s.ad)} — <b>${esc(s.secim)}</b> @ ${s.oran.toFixed(2)} <span style="opacity:.8">(model ${(s.p*100).toFixed(0)}%)</span></div>`).join('')}
+    <div class="ipucu" style="display:block;margin-bottom:6px">Neye göre: kupona yalnız <b>backtest kanıtlı ✅/🟡 bandındaki</b> seçimler girer
+      (liste oranıyla EV ≥ +%4); her bacağın olasılığı piyasa çapalı modelden, kanıtı benzer-oranlı geçmiş maç sayısından gelir.
+      Tablo her sistemin matematiğini açar — ⭐, kolon başına beklenen değeri en yüksek olandır.</div>
+    ${secimler.map(s => `<div class="ipucu" style="display:block">• ${esc(s.ad)} — <b>${esc(s.secim)}</b> @ ${s.oran.toFixed(2)}
+      <span style="opacity:.85">(model %${(s.p*100).toFixed(0)} · EV ${s.ev_degeri >= 0 ? '+' : ''}${(s.ev_degeri*100).toFixed(1)}%${s.kalip_n ? ` · ${s.kalip_n} benzer maç` : ''} · ${'★'.repeat(s.yildiz)})</span></div>`).join('')}
     <div style="overflow-x:auto;margin-top:8px"><table>
       <tr><th>Sistem</th><th class="sag">Kolon</th><th class="sag">Maliyet</th><th class="sag">Kupon tutma şansı</th><th class="sag">Beklenen net</th><th class="sag">ROI</th></tr>
       ${satirlar.map(s => `<tr ${s === enIyi ? 'style="font-weight:700"' : ''}>
@@ -1224,11 +1292,13 @@ function tabloPilCiz(){
     `<button class="gun-pil ${g.tarih === AKTIF_TABLO_GUN ? 'aktif' : ''}" onclick="tabloGunSec('${g.tarih}')">
       ${g.tarih.slice(0,5)} <small>${gunEtiket(g)} · ${g.maclar.length} maç</small></button>`).join('');
 }
-function tabloGunSec(t){ AKTIF_TABLO_GUN = t; tabloPilCiz(); tabloCiz(); }
+function tabloGunSec(t){ AKTIF_TABLO_GUN = t; tabloPilCiz(); tabloCiz(); if(!TABLOLAR[t]) tabloOlustur(); }
 
 async function tabloOlustur(){
   if(!AKTIF_TABLO_GUN){ bildir('Önce fikstürün yüklenmesini bekleyin.', true); return; }
-  const b = $('#btn-tablo'); b.disabled = true; b.textContent = '⏳ Hesaplanıyor…';
+  const b = $('#btn-tablo');
+  if(b.disabled) return;  // otomatik + elle tetikleme çakışmasın
+  b.disabled = true; b.textContent = '⏳ Hesaplanıyor…';
   try{
     TABLOLAR[AKTIF_TABLO_GUN] = await api('/api/tahmin-tablosu', {tarih: AKTIF_TABLO_GUN});
     tabloCiz();

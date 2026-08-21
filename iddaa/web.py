@@ -980,7 +980,10 @@ def uygulama_olustur():
                     "karar": o["karar"],
                     "kalip_n": int(a["kalip"]["n"]) if a["kalip"] else 0,
                     "basladi": bool(r["Tarih"] <= simdi),
-                    "guvenli": (analiz.guvenli_secimler(a) or [None])[0],
+                    # güvenli kupon kurucusu maç başına SEÇENEKLER ister: eşik
+                    # 0.55'e inince 1.80'e kadar adil oranlı taraflar da girer
+                    # ve hedef toplam orana ulaşmak mümkün olur
+                    "guvenli": analiz.guvenli_secimler(a, sinir=0.55)[:4],
                 }
             )
             if r["Tarih"] > simdi:  # karne dürüstlüğü: yalnız başlamamış maç kaydedilir
