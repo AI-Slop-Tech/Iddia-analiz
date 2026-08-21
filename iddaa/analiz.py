@@ -21,12 +21,14 @@ from functools import lru_cache
 
 import pandas as pd
 
-YARI_OMUR_GUN = 365.0   # 1 yıl önceki maç, bugünkünün yarısı kadar ağırlık taşır
+YARI_OMUR_GUN = 540.0   # ~18 ay önceki maç yarı ağırlık taşır. Izgara testinde 180/365/540
+                        # denendi; 540 hem Brier'i hem ROI eğrisini iyileştirdi (istikrarlı
+                        # takım gücü > güncellik), 180 belirgin biçimde zarar yazdı
 MAKS_GOL = 8            # skor matrisinin boyutu (0-8 gol)
 MIN_MAC_UYARI = 8       # takım başına bu sayının altında maç varsa "sınırlı veri" uyarısı
-DC_RHO = 0.0            # Dixon-Coles düşük skor düzeltmesi (negatif: 0-0/1-1 payı artar,
-                        # 1-0/0-1 azalır) — bağımsız Poisson'un beraberliği hafife alması
-                        # bilinen kusurdur; değer backtest kalite metriğiyle seçilir
+DC_RHO = -0.06          # Dixon-Coles düşük skor düzeltmesi (0-0/1-1 payı artar, 1-0/0-1
+                        # azalır). Izgara: 0/-0.06/-0.12 içinde Brier'i en çok -0.06 düzeltti;
+                        # beraberlik kalibrasyonu %24.5→%25.9 (gerçek %26.2) — -0.12 aşırıydı
 
 
 # ---------------------------------------------------------------- yardımcılar

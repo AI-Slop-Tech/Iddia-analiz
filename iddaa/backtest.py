@@ -4,8 +4,9 @@ Dürüstlük kuralları:
 - Bakış sızıntısı (look-ahead bias) yok: her maç, yalnızca kendisinden ÖNCE
   oynanmış maçların verisiyle değerlendirilir. Zaman ağırlıklı takım güçleri
   artımlı (üstel sönümlü) tutulur; oran kalıbı yalnızca önceki maçlarda aranır.
-- Canlı modelle aynı karışım: %35 piyasa + (örnekleme göre <=%25) oran kalıbı
-  + kalan Poisson. Aynı yarı ömür, aynı katsayı/lambda kırpmaları.
+- Canlı modelle aynı karışım: %50 piyasa + (örnekleme göre <=%25) oran kalıbı
+  + kalan Poisson; ±5 puan piyasa çapası ve Dixon-Coles düzeltmesi dahil.
+  Aynı yarı ömür, aynı katsayı/lambda kırpmaları.
 - Bahis kuralı: adayların (MS1/MS0/MS2 + varsa ÜST/ALT 2.5) en yüksek beklenen
   değerlisi eşiği aşarsa açılış oranından düz 1 birim oynanır.
 - Veri yetersizse (takım başına 8 maçtan az saha verisi) maç atlanır.
@@ -31,7 +32,7 @@ MIN_SAHA_MAC = 8  # canlı sistemdeki "sınırlı veri" uyarı sınırıyla ayn�
 
 
 class _Durum:
-    """Üstel sönümlü (yarı ömür 1 yıl) ağırlıklı gol toplamları."""
+    """Üstel sönümlü (yarı ömür analiz.YARI_OMUR_GUN) ağırlıklı gol toplamları."""
 
     __slots__ = ("w", "gf", "ga", "n", "son")
 
