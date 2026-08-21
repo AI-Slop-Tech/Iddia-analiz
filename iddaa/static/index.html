@@ -1762,6 +1762,15 @@ function btestHTML(r){
     <div class="not">Kıyas (${t.mac.toLocaleString('tr-TR')} maç): her maç ev sahibi ${(t.ms1_roi*100).toFixed(1)}% ROI · her maç favori ${(t.favori_roi*100).toFixed(1)}% ROI.
     ${kapali ? '' : 'Açık veriyle kurulan modelin açılış oranlarında bahisçi marjını yenememesi beklenen ve dürüst bir sonuçtur — sistemin değeri disiplinde: sürpriz tuzağını eler, değersiz maçta PAS der, en iyi oranı gösterir.'}</div>
   </div>
+  ${r.kalite ? `<div class="kart"><h2>🎯 Model Kalitesi <span class="ipucu">(Brier skoru — düşük daha iyi; ${r.kalite.n.toLocaleString('tr-TR')} maç)</span></h2>
+    <div class="rozetler">
+      ${rozet('Piyasa (marjsız oran)', r.kalite.piyasa_brier.toFixed(4))}
+      ${rozet('Model karışımı', r.kalite.model_brier.toFixed(4))}
+      ${rozet('Saf Poisson', r.kalite.poisson_brier.toFixed(4))}
+    </div>
+    <div class="not">Beraberlik kalibrasyonu: model %${(r.kalite.beraberlik_model*100).toFixed(1)} bekledi, gerçekte %${(r.kalite.beraberlik_gercek*100).toFixed(1)} çıktı.
+    Model karışımının piyasaya çok yakın çıkması tasarım gereğidir (±5 puan çapa); fark, kalıp + Poisson'un eklediği küçük kenardır. Piyasayı Brier'de geçmek nadirdir — hedef, ona yakın kalıp fiyat hatalarını yakalamaktır.</div>
+  </div>` : ''}
   <div class="kart"><h2>📉 Bakiye Eğrisi</h2>${egriSVG(r.egri)}</div>
   <div class="kart"><h2>Eşik-ROI Tablosu <span class="ipucu">eşiği değiştirince ne olurdu?</span></h2>
     <table><tr><th class="sag">Eşik</th><th class="sag">Bahis</th><th class="sag">İsabet</th><th class="sag">ROI (açılış)</th><th class="sag">ROI (en iyi)</th></tr>
