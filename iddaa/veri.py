@@ -793,13 +793,26 @@ def fikstur_yukle(ligler: list[str] | None = None,
     f["oran_ev"] = _ilk_dolu_kolon(f, ["AvgH", "B365H", "PSH", "MaxH"])
     f["oran_berabere"] = _ilk_dolu_kolon(f, ["AvgD", "B365D", "PSD", "MaxD"])
     f["oran_dep"] = _ilk_dolu_kolon(f, ["AvgA", "B365A", "PSA", "MaxA"])
-    # en iyi (en yüksek) piyasa oranı: Max kolonu, yoksa kitapçıların satır maksimumu
+    # EN İYİ FİYAT: yalnız GERÇEKTEN GÖRDÜĞÜMÜZ kitapçıların en yükseği.
+    # Kaynağın "Max" kolonu güvenilmez çıktı — ör. Everton-C.Palace'ta listelenen
+    # 7 kitapçının hepsi 2.10-2.28 verirken MaxH=3.20 yazıyordu; öyle bir fiyat
+    # piyasada yok. Böyle hayalet kotalar hem kullanıcıya oynayamayacağı fiyatı
+    # gösterir hem de sahte "değer" sinyali üretir.
     for uc, kolon in (("ev", "H"), ("berabere", "D"), ("dep", "A")):
         kaynaklar = [f"{p}{kolon}" for p in mevcut_kitapcilar]
-        satir_maks = f[kaynaklar].max(axis=1) if kaynaklar else pd.Series(float("nan"), index=f.index)
-        f[f"oran_max_{uc}"] = pd.to_numeric(f.get(f"Max{kolon}"), errors="coerce").fillna(satir_maks)
-    f["oran_ust25"] = _ilk_dolu_kolon(f, ["Avg>2.5", "B365>2.5", "Max>2.5"])
-    f["oran_alt25"] = _ilk_dolu_kolon(f, ["Avg<2.5", "B365<2.5", "Max<2.5"])
+        f[f"oran_max_{uc}"] = (f[kaynaklar].max(axis=1) if kaynaklar
+                               else pd.Series(float("nan"), index=f.index))
+    f["oran_ust25"] = _ilk_dolu_kolon(f, ["Avg>2.5", "B365>2.5"])
+    f["oran_alt25"] = _ilk_dolu_kolon(f, ["Avg<2.5", "B365<2.5"])
+    # Üst/Alt tarafında da en iyi gerçek fiyat (kitapçı bazlı kolonlardan)
+    for uc, ek in (("ust25", ">2.5"), ("alt25", "<2.5")):
+        kaynaklar = [f"{p}{ek}" for p in KITAPCI_ADLARI if f"{p}{ek}" in f.columns]
+        if kaynaklar:
+            for k in kaynaklar:
+                f[k] = pd.to_numeric(f[k], errors="coerce")
+            f[f"oran_{uc}_maks"] = f[kaynaklar].max(axis=1)
+        else:
+            f[f"oran_{uc}_maks"] = f[f"oran_{uc}"]
 
     if gecmisi_at:
         f = f[f["Tarih"] >= simdi_tr().normalize()]

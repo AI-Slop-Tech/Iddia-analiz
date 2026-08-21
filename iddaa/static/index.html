@@ -253,6 +253,116 @@
   #bildirim.goster{transform:translateX(-50%) translateY(0)}
   #bildirim.hata{border-color:var(--kirmizi)}
   footer{margin-top:34px;color:var(--cok-soluk);font-size:12.5px;text-align:center;border-top:1px solid var(--cizgi);padding-top:18px}
+
+  /* ============================================================
+     v3 — profesyonel bahis arayüzü katmanı
+     Amaç: gerçek bir bahis sitesinin okunabilirliği — sakin zemin,
+     yüksek kontrastlı oran düğmeleri, tabular rakamlar, net hiyerarşi.
+     ============================================================ */
+  :root{
+    --bg:#080b12; --kart:#0e1420; --kart-ic:#0b1019; --cizgi:#1b2436;
+    --metin:#e8edf5; --soluk:#95a3bd; --cok-soluk:#5f6f8d;
+    --yesil:#22c55e; --sari:#f5b544; --mavi:#4c9ef8; --kirmizi:#ef5350;
+    --vurgu:#22c55e; --vurgu-koyu:#166534;
+    --grad:linear-gradient(135deg,#22c55e 0%,#0ea5e9 100%);
+    --radius:14px; --golge:0 8px 30px #0006;
+  }
+  body{
+    background:
+      radial-gradient(900px 480px at 85% -12%,#12305518,transparent),
+      radial-gradient(700px 420px at -8% 8%,#0d3b2e14,transparent), var(--bg);
+    font-feature-settings:"tnum" 1,"cnum" 1;
+  }
+  .kart{box-shadow:var(--golge)}
+  h2{letter-spacing:-.2px}
+  table{font-variant-numeric:tabular-nums}
+
+  /* --- oran düğmeleri: bahis sitelerindeki gibi tıklanabilir --- */
+  .oran-grup{display:flex;gap:6px;flex-wrap:nowrap}
+  .oran-btn{
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    min-width:62px;padding:7px 9px;border-radius:10px;cursor:pointer;
+    background:#141c2c;border:1px solid #223049;color:var(--metin);
+    font-weight:800;font-size:14px;line-height:1.15;transition:.13s;
+    font-variant-numeric:tabular-nums;
+  }
+  .oran-btn small{display:block;font-size:10px;font-weight:700;color:var(--cok-soluk);
+    letter-spacing:.6px;margin-bottom:2px}
+  .oran-btn:hover{border-color:#3a527d;background:#182236;transform:translateY(-1px)}
+  .oran-btn.secili{background:var(--grad);color:#04121f;border-color:transparent}
+  .oran-btn.secili small{color:#04121f;opacity:.75}
+  .oran-btn.sinyalli{border-color:var(--sari);box-shadow:0 0 0 1px #f5b54455 inset}
+
+  /* --- maç satırı: daha nefes alan, hiyerarşik --- */
+  .mac-satir{align-items:center;gap:10px}
+  .mac-satir .takimlar{font-weight:700;letter-spacing:-.1px}
+  .lig-chip{font-size:10.5px;letter-spacing:.4px;text-transform:uppercase}
+
+  /* --- sinyal rozeti --- */
+  .sinyal-rozet{
+    display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:999px;
+    background:#f5b5441f;border:1px solid #f5b54455;color:var(--sari);
+    font-size:11.5px;font-weight:800;letter-spacing:.2px;white-space:nowrap;
+  }
+  .sinyal-kart{border-color:#f5b54466;background:linear-gradient(180deg,#f5b5440d,transparent 42%)}
+
+  /* --- KUPON FİŞİ (bet slip) --- */
+  #fis-dugme{
+    position:fixed;right:16px;bottom:78px;z-index:60;border:none;cursor:pointer;
+    padding:13px 18px;border-radius:999px;background:var(--grad);color:#04121f;
+    font-weight:900;font-size:14px;box-shadow:0 10px 30px #0009;display:none;
+    align-items:center;gap:8px;
+  }
+  #fis-dugme.gorunur{display:inline-flex}
+  #fis-dugme .sayi{background:#04121f;color:#fff;border-radius:999px;
+    min-width:22px;height:22px;display:grid;place-items:center;font-size:12px}
+  #fis-kaplama{position:fixed;inset:0;background:#000a;z-index:80;display:none}
+  #fis-kaplama.acik{display:block}
+  #fis{
+    position:fixed;right:0;bottom:0;z-index:81;width:min(420px,100%);
+    max-height:86vh;display:none;flex-direction:column;
+    background:var(--kart);border:1px solid var(--cizgi);
+    border-radius:18px 18px 0 0;box-shadow:0 -12px 40px #000a;
+  }
+  #fis.acik{display:flex}
+  #fis .fis-ust{display:flex;align-items:center;justify-content:space-between;
+    padding:14px 16px;border-bottom:1px solid var(--cizgi)}
+  #fis .fis-ust b{font-size:15.5px}
+  #fis .fis-govde{overflow:auto;padding:8px 12px;flex:1}
+  #fis .fis-alt{border-top:1px solid var(--cizgi);padding:12px 14px;background:var(--kart-ic);
+    border-radius:0 0 0 0}
+  .fis-satir{display:flex;gap:10px;align-items:flex-start;padding:10px 8px;text-align:left;
+    border-bottom:1px solid #16203399}
+  .fis-satir:last-child{border-bottom:none}
+  .fis-satir .orta{flex:1;min-width:0;text-align:left}
+  .fis-satir .mac{font-size:12px;color:var(--soluk);white-space:nowrap;
+    overflow:hidden;text-overflow:ellipsis}
+  .fis-satir .sec{font-weight:800;font-size:14px;margin-top:2px}
+  .fis-satir .oran{font-weight:900;font-variant-numeric:tabular-nums}
+  .fis-satir .sil{background:none;border:none;color:var(--cok-soluk);cursor:pointer;
+    font-size:16px;padding:0 2px}
+  .fis-satir .sil:hover{color:var(--kirmizi)}
+  .fis-ozet{display:flex;justify-content:space-between;font-size:13px;margin:5px 0}
+  .fis-ozet b{font-variant-numeric:tabular-nums}
+  .fis-kazanc{font-size:20px;font-weight:900;color:var(--yesil)}
+  #fis input[type=number]{width:100%;padding:11px 12px;border-radius:10px;
+    background:#0a111d;border:1px solid var(--cizgi);color:var(--metin);
+    font-size:16px;font-weight:800;font-variant-numeric:tabular-nums}
+  .fis-tut{display:flex;gap:6px;margin:8px 0 4px;flex-wrap:wrap}
+  .fis-tut button{flex:1;min-width:56px;padding:8px 4px;border-radius:9px;cursor:pointer;
+    background:#141c2c;border:1px solid #223049;color:var(--soluk);font-weight:800;font-size:12.5px}
+  .fis-tut button:hover{border-color:#3a527d;color:var(--metin)}
+  @media(min-width:760px){
+    #fis{right:18px;bottom:18px;border-radius:18px}
+    #fis-dugme{bottom:24px}
+  }
+  /* dar ekranda başlık tek satırda kalsın: güncelle düğmesi ikona iner */
+  @media(max-width:560px){
+    #btn-guncelle{font-size:0;padding:9px 11px}
+    #btn-guncelle::before{content:"🔄";font-size:16px}
+    header .ust{flex-wrap:nowrap}
+    .durum-chipler{overflow:hidden}
+  }
 </style>
 </head>
 <body>
@@ -325,17 +435,23 @@
   <!-- ============ BU HAFTA ============ -->
   <section id="s-hafta" class="aktif">
     <div class="kart">
-      <h2>📅 Bu Haftanın Maçları</h2>
-      <div class="alt-baslik">
-        Fikstür ve oranlar otomatik çekilir (Bet365, Betfair, Bwin, Paddy Power, SkyBet, BetVictor… + piyasa ortalaması ve en yüksek oran).
-        <b>⚡ Günü Tara</b>, günün tüm maçlarını arşivle eşleştirip değer sırasına dizer.
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <h2 style="margin:0">📅 Bülten</h2>
+        <select id="h-lig" onchange="gunCiz()" style="width:auto;min-width:130px;padding:8px 10px">
+          <option value="">Tüm ligler</option></select>
+        <span style="flex:1"></span>
+        <button class="btn ikincil" id="btn-tara" onclick="gunTara()">⚡ Tara</button>
+        <button class="btn ikincil" onclick="haftaYukle(true)">↻ Yenile</button>
+        <button class="mini-btn" onclick="const y=$('#bulten-bilgi');y.style.display=y.style.display==='none'?'block':'none'">ℹ️</button>
       </div>
-      <div class="form-satir">
-        <div class="alan"><label>Lig</label><select id="h-lig" onchange="gunCiz()"><option value="">Tümü</option></select></div>
-        <button class="btn" id="btn-tara" onclick="gunTara()">⚡ Günü Tara</button>
-        <button class="btn ikincil" onclick="haftaYukle(true)">↻ Fikstürü Yenile</button>
+      <div id="bulten-bilgi" style="display:none">
+        <div class="alt-baslik" style="margin-top:8px">
+          Fikstür ve oranlar otomatik çekilir (Bet365, Betfair, Bwin, Paddy Power, SkyBet, BetVictor…) ve
+          günün tüm maçları arka planda arşivle eşleştirilip değer sırasına dizilir —
+          <b>oranlara dokunarak kupon fişinize ekleyebilirsiniz</b>.
+        </div>
+        <div class="not" id="kaynak-notu"></div>
       </div>
-      <div class="not" id="kaynak-notu"></div>
       <div id="anahtar-kutu" style="display:none;margin-top:12px" class="form-satir">
         <div class="alan" style="flex:1;min-width:220px">
           <label>🔑 football-data.org anahtarı — takvimi ~90 maça çıkarır (panelden kaydedilir, Coolify env gerekmez)</label>
@@ -764,6 +880,7 @@ function aktifGunMaclari(){
 let OTOTARA = {};
 function gunCiz(){
   if(!HAFTA) return;
+  if(typeof fisRozet === 'function') fisRozet();
   const maclar = aktifGunMaclari();
   oneCikanCiz();
   if(!maclar.length){
@@ -781,12 +898,7 @@ function gunCiz(){
       <span class="lig-chip" title="${esc(m.lig_adi)}">${esc(m.lig)}</span>
       <span class="takimlar">${esc(m.ev)} – ${esc(m.dep)}</span>
       ${m.basladi ? '<span class="chip-basladi">▶ başladı</span>' : ''}
-      ${m.oranlar ? `<span class="oran-trio">
-        <span class="oran-kutu"><small>1</small>${m.oranlar[0].toFixed(2)}</span>
-        <span class="oran-kutu"><small>X</small>${m.oranlar[1].toFixed(2)}</span>
-        <span class="oran-kutu"><small>2</small>${m.oranlar[2].toFixed(2)}</span>
-      </span>` : '<span class="ipucu">oran yok</span>'}
-      ${m.ust_alt ? `<span class="ipucu">Ü/A: ${m.ust_alt[0].toFixed(2)} / ${m.ust_alt[1].toFixed(2)}</span>` : ''}
+      ${m.oranlar ? oranDugmeleri(m) : '<span class="ipucu">oran yok</span>'}
       ${m.analiz_yok
         ? '<span class="ipucu" title="Takımlar istatistik arşivinin kapsamı dışında">yalnız listeleme</span>'
         : `<button class="mini-btn" onclick="detayToggle(${m.id})">🔬 Detay</button>`}
@@ -841,13 +953,14 @@ async function gunTara(){
 let TARAMA_TUM = false, TARAMA_OYN = [], TARAMA_ACIK = {};
 function taramaSatir(m, soluk){
   return `
-    <div class="one-cikan ${m.karar}" ${soluk ? 'style="opacity:.55"' : ''}>
+    <div class="one-cikan ${m.karar} ${m.sinyal ? 'sinyal-kart' : ''}" ${soluk ? 'style="opacity:.55"' : ''}>
       <span>${m.basladi ? '▶' : KARAR_ISARET[m.karar]}</span>
       <span class="ipucu">${m.saat} · ${esc(m.lig)}</span>
       <span style="font-weight:700;flex:1;min-width:170px">${esc(m.ev)} – ${esc(m.dep)}</span>
       <span>${SECIM_AD[m.secim] || esc(m.secim)} @ <b>${m.oran.toFixed(2)}</b>${
         m.en_iyi_oran && m.en_iyi_oran > m.oran + 0.001
           ? ` <span class="ipucu">en iyi ${m.en_iyi_oran.toFixed(2)} → ${m.ev_max >= 0 ? '+' : ''}${(m.ev_max*100).toFixed(1)}%</span>` : ''}</span>
+      ${m.sinyal ? `<span class="sinyal-rozet" title="Konsensüs sapması sinyali">🎯 ${esc(m.sinyal.secim)} @${m.sinyal.oran.toFixed(2)} · +${(m.sinyal.ev*100).toFixed(1)}%</span>` : ''}
       <span class="ipucu">${m.kalip_n ? m.kalip_n + ' benzer maç' : ''}</span>
       ${yildizHTML(m.yildiz)}
       <span class="buyukev ${m.ev_degeri >= 0 ? 'ev-poz' : 'ev-neg'}" title="Liste oranıyla beklenen değer — karar (✅/🟡/⛔) bu sayıya göre verilir">${m.ev_degeri >= 0 ? '+' : ''}${(m.ev_degeri*100).toFixed(1)}%</span>
@@ -873,6 +986,7 @@ function oneCikanCiz(){
     <div class="alt-baslik">✅ değerli = liste oranıyla EV ≥ +%8 (3 sezonluk backtestte kârlı tek bant) · 🟡 sınırda = +%4–%8.
       Değersiz ve başlamış maçlar gizlenir. Yüksek oranlı seçimlerde tekil isabet ~%30-35 normaldir — hedef seri kârı, maç başı isabet değil.</div>
     ${oyn.length > 1 ? `<div style="margin:8px 0"><button class="mini-btn" id="btn-tum-analiz" onclick="taramaHepsiniAc()">📖 ${oyn.length} önerinin tam analizini aç</button></div>` : ''}
+    ${sinyalBolumu(liste)}
     ${oyn.map(m => taramaSatir(m, false)).join('')}
     ${sistemKuponuHTML(oyn)}
     ${guvenliKuponHTML(liste)}
@@ -884,6 +998,163 @@ function oneCikanCiz(){
   Object.keys(TARAMA_ACIK).forEach(id => {
     if(TARAMA_ACIK[id] && MAC_DETAY_CACHE[id] && $('#tdetay-' + id)) taramaDetayToggle(+id);
   });
+}
+
+// Bahis sitesi tarzı oran düğmeleri: dokun → fişe düşer, seçiliyse dolu görünür
+const PAZAR_ETIKET = {'MS1':'1','MS0':'X','MS2':'2','ÜST 2.5':'ÜST','ALT 2.5':'ALT'};
+function oranDugmeleri(m){
+  const dugme = (pazar, oran) => {
+    if(!oran) return '';
+    const secili = fisSeciliMi(m.ev, m.dep, pazar);
+    const arg = [m.id, JSON.stringify(pazar), oran, JSON.stringify(m.ev), JSON.stringify(m.dep),
+                 JSON.stringify(m.saat || ''), JSON.stringify(m.lig || ''), JSON.stringify(AKTIF_GUN)].join(',');
+    return `<button class="oran-btn ${secili ? 'secili' : ''}" onclick='oranSec(${arg})'>
+      <small>${PAZAR_ETIKET[pazar] || pazar}</small>${oran.toFixed(2)}</button>`;
+  };
+  return `<span class="oran-grup">
+    ${dugme('MS1', m.oranlar[0])}${dugme('MS0', m.oranlar[1])}${dugme('MS2', m.oranlar[2])}
+    ${m.ust_alt ? dugme('ÜST 2.5', m.ust_alt[0]) + dugme('ALT 2.5', m.ust_alt[1]) : ''}
+  </span>`;
+}
+
+// 🎯 Konsensüs Sapması — backtest kanıtlı ana motor (%44 tutma, +%18 ROI,
+// kapanışı %82 yenme). Piyasanın kendi ortalamasıyla tek bir kitapçının
+// fiyatı arasındaki ölçülebilir tutarsızlığı yakalar; model yalnız veto eder.
+function sinyalBolumu(liste){
+  const sin = liste.filter(m => m.sinyal && !m.basladi);
+  if(!sin.length) return '';
+  return `<div class="kart sinyal-kart" style="margin:10px 0">
+    <h2>🎯 Konsensüs Sinyali <span class="ipucu">(${sin.length} maç — sistemin en güçlü kanıtlı motoru)</span></h2>
+    <div class="alt-baslik">Piyasadaki en iyi gerçek fiyat, ~10 kitapçılık konsensüsün adil fiyatını belirgin aşıyor.
+      3 sezonluk testte <b>%44 tutma · +%18 ROI</b> ve kapanış oranını <b>%82</b> oranında yenme.
+      Model burada seçim üretmez, yalnız <b>veto</b> eder.</div>
+    ${sin.map(m => {
+      const s = m.sinyal;
+      const arg = [m.id, JSON.stringify(s.secim), s.oran, JSON.stringify(m.ev), JSON.stringify(m.dep),
+                   JSON.stringify(m.saat || ''), JSON.stringify(m.lig || ''), JSON.stringify(AKTIF_GUN)].join(',');
+      return `<div class="one-cikan" style="border-color:#f5b54455">
+        <span class="ipucu">${m.saat} · ${esc(m.lig)}</span>
+        <span style="font-weight:700;flex:1;min-width:150px">${esc(m.ev)} – ${esc(m.dep)}</span>
+        <span class="ipucu">${esc(s.pazar)}</span>
+        <span><b>${SECIM_AD[s.secim] || esc(s.secim)}</b> @ <b>${s.oran.toFixed(2)}</b>
+          <span class="ipucu">konsensüs ${s.konsensus.toFixed(2)} · adil ${s.adil_oran}</span></span>
+        <span class="buyukev ev-poz">+${(s.ev*100).toFixed(1)}%</span>
+        <button class="mini-btn" onclick='oranSec(${arg})'>➕ Fişe ekle</button>
+      </div>`;
+    }).join('')}
+    <div class="not">Seyrek çıkar (sezonda ~40-50 sinyal) — bulunmadığı gün normaldir. Fiyat kayarsa sinyal geçersizleşir.</div>
+  </div>`;
+}
+
+// ==================== KUPON FİŞİ (bet slip) ====================
+// Gerçek bahis sitelerindeki fiş mantığı: oran düğmesine bas → fişe düşer,
+// tutar gir → toplam oran ve olası kazanç anında hesaplanır, kaydet → defter.
+let FIS_ACIK = false, FIS_TUTAR = 100;
+try{ FIS_TUTAR = Number(localStorage.getItem('fis_tutar')) || 100; }catch(_e){}
+
+function fisAc(){ FIS_ACIK = true; $('#fis').classList.add('acik');
+  $('#fis-kaplama').classList.add('acik'); fisCiz(); }
+function fisKapat(){ FIS_ACIK = false; $('#fis').classList.remove('acik');
+  $('#fis-kaplama').classList.remove('acik'); }
+function fisTemizle(){ KUPON_TASLAK = []; _taslakYaz(); fisCiz(); }
+function fisTutarSec(t){ FIS_TUTAR = t; try{ localStorage.setItem('fis_tutar', t); }catch(_e){} fisCiz(); }
+function fisTutarGir(v){ FIS_TUTAR = Math.max(0, Number(v) || 0);
+  try{ localStorage.setItem('fis_tutar', FIS_TUTAR); }catch(_e){} fisOzetCiz(); }
+
+function fisRozet(){
+  const d = $('#fis-dugme'), n = KUPON_TASLAK.length;
+  if(!d) return;
+  d.classList.toggle('gorunur', n > 0);
+  const s = $('#fis-sayi'); if(s) s.textContent = n;
+}
+
+function fisToplamOran(){ return KUPON_TASLAK.reduce((a, s) => a * (s.oran || 1), 1); }
+
+function fisOzetCiz(){
+  const alt = $('#fis-alt'); if(!alt) return;
+  const n = KUPON_TASLAK.length;
+  if(!n){ alt.innerHTML = ''; return; }
+  const toplam = fisToplamOran(), kazanc = toplam * FIS_TUTAR;
+  alt.innerHTML = `
+    <div class="fis-ozet"><span>Maç sayısı</span><b>${n}</b></div>
+    <div class="fis-ozet"><span>Toplam oran</span><b>${toplam.toFixed(2)}</b></div>
+    <label class="ipucu" style="display:block;margin:8px 0 4px">Bahis tutarı (₺)</label>
+    <input type="number" min="0" step="10" value="${FIS_TUTAR}" oninput="fisTutarGir(this.value)">
+    <div class="fis-tut">
+      ${[50,100,250,500].map(t => `<button onclick="fisTutarSec(${t})">${t}₺</button>`).join('')}
+    </div>
+    <div class="fis-ozet" style="align-items:center;margin-top:10px">
+      <span>Olası kazanç</span><span class="fis-kazanc">${kazanc.toLocaleString('tr-TR',{maximumFractionDigits:0})} ₺</span>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:10px">
+      <select id="fis-sistem" style="flex:1;padding:10px">${fisSistemSecenek(n)}</select>
+      <button class="btn" onclick="fisKaydet()">💾 Kuponu Kaydet</button>
+    </div>
+    <div class="not" style="margin-top:8px">Kayıt sonrası sonuçlar maçlar bitince otomatik işlenir; 🎫 Kupon sekmesinden takip edin.</div>`;
+}
+
+function fisSistemSecenek(n){
+  let o = `<option value="kombine">${n > 1 ? n + "'li kombine" : 'Tekli'}</option>`;
+  for(let k = 2; k < n; k++) o += `<option value="${k}/${n}">${k}/${n} sistem</option>`;
+  return o;
+}
+
+function fisCiz(){
+  fisRozet();
+  const g = $('#fis-govde'); if(!g) return;
+  const adet = $('#fis-adet'); if(adet) adet.textContent = KUPON_TASLAK.length ? `(${KUPON_TASLAK.length})` : '';
+  if(!KUPON_TASLAK.length){
+    g.innerHTML = `<div class="bos-durum" style="padding:26px 10px">
+      <div class="dev">🎫</div><p>Fişiniz boş.<br><span class="ipucu">Maç listesindeki oranlara dokunarak seçim ekleyin.</span></p></div>`;
+    fisOzetCiz(); return;
+  }
+  g.innerHTML = KUPON_TASLAK.map((s, i) => `
+    <div class="fis-satir">
+      <div class="orta">
+        <div class="mac">${esc(s.tarih)} ${esc(s.saat || '')} · ${esc(s.lig || '')}</div>
+        <div class="mac" style="color:var(--metin)">${esc(s.ev)} – ${esc(s.dep)}</div>
+        <div class="sec">${SECIM_AD[s.pazar] || esc(s.pazar)}</div>
+      </div>
+      <div style="text-align:right">
+        <div class="oran">${s.oran.toFixed(2)}</div>
+        <button class="sil" onclick="fisSil(${i})" title="Kaldır">✕</button>
+      </div>
+    </div>`).join('');
+  fisOzetCiz();
+}
+
+function fisSil(i){ KUPON_TASLAK.splice(i, 1); _taslakYaz(); fisCiz(); }
+
+async function fisKaydet(){
+  if(!KUPON_TASLAK.length) return;
+  const sistem = ($('#fis-sistem') || {}).value || 'kombine';
+  try{
+    await api('/api/kuponlar', {secimler: KUPON_TASLAK, sistem, ad: ''});
+    KUPON_TASLAK = [];
+    try{ localStorage.removeItem('kupon_taslak'); }catch(_e){}
+    fisCiz(); fisKapat();
+    bildir('💾 Kupon kaydedildi — 🎫 Kupon sekmesinden takip edebilirsiniz.');
+    if(document.querySelector('#s-kupon.aktif')) kuponSekmesiCiz();
+  }catch(h){ bildir(h.message, true); }
+}
+
+// oran düğmesi: tek dokunuşla fişe ekler, tekrar dokununca çıkarır (aç/kapa)
+function oranSec(id, pazar, oran, ev, dep, saat, lig, tarih){
+  const el = (typeof event !== 'undefined' && event) ? event.currentTarget : null;
+  const idx = KUPON_TASLAK.findIndex(s => s.ev === ev && s.dep === dep && s.pazar === pazar);
+  if(idx >= 0){
+    KUPON_TASLAK.splice(idx, 1); _taslakYaz();
+    bildir(`Fişten çıkarıldı: ${ev} – ${dep} · ${SECIM_AD[pazar] || pazar}`);
+  }else{
+    kuponaEkle({tarih: tarih || AKTIF_GUN, saat: saat || '', lig: lig || '',
+                ev: ev, dep: dep, pazar: pazar, oran: Number(oran), kaynak: 'oran'});
+  }
+  if(el && el.classList) el.classList.toggle('secili', fisSeciliMi(ev, dep, pazar));
+  fisCiz();
+}
+
+function fisSeciliMi(ev, dep, pazar){
+  return KUPON_TASLAK.some(s => s.ev === ev && s.dep === dep && s.pazar === pazar);
 }
 
 // ------------------------------ kupon defteri ------------------------------
@@ -898,6 +1169,7 @@ function kuponRozetGuncelle(){
 function _taslakYaz(){
   try{ localStorage.setItem('kupon_taslak', JSON.stringify(KUPON_TASLAK)); }catch(_e){}
   kuponRozetGuncelle();
+  if(typeof fisCiz === 'function') fisCiz();
   if(document.querySelector('#s-kupon.aktif')) kuponSekmesiCiz();
 }
 
@@ -2247,5 +2519,21 @@ async function gecmisYukle(){
   b.disabled = false;
 }
 </script>
+
+<!-- ============ KUPON FİŞİ (bet slip) ============ -->
+<button id="fis-dugme" onclick="fisAc()">🎫 Kuponum <span class="sayi" id="fis-sayi">0</span></button>
+<div id="fis-kaplama" onclick="fisKapat()"></div>
+<aside id="fis" aria-label="Kupon fişi">
+  <div class="fis-ust">
+    <b>🎫 Kuponum <span class="ipucu" id="fis-adet"></span></b>
+    <div style="display:flex;gap:6px">
+      <button class="mini-btn" onclick="fisTemizle()">Temizle</button>
+      <button class="mini-btn" onclick="fisKapat()">✕</button>
+    </div>
+  </div>
+  <div class="fis-govde" id="fis-govde"></div>
+  <div class="fis-alt" id="fis-alt"></div>
+</aside>
+
 </body>
 </html>
