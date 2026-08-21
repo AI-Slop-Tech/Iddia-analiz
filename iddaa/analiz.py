@@ -667,9 +667,18 @@ def tahmin_hucreleri(poisson: dict, kalip: dict | None = None) -> dict:
 
     p_ust25 = poisson["ust25"]
     p_kg = poisson["kg_var"]
+    p1, p0, p2 = poisson["ms1"], poisson["ms0"], poisson["ms2"]
     if kalip:
         p_ust25 = 0.5 * p_ust25 + 0.5 * kalip["ust25"]
         p_kg = 0.5 * p_kg + 0.5 * kalip["kg_var"]
+        # MS sonucu da kalıpla yarı yarıya harmanlanır: saf Poisson "1 %76" gibi
+        # aşırı özgüvenli hücreler üretebiliyor; kalıp (benzer oranla açılan
+        # maçların gerçek dağılımı) bunu gerçekçi banda çeker
+        p1 = 0.5 * p1 + 0.5 * kalip["ms1"]
+        p0 = 0.5 * p0 + 0.5 * kalip["ms0"]
+        p2 = 0.5 * p2 + 0.5 * kalip["ms2"]
+        t = p1 + p0 + p2
+        p1, p0, p2 = p1 / t, p0 / t, p2 / t
 
     iy = poisson["iy"]
     return {
@@ -683,7 +692,7 @@ def tahmin_hucreleri(poisson: dict, kalip: dict | None = None) -> dict:
         "y2_skor": poisson["y2_skor"][0],
         "ms_skor": poisson["skorlar"][0][0],
         "iy_sonuc": uclu(iy["ms1"], iy["ms0"], iy["ms2"]),
-        "ms_sonuc": uclu(poisson["ms1"], poisson["ms0"], poisson["ms2"]),
+        "ms_sonuc": uclu(p1, p0, p2),
     }
 
 

@@ -314,6 +314,7 @@
     <button class="sekme aktif" data-s="hafta"><span class="ikon">📅</span><span class="etiket">Bu Hafta</span></button>
     <button class="sekme" data-s="tablo"><span class="ikon">📋</span><span class="etiket">Tablo</span></button>
     <button class="sekme" data-s="surpriz"><span class="ikon">🎭</span><span class="etiket">Sürpriz</span></button>
+    <button class="sekme" data-s="kupon"><span class="ikon">🎫</span><span class="etiket">Kupon</span></button>
     <button class="sekme" data-s="sonuc"><span class="ikon">📊</span><span class="etiket">Sonuçlar</span></button>
     <button class="sekme" data-s="oran"><span class="ikon">📈</span><span class="etiket">Oran</span></button>
     <button class="sekme" data-s="takim"><span class="ikon">🎯</span><span class="etiket">Takım</span></button>
@@ -403,6 +404,16 @@
   </section>
 
   <!-- ============ SONUÇLAR ============ -->
+  <section id="s-kupon">
+    <div class="kart">
+      <h2>🎫 Kupon Defteri</h2>
+      <div class="alt-baslik">Günün Taraması'ndaki önerilerden (➕) ve Sürpriz Radarı'ndan (➕ Kupona ekle) seçim toplayın,
+        kombine ya da sistem olarak kaydedin. Sonuçlar maçlar bitince arşivden <b>otomatik işlenir</b>;
+        arşivin kapsamadığı maçları elle ✓/✗ işaretleyebilirsiniz. Böylece neyin tutup tutmadığı kayıt altında kalır.</div>
+      <div id="kupon-taslak"></div>
+    </div>
+    <div id="kupon-liste"></div>
+  </section>
   <section id="s-sonuc">
     <div class="kart">
       <h2>📊 Sonuçlar & Tahmin Karnesi</h2>
@@ -548,6 +559,7 @@ document.querySelectorAll('.sekme').forEach(b => b.onclick = () => sekmeAc(b.dat
 function sekmeAc(ad){
   document.querySelectorAll('.sekme').forEach(x => x.classList.toggle('aktif', x.dataset.s === ad));
   document.querySelectorAll('section').forEach(x => x.classList.toggle('aktif', x.id === 's-' + ad));
+  if(ad === 'kupon') kuponSekmesiCiz();
 }
 
 function barSatir(etiket, p, renk, sagEk=''){
@@ -813,6 +825,7 @@ function taramaSatir(m, soluk){
       ${yildizHTML(m.yildiz)}
       <span class="buyukev ${m.ev_max >= 0 ? 'ev-poz' : 'ev-neg'}">${(m.ev_max*100).toFixed(1)}%</span>
       <button class="mini-btn" onclick="${soluk ? `detayToggle(${m.id}, true)` : `taramaDetayToggle(${m.id})`}">🔬 ${soluk ? 'Detay' : 'Tam analiz'}</button>
+      ${soluk ? '' : `<button class="mini-btn" onclick="taramadanKupona(${m.id})" title="Kupona ekle">➕</button>`}
     </div>
     ${soluk ? '' : `<div id="tdetay-${m.id}"></div>`}`;
 }
@@ -834,6 +847,7 @@ function oneCikanCiz(){
       Değersiz ve başlamış maçlar gizlenir. Yüksek oranlı seçimlerde tekil isabet ~%30-35 normaldir — hedef seri kârı, maç başı isabet değil.</div>
     ${oyn.length > 1 ? `<div style="margin:8px 0"><button class="mini-btn" id="btn-tum-analiz" onclick="taramaHepsiniAc()">📖 ${oyn.length} önerinin tam analizini aç</button></div>` : ''}
     ${oyn.map(m => taramaSatir(m, false)).join('')}
+    ${sistemKuponuHTML(oyn)}
     ${!oyn.length ? `<div class="bos-durum" style="padding:14px 0"><p>Bugün oynanabilir değer yok — <b>pas da bir karardır</b>; değersiz bahse girmemek kasayı korur.</p></div>` : ''}
     ${gizli.length ? `<div class="alt-baslik" style="cursor:pointer;user-select:none;margin-top:10px" onclick="TARAMA_TUM=!TARAMA_TUM;oneCikanCiz()">${ozet} — ${TARAMA_TUM ? '▾ gizle' : '▸ göster'}</div>` : ''}
     ${TARAMA_TUM ? gizli.map(m => taramaSatir(m, true)).join('') : ''}
@@ -842,6 +856,198 @@ function oneCikanCiz(){
   Object.keys(TARAMA_ACIK).forEach(id => {
     if(TARAMA_ACIK[id] && MAC_DETAY_CACHE[id] && $('#tdetay-' + id)) taramaDetayToggle(+id);
   });
+}
+
+// ------------------------------ kupon defteri ------------------------------
+let KUPON_TASLAK = [];
+try{ KUPON_TASLAK = JSON.parse(localStorage.getItem('kupon_taslak') || '[]'); }catch(_e){}
+
+function kuponRozetGuncelle(){
+  const b = document.querySelector('.sekme[data-s="kupon"] .etiket');
+  if(b) b.textContent = KUPON_TASLAK.length ? `Kupon (${KUPON_TASLAK.length})` : 'Kupon';
+}
+
+function _taslakYaz(){
+  try{ localStorage.setItem('kupon_taslak', JSON.stringify(KUPON_TASLAK)); }catch(_e){}
+  kuponRozetGuncelle();
+  if(document.querySelector('#s-kupon.aktif')) kuponSekmesiCiz();
+}
+
+function kuponaEkle(sec){
+  const anahtar = s => `${s.tarih}|${s.ev}|${s.dep}|${s.pazar}`;
+  if(KUPON_TASLAK.some(s => anahtar(s) === anahtar(sec))){ bildir('Bu seçim zaten kuponda.', true); return; }
+  if(KUPON_TASLAK.length >= 12){ bildir('Kupon en fazla 12 seçim alır.', true); return; }
+  KUPON_TASLAK.push(sec);
+  _taslakYaz();
+  bildir(`🎫 Kupona eklendi (${KUPON_TASLAK.length} seçim): ${sec.ev} – ${sec.dep} · ${sec.pazar} @ ${sec.oran.toFixed(2)}`);
+}
+
+function taramadanKupona(id){
+  const m = (TARAMALAR[AKTIF_GUN] || []).find(x => x.id === id);
+  if(!m){ bildir('Seçim bulunamadı; günü yeniden tarayın.', true); return; }
+  kuponaEkle({tarih: AKTIF_GUN, saat: m.saat, lig: m.lig, ev: m.ev, dep: m.dep,
+              pazar: m.secim, oran: m.oran, kaynak: 'tarama'});
+}
+
+function srKupona(i){
+  const m = (SR_SONUCLAR[AKTIF_SR_GUN] || [])[i]; if(!m) return;
+  const secEl = $('#sr-sec-' + i), oranEl = $('#sr-oran-' + i);
+  const ad = secEl ? secEl.value : null, oran = Number(oranEl ? oranEl.value : 0);
+  if(!ad || !oran || oran <= 1){ bildir('Önce İY/MS seçimini ve oranını girin.', true); return; }
+  kuponaEkle({tarih: AKTIF_SR_GUN, saat: m.saat || '', lig: m.lig || '', ev: m.ev, dep: m.dep,
+              pazar: 'İY/MS ' + ad, oran, kaynak: 'surpriz'});
+}
+
+function kuponCikar(i){ KUPON_TASLAK.splice(i, 1); _taslakYaz(); kuponSekmesiCiz(); }
+
+async function kuponKaydet(){
+  if(!KUPON_TASLAK.length) return;
+  const sistem = ($('#kupon-sistem') || {}).value || 'kombine';
+  const ad = ($('#kupon-ad') || {}).value || '';
+  const b = $('#kupon-kaydet'); if(b) b.disabled = true;
+  try{
+    await api('/api/kuponlar', {secimler: KUPON_TASLAK, sistem, ad});
+    KUPON_TASLAK = [];
+    try{ localStorage.removeItem('kupon_taslak'); }catch(_e){}
+    kuponRozetGuncelle();
+    bildir('💾 Kupon kaydedildi — sonuçlar maçlar bitince otomatik işlenir.');
+  }catch(h){ bildir(h.message, true); }
+  if(b) b.disabled = false;
+  kuponSekmesiCiz();
+}
+
+async function kuponSil(id){
+  try{ await api('/api/kupon-sil', {id}); bildir('Kupon silindi.'); }catch(h){ bildir(h.message, true); }
+  kuponSekmesiCiz();
+}
+
+async function bacakIsaretle(id, indeks, durum){
+  try{ await api('/api/kupon-bacak', {id, indeks, durum}); }catch(h){ bildir(h.message, true); }
+  kuponSekmesiCiz();
+}
+
+const BACAK_IKON = {tuttu: '<span class="ev-poz">✓</span>', yatti: '<span class="ev-neg">✗</span>', bekliyor: '⏳'};
+
+function kuponKartHTML(k){
+  const chip = k.durum === 'tuttu'
+    ? `<span class="ev-poz" style="font-weight:800">✅ TUTTU ${k.net != null ? '+' + k.net.toFixed(2) + ' birim' : ''}</span>`
+    : (k.durum === 'yatti'
+       ? `<span class="ev-neg" style="font-weight:800">❌ YATTI ${k.net != null ? k.net.toFixed(2) + ' birim' : ''}</span>`
+       : `<span class="ipucu">⏳ ${k.tutan}/${k.secimler.length} tuttu · ${k.bekleyen} bekliyor</span>`);
+  return `<div class="kart">
+    <h2>${esc(k.ad || (k.sistem === 'kombine' ? k.secimler.length + "'li kombine" : k.sistem + ' sistem'))}
+      <span class="ipucu">· ${esc(k.olusturma)} · ${k.sistem === 'kombine'
+        ? 'toplam oran ' + (k.toplam_oran || 0).toFixed(2)
+        : k.maliyet + ' kolon'}</span></h2>
+    <div style="margin-bottom:8px">${chip}
+      <button class="mini-btn" style="float:right" onclick="kuponSil(${k.id})">🗑 Sil</button></div>
+    ${k.secimler.map((s, i) => `
+      <div class="one-cikan" style="border:none;padding:6px 0">
+        <span>${BACAK_IKON[s.durum] || '❓'}</span>
+        <span class="ipucu">${esc(s.tarih)} ${esc(s.saat)} · ${esc(s.lig)}</span>
+        <span style="flex:1;min-width:150px">${esc(s.ev)} – ${esc(s.dep)}
+          ${s.skor ? `<span class="ipucu">(${esc(s.skor)}${s.iy_skor ? ' · İY ' + esc(s.iy_skor) : ''})</span>` : ''}</span>
+        <span><b>${esc(s.pazar)}</b> @ ${s.oran.toFixed(2)}</span>
+        ${s.durum === 'bekliyor'
+          ? `<span style="white-space:nowrap"><button class="mini-btn" onclick="bacakIsaretle(${k.id}, ${i}, 'tuttu')">✓</button>
+             <button class="mini-btn" onclick="bacakIsaretle(${k.id}, ${i}, 'yatti')">✗</button></span>`
+          : (s.elle ? '<span class="ipucu">elle</span>' : '')}
+      </div>`).join('')}
+  </div>`;
+}
+
+async function kuponSekmesiCiz(){
+  const t = $('#kupon-taslak');
+  if(!t) return;
+  if(KUPON_TASLAK.length){
+    const n = KUPON_TASLAK.length;
+    const toplam = KUPON_TASLAK.reduce((a, s) => a * s.oran, 1);
+    let sistemSec = `<option value="kombine">${n > 1 ? n + "'li kombine (hepsi tutmalı)" : 'tekli'}</option>`;
+    for(let k = 2; k < n; k++) sistemSec += `<option value="${k}/${n}">${k}/${n} sistem (C(${n},${k}) kolon)</option>`;
+    t.innerHTML = `
+      ${KUPON_TASLAK.map((s, i) => `
+        <div class="one-cikan" style="border:none;padding:6px 0">
+          <span class="ipucu">${esc(s.tarih)} · ${esc(s.lig)}</span>
+          <span style="flex:1;min-width:150px">${esc(s.ev)} – ${esc(s.dep)}</span>
+          <span><b>${esc(s.pazar)}</b> @ ${s.oran.toFixed(2)}</span>
+          <button class="mini-btn" onclick="kuponCikar(${i})">✖</button>
+        </div>`).join('')}
+      <div class="sr-alt" style="margin-top:8px;flex-wrap:wrap">
+        <span class="ipucu">Kombine oranı: <b>${toplam.toFixed(2)}</b></span>
+        <select id="kupon-sistem" style="width:auto;padding:8px 10px">${sistemSec}</select>
+        <input id="kupon-ad" placeholder="kupon adı (isteğe bağlı)" style="width:170px;padding:8px 10px">
+        <button class="btn" id="kupon-kaydet" onclick="kuponKaydet()">💾 Kaydet</button>
+      </div>`;
+  }else{
+    t.innerHTML = `<div class="bos-durum" style="padding:12px 0"><p>Taslak boş. ⚡ Günün Taraması'ndaki önerilerin yanındaki
+      <b>➕</b> ile ya da 🎭 Sürpriz Radarı'ndaki <b>➕ Kupona ekle</b> ile seçim toplayın.</p></div>`;
+  }
+  try{
+    const r = await api('/api/kuponlar');
+    $('#kupon-liste').innerHTML = (r.kuponlar || []).map(kuponKartHTML).join('')
+      || '<div class="kart bos-durum"><p>Kayıtlı kupon yok.</p></div>';
+  }catch(h){
+    $('#kupon-liste').innerHTML = `<div class="kart"><span class="ev-neg">${esc(h.message)}</span></div>`;
+  }
+}
+kuponRozetGuncelle();
+
+function kombinasyonlar(n, k){
+  const sonuc = [], sec = [];
+  (function geri(bas){
+    if(sec.length === k){ sonuc.push(sec.slice()); return; }
+    for(let i = bas; i <= n - (k - sec.length); i++){ sec.push(i); geri(i + 1); sec.pop(); }
+  })(0);
+  return sonuc;
+}
+
+function sistemHesabi(secimler, k){
+  // beklenen net: her kolona 1 birim — Σ(∏p·∏oran) − kolon sayısı
+  const komb = kombinasyonlar(secimler.length, k);
+  let ev = 0;
+  for(const c of komb){
+    let p = 1, o = 1;
+    for(const i of c){ p *= secimler[i].p; o *= secimler[i].oran; }
+    ev += p * o - 1;
+  }
+  // en az k seçim tutma olasılığı (poisson-binomial, 2^n numaralandırma; n ≤ 6)
+  const n = secimler.length;
+  let pk = 0;
+  for(let m = 0; m < (1 << n); m++){
+    let adet = 0, p = 1;
+    for(let i = 0; i < n; i++){
+      if(m & (1 << i)){ adet++; p *= secimler[i].p; } else { p *= 1 - secimler[i].p; }
+    }
+    if(adet >= k) pk += p;
+  }
+  return {kolon: komb.length, ev, pk};
+}
+
+function sistemKuponuHTML(oyn){
+  if(oyn.length < 2) return '';
+  const secimler = oyn.slice().sort((a, b) => b.ev_degeri - a.ev_degeri).slice(0, 6)
+    .map(m => ({ad: `${m.ev} – ${m.dep}`, secim: SECIM_AD[m.secim] || m.secim, oran: m.oran,
+                p: Math.min(0.95, Math.max(0.02, (1 + m.ev_degeri) / m.oran))}));
+  const n = secimler.length;
+  const satirlar = [];
+  for(let k = 2; k <= n; k++) satirlar.push({k, ...sistemHesabi(secimler, k)});
+  const enIyi = satirlar.reduce((a, b) => (b.ev / b.kolon > a.ev / a.kolon ? b : a));
+  return `
+  <div style="border-top:1px solid var(--cizgi);margin-top:14px;padding-top:10px">
+    <h2>🎫 Sistem Kuponu <span class="ipucu">(yalnız işaretli seçimlerden${oyn.length > 6 ? ' — EV sırasına göre ilk 6' : ''}; bültenin tamamından değil)</span></h2>
+    ${secimler.map(s => `<div class="ipucu" style="display:block">• ${esc(s.ad)} — <b>${esc(s.secim)}</b> @ ${s.oran.toFixed(2)} <span style="opacity:.8">(model ${(s.p*100).toFixed(0)}%)</span></div>`).join('')}
+    <div style="overflow-x:auto;margin-top:8px"><table>
+      <tr><th>Sistem</th><th class="sag">Kolon</th><th class="sag">Maliyet</th><th class="sag">Kupon tutma şansı</th><th class="sag">Beklenen net</th><th class="sag">ROI</th></tr>
+      ${satirlar.map(s => `<tr ${s === enIyi ? 'style="font-weight:700"' : ''}>
+        <td>${s.k === n ? n + "'li kombine" : s.k + '/' + n + ' sistem'}${s === enIyi ? ' ⭐' : ''}</td>
+        <td class="sag">${s.kolon}</td><td class="sag">${s.kolon} birim</td>
+        <td class="sag">${(s.pk*100).toFixed(1)}%</td>
+        <td class="sag ${s.ev >= 0 ? 'ev-poz' : 'ev-neg'}">${s.ev >= 0 ? '+' : ''}${s.ev.toFixed(2)} birim</td>
+        <td class="sag ${s.ev >= 0 ? 'ev-poz' : 'ev-neg'}">${(s.ev / s.kolon * 100).toFixed(1)}%</td>
+      </tr>`).join('')}
+    </table></div>
+    <div class="not">"Kupon tutma şansı" = en az o kadar seçimin tutması. Hesap, modelin olasılıkları ve maçların birbirinden bağımsız olduğu varsayımıyla yapılır; liste oranı esas alınır (en iyi kitapçı oranıyla oynarsanız getiri artar). Sistem, riski de kazancı da çarpar — kasa payını tekil bahisten <b>küçük</b> tutun. ⭐ = kolon başına beklenen değeri en yüksek seçenek.</div>
+  </div>`;
 }
 
 async function taramaDetayToggle(id){
@@ -1088,7 +1294,7 @@ function tahminDetayHTML(s){
     ${TAB_KOLONLAR.map(k => hucreTd(o.hucre[k])).join('')}</tr>`).join('');
   return `<div class="kart">
     <h2>📋 Tahmin & Benzer Maçlarda Gerçekleşenler</h2>
-    <div class="alt-baslik">İlk satır modelin bu maç tahmini; altı, <b>benzer oranla açılan geçmiş maçlarda gerçekte ne olduğu</b> — her satırın altında o maçın açılış oranları (1 / X / 2) yazar, bu maçınkiyle kıyaslayın. <b style="color:var(--sari)">★</b> işaretli satırlar <b>bu maçla aynı ülkenin liglerinden</b>dir ve en üstte sıralanır (A/B/C ligi fark etmez); "—" görünen satırlar İY verisi yayınlanmayan liglerdendir. Tahmin ile geçmişin aynı yöne bakması sinyali güçlendirir.</div>
+    <div class="alt-baslik">İlk satır modelin bu maç tahmini (model + kalıp görüşü; yüzdeler o hücrenin <b>daha olası tarafını</b> gösterir, bahis önerisi değildir — öneri, piyasa çapalı ✅/🟡 banner'ından gelir); altı, <b>benzer oranla açılan geçmiş maçlarda gerçekte ne olduğu</b> — her satırın altında o maçın açılış oranları (1 / X / 2) yazar, bu maçınkiyle kıyaslayın. <b style="color:var(--sari)">★</b> işaretli satırlar <b>bu maçla aynı ülkenin liglerinden</b>dir ve en üstte sıralanır (A/B/C ligi fark etmez); "—" görünen satırlar İY verisi yayınlanmayan liglerdendir. Tahmin ile geçmişin aynı yöne bakması sinyali güçlendirir.</div>
     ${s.kalip && s.kalip.ulke ? `<div class="ipucu" style="margin-bottom:8px">🏳️ <b>${esc(s.kalip.ulke.ad)} kalıbı</b> (${s.kalip.ulke.n} maç):
       1 ${pct(s.kalip.ulke.ms1)} · X ${pct(s.kalip.ulke.ms0)} · 2 ${pct(s.kalip.ulke.ms2)} · Üst 2.5 ${pct(s.kalip.ulke.ust25)} · KG ${pct(s.kalip.ulke.kg_var)}
       &nbsp;—&nbsp; genel kalıp (${s.kalip.n} maç): 1 ${pct(s.kalip.ms1)} · X ${pct(s.kalip.ms0)} · 2 ${pct(s.kalip.ms2)}.
@@ -1541,6 +1747,7 @@ function srDegerHTML(m, i, enIyi){
     <select id="sr-sec-${i}" onchange="srSecimDegisti(${i})" style="width:auto;padding:8px 10px">${sec}</select>
     <input id="sr-oran-${i}" type="number" step="0.01" min="1.01" inputmode="decimal" value="${hazir}"
       placeholder="ör. 22.50" style="width:100px;padding:8px 10px" oninput="srDeger(${i})">
+    <button class="mini-btn" onclick="srKupona(${i})">➕ Kupona ekle</button>
     <span id="sr-ev-${i}" class="ipucu"></span>
   </div>`;
 }

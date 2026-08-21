@@ -21,7 +21,7 @@ import time
 import pandas as pd
 
 from . import __version__ as SURUM
-from . import analiz, backtest, kayit, rapor, veri, yorum
+from . import analiz, backtest, kayit, kupon, rapor, veri, yorum
 
 _DURUM: dict = {
     "df": None, "elo": None, "fikstur": None, "kitapcilar": [],
@@ -1565,6 +1565,44 @@ def uygulama_olustur():
                 "veri_son": _t(df["Tarih"].max()),
             }
         )
+
+    # ------------------------------------------------------------- kupon defteri
+
+    @app.get("/api/kuponlar")
+    def kuponlar_listele():
+        try:
+            df = _df()
+        except FileNotFoundError:
+            df = None
+        kuponlar = kupon.sonuclandir(df)
+        return jsonify({"kuponlar": [kupon.degerlendir(k) for k in kuponlar]})
+
+    @app.post("/api/kuponlar")
+    def kupon_olustur():
+        govde = request.get_json(silent=True) or {}
+        try:
+            yeni = kupon.olustur(govde.get("secimler") or [],
+                                 sistem=govde.get("sistem", "kombine"),
+                                 ad=govde.get("ad", ""))
+        except (ValueError, TypeError) as hata:
+            return jsonify({"hata": str(hata)}), 400
+        return jsonify({"tamam": True, "id": yeni["id"]})
+
+    @app.post("/api/kupon-sil")
+    def kupon_sil():
+        govde = request.get_json(silent=True) or {}
+        return jsonify({"tamam": kupon.sil(int(govde.get("id", 0)))})
+
+    @app.post("/api/kupon-bacak")
+    def kupon_bacak():
+        govde = request.get_json(silent=True) or {}
+        try:
+            tamam = kupon.elle_isaretle(int(govde.get("id", 0)),
+                                        int(govde.get("indeks", -1)),
+                                        str(govde.get("durum", "")))
+        except (ValueError, TypeError) as hata:
+            return jsonify({"hata": str(hata)}), 400
+        return jsonify({"tamam": tamam})
 
     @app.post("/api/backtest")
     def backtest_calistir():
