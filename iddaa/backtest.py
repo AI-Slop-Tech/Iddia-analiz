@@ -4,8 +4,9 @@ Dürüstlük kuralları:
 - Bakış sızıntısı (look-ahead bias) yok: her maç, yalnızca kendisinden ÖNCE
   oynanmış maçların verisiyle değerlendirilir. Zaman ağırlıklı takım güçleri
   artımlı (üstel sönümlü) tutulur; oran kalıbı yalnızca önceki maçlarda aranır.
-- Canlı modelle aynı karışım: %35 piyasa + (örnekleme göre <=%25) oran kalıbı
-  + kalan Poisson. Aynı yarı ömür, aynı katsayı/lambda kırpmaları.
+- Canlı modelle aynı karışım: %50 piyasa + (örnekleme göre <=%25) oran kalıbı
+  + kalan Poisson; ±5 puan piyasa çapası ve Dixon-Coles düzeltmesi dahil.
+  Aynı yarı ömür, aynı katsayı/lambda kırpmaları.
 - Bahis kuralı: adayların (MS1/MS0/MS2 + varsa ÜST/ALT 2.5) en yüksek beklenen
   değerlisi eşiği aşarsa açılış oranından düz 1 birim oynanır.
 - Veri yetersizse (takım başına 8 maçtan az saha verisi) maç atlanır.
@@ -21,7 +22,9 @@ import math
 import numpy as np
 import pandas as pd
 
-from .analiz import MAKS_AYRISMA, W_PIYASA, YARI_OMUR_GUN, ayrismayi_sinirla
+from . import analiz as _a  # sabitlere modül üzerinden erişilir ki deney
+                            # ızgarası (rho / yarı ömür / kırpma) çalışırken
+                            # yamalanan değerler burada da geçerli olsun
 
 _FAKTORIYEL = [1, 1, 2, 6, 24, 120, 720, 5040, 40320]
 _MAKS_GOL = 8
@@ -29,7 +32,7 @@ MIN_SAHA_MAC = 8  # canlı sistemdeki "sınırlı veri" uyarı sınırıyla ayn�
 
 
 class _Durum:
-    """Üstel sönümlü (yarı ömür 1 yıl) ağırlıklı gol toplamları."""
+    """Üstel sönümlü (yarı ömür analiz.YARI_OMUR_GUN) ağırlıklı gol toplamları."""
 
     __slots__ = ("w", "gf", "ga", "n", "son")
 
@@ -42,7 +45,7 @@ class _Durum:
 
     def _sondur(self, tarih):
         if self.son is not None:
-            k = 0.5 ** ((tarih - self.son).days / YARI_OMUR_GUN)
+            k = 0.5 ** ((tarih - self.son).days / _a.YARI_OMUR_GUN)
             self.w *= k
             self.gf *= k
             self.ga *= k
@@ -74,7 +77,7 @@ def _poisson_olasiliklar(lam_ev: float, lam_dep: float) -> tuple[float, float, f
     ms1 = ms0 = ms2 = ust = toplam = 0.0
     for i in range(_MAKS_GOL + 1):
         for j in range(_MAKS_GOL + 1):
-            p = pe[i] * pd_[j]
+            p = pe[i] * pd_[j] * _a.dc_tau(i, j, lam_ev, lam_dep, _a.DC_RHO)
             toplam += p
             if i > j:
                 ms1 += p
@@ -127,6 +130,7 @@ def backtest_calistir(df: pd.DataFrame, sezon_sayisi: int = 3, lig: str | None =
 
     secimler = []      # modelin her test maçındaki en iyi adayı
     taban_satirlar = []  # kıyas stratejileri için (hep MS1, hep favori)
+    kalite_kayitlari = []  # olasılık kalitesi: (poisson, karışım, gerçekleşen) üçlüleri
 
     kayitlar = list(D.itertuples())
     for i, r in enumerate(kayitlar):
@@ -168,17 +172,20 @@ def backtest_calistir(df: pd.DataFrame, sezon_sayisi: int = 3, lig: str | None =
                     k2 = float(res_a[:i][m].mean())
                     k_ust = float(ust_g[:i][m].mean())
                     w_kalip = min(n_k / 200.0, 1.0) * 0.25
-                w_poisson = 1.0 - W_PIYASA - w_kalip
+                w_poisson = 1.0 - _a.W_PIYASA - w_kalip
 
                 # canlı modelle aynı karışım
-                m1 = w_poisson * po1 + w_kalip * k1 + W_PIYASA * p1a[i]
-                m0 = w_poisson * po0 + w_kalip * k0 + W_PIYASA * p0a[i]
-                m2 = w_poisson * po2 + w_kalip * k2 + W_PIYASA * p2a[i]
+                m1 = w_poisson * po1 + w_kalip * k1 + _a.W_PIYASA * p1a[i]
+                m0 = w_poisson * po0 + w_kalip * k0 + _a.W_PIYASA * p0a[i]
+                m2 = w_poisson * po2 + w_kalip * k2 + _a.W_PIYASA * p2a[i]
                 norm = m1 + m0 + m2
                 m1, m0, m2 = m1 / norm, m0 / norm, m2 / norm
-                sinirli = ayrismayi_sinirla({"1": m1, "0": m0, "2": m2},
+                sinirli = _a.ayrismayi_sinirla({"1": m1, "0": m0, "2": m2},
                                             {"1": p1a[i], "0": p0a[i], "2": p2a[i]})
                 m1, m0, m2 = sinirli["1"], sinirli["0"], sinirli["2"]
+                kalite_kayitlari.append((po1, po0, po2, m1, m0, m2,
+                                         p1a[i], p0a[i], p2a[i],
+                                         float(res_h[i]), float(res_d[i]), float(res_a[i])))
 
                 def _maks(deger_, yedek):
                     return float(deger_) if not pd.isna(deger_) else yedek
@@ -192,8 +199,8 @@ def backtest_calistir(df: pd.DataFrame, sezon_sayisi: int = 3, lig: str | None =
                 if not (pd.isna(o_u) or pd.isna(o_a)) and min(o_u, o_a) > 1.0:
                     adil_ust = (1 / o_u) / (1 / o_u + 1 / o_a)
                     ku = k_ust if w_kalip > 0 else po_ust
-                    mu = w_poisson * po_ust + w_kalip * ku + W_PIYASA * adil_ust
-                    mu = adil_ust + max(-MAKS_AYRISMA, min(MAKS_AYRISMA, mu - adil_ust))
+                    mu = w_poisson * po_ust + w_kalip * ku + _a.W_PIYASA * adil_ust
+                    mu = adil_ust + max(-_a.MAKS_AYRISMA, min(_a.MAKS_AYRISMA, mu - adil_ust))
                     # not: kalıp yönüyle çelişen tarafı elemek denendi ve kârı DÜŞÜRDÜ
                     # (eşik 0.08: 589→470 bahis, ROI +4.6→+4.4; eşik 0.10: +4.7→+1.2).
                     # Azınlık-ihtimal değer bahisleri gerçek kenar taşıyor — elenmez.
@@ -268,6 +275,25 @@ def backtest_calistir(df: pd.DataFrame, sezon_sayisi: int = 3, lig: str | None =
     for e in (0.0, 0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.08, 0.10):
         esik_tablosu.append({"esik": e, **_rapor(S[S["ev_degeri"] >= e])})
 
+    # olasılık kalitesi: ROI'den çok daha az gürültülü model ölçüsü —
+    # tüm değerlendirilen maçlar üzerinden Brier / log-loss + beraberlik kalibrasyonu
+    kalite = None
+    if kalite_kayitlari:
+        K = np.asarray(kalite_kayitlari, dtype=float)
+        po, mo, pi, y = K[:, 0:3], K[:, 3:6], K[:, 6:9], K[:, 9:12]
+        kalite = {
+            "n": int(len(K)),
+            "poisson_brier": float(((po - y) ** 2).sum(axis=1).mean()),
+            "model_brier": float(((mo - y) ** 2).sum(axis=1).mean()),
+            "piyasa_brier": float(((pi - y) ** 2).sum(axis=1).mean()),
+            "poisson_logloss": float(-np.log(np.clip((po * y).sum(axis=1), 1e-12, None)).mean()),
+            "model_logloss": float(-np.log(np.clip((mo * y).sum(axis=1), 1e-12, None)).mean()),
+            "piyasa_logloss": float(-np.log(np.clip((pi * y).sum(axis=1), 1e-12, None)).mean()),
+            "beraberlik_poisson": float(po[:, 1].mean()),
+            "beraberlik_model": float(mo[:, 1].mean()),
+            "beraberlik_gercek": float(y[:, 1].mean()),
+        }
+
     # bakiye eğrisi + maksimum düşüş
     egri, maks_dusus = [], 0.0
     if not oynanan.empty:
@@ -307,6 +333,7 @@ def backtest_calistir(df: pd.DataFrame, sezon_sayisi: int = 3, lig: str | None =
         },
         "ozet": {**_rapor(oynanan), "maks_dusus": maks_dusus},
         "esik_tablosu": esik_tablosu,
+        "kalite": kalite,
         "secim_kirilim": _kirilim("secim"),
         "lig_kirilim": _kirilim("lig", en_cok=10),
         "sezon_kirilim": _kirilim("sezon"),
