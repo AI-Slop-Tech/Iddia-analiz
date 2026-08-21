@@ -804,18 +804,19 @@ function gunCiz(){
 
 // Haftalık otomatik tarama: kullanıcı hiçbir butona basmadan tüm günlerin
 // analizi arka planda sırayla hazırlanır; gün değiştirince sonuç anında gelir.
-let HAFTA_OTO_CALISIYOR = false;
+let HAFTA_OTO_CALISIYOR = false, TARAMA_ZAMAN = {};
+const TARAMA_OMRU = 20 * 60 * 1000;  // oranlar kayar: bu yaştan eski tarama tazelenir
 async function haftaOtoTara(){
   if(HAFTA_OTO_CALISIYOR || !HAFTA) return;
   HAFTA_OTO_CALISIYOR = true;
   try{
     for(const g of (HAFTA.gunler || []).map(x => x.tarih)){
-      if(TARAMALAR[g]) continue;
+      if(TARAMALAR[g] && (Date.now() - (TARAMA_ZAMAN[g] || 0) < TARAMA_OMRU)) continue;
       try{
         const r = await api('/api/bulten-tara', {tarih: g});
         // oranlar hâlâ ısınıyorken gelen boş sonuç önbelleğe alınmaz ki
         // piyasa dolunca otomatik yeniden denensin
-        if(r.length || !HAFTA.piyasa_isitma) TARAMALAR[g] = r;
+        if(r.length || !HAFTA.piyasa_isitma){ TARAMALAR[g] = r; TARAMA_ZAMAN[g] = Date.now(); }
         if(g === AKTIF_GUN) oneCikanCiz();
       }catch(_h){ /* gün taranamadıysa sessiz geç; elle Günü Tara hâlâ çalışır */ }
     }
@@ -829,6 +830,8 @@ async function gunTara(){
     $('#one-cikanlar').innerHTML = '<div class="iskelet" style="height:110px"></div>';
   try{
     TARAMALAR[AKTIF_GUN] = await api('/api/bulten-tara', {tarih: AKTIF_GUN});
+    TARAMA_ZAMAN[AKTIF_GUN] = Date.now();
+    Object.keys(MAC_DETAY_CACHE).forEach(k => delete MAC_DETAY_CACHE[k]);  // detaylar da tazelensin
     oneCikanCiz();
     bildir(`${TARAMALAR[AKTIF_GUN].length} maç tarandı ve değer sırasına dizildi.`);
   }catch(h){ bildir(h.message, true); }
@@ -842,10 +845,12 @@ function taramaSatir(m, soluk){
       <span>${m.basladi ? '▶' : KARAR_ISARET[m.karar]}</span>
       <span class="ipucu">${m.saat} · ${esc(m.lig)}</span>
       <span style="font-weight:700;flex:1;min-width:170px">${esc(m.ev)} – ${esc(m.dep)}</span>
-      <span>${SECIM_AD[m.secim] || esc(m.secim)} @ <b>${(m.en_iyi_oran || m.oran).toFixed(2)}</b></span>
+      <span>${SECIM_AD[m.secim] || esc(m.secim)} @ <b>${m.oran.toFixed(2)}</b>${
+        m.en_iyi_oran && m.en_iyi_oran > m.oran + 0.001
+          ? ` <span class="ipucu">en iyi ${m.en_iyi_oran.toFixed(2)} → ${m.ev_max >= 0 ? '+' : ''}${(m.ev_max*100).toFixed(1)}%</span>` : ''}</span>
       <span class="ipucu">${m.kalip_n ? m.kalip_n + ' benzer maç' : ''}</span>
       ${yildizHTML(m.yildiz)}
-      <span class="buyukev ${m.ev_max >= 0 ? 'ev-poz' : 'ev-neg'}">${(m.ev_max*100).toFixed(1)}%</span>
+      <span class="buyukev ${m.ev_degeri >= 0 ? 'ev-poz' : 'ev-neg'}" title="Liste oranıyla beklenen değer — karar (✅/🟡/⛔) bu sayıya göre verilir">${m.ev_degeri >= 0 ? '+' : ''}${(m.ev_degeri*100).toFixed(1)}%</span>
       <button class="mini-btn" onclick="${soluk ? `detayToggle(${m.id}, true)` : `taramaDetayToggle(${m.id})`}">🔬 ${soluk ? 'Detay' : 'Tam analiz'}</button>
       ${soluk ? '' : `<button class="mini-btn" onclick="taramadanKupona(${m.id})" title="Kupona ekle">➕</button>`}
     </div>
@@ -1186,7 +1191,37 @@ async function macDetayGetir(id){
   if(MAC_DETAY_CACHE[id]) return MAC_DETAY_CACHE[id];
   const s = await api('/api/mac-detay?id=' + id);
   MAC_DETAY_CACHE[id] = s;
+  taramaSatiriniTazele(id, s);
   return s;
+}
+
+// Detay her zaman TAZE hesaplanır; tarama sonucu ise önbellekten gelir ve
+// aradan geçen sürede oran değişmiş olabilir (ör. en iyi 3.75 → 3.50).
+// Böyle bir sapmada satır, detayın sayılarıyla eşitlenir — kullanıcı asla
+// aynı maç için iki farklı karar görmez.
+function taramaSatiriniTazele(id, s){
+  const o = s && s.oneri;
+  if(!o) return;
+  let degisti = false;
+  Object.keys(TARAMALAR).forEach(gun => {
+    (TARAMALAR[gun] || []).forEach(m => {
+      if(m.id !== id) return;
+      const sapma = Math.abs((m.ev_degeri ?? 0) - o.ev) > 0.005 || m.secim !== o.secim || m.karar !== o.karar;
+      if(!sapma) return;
+      m.secim = o.secim; m.oran = o.oran; m.ev_degeri = o.ev; m.karar = o.karar; m.yildiz = o.yildiz;
+      if(s.deger && s.deger.satirlar){
+        const satir = s.deger.satirlar.find(x => x.secim === o.secim);
+        if(satir && satir.oran_max){ m.en_iyi_oran = satir.oran_max; m.ev_max = satir.ev_max; }
+        else { m.en_iyi_oran = o.oran; m.ev_max = o.ev; }
+      }
+      degisti = true;
+    });
+  });
+  if(degisti && document.querySelector('#s-hafta.aktif')){
+    const acik = {...TARAMA_ACIK};
+    oneCikanCiz();
+    Object.keys(acik).forEach(k => { if(acik[k]) TARAMA_ACIK[k] = true; });
+  }
 }
 async function detayToggle(id, kaydir){
   const kutu = $('#detay-' + id);
@@ -2151,6 +2186,26 @@ function btestHTML(r){
     </div>
     <div class="not">Beraberlik kalibrasyonu: model %${(r.kalite.beraberlik_model*100).toFixed(1)} bekledi, gerçekte %${(r.kalite.beraberlik_gercek*100).toFixed(1)} çıktı.
     Model karışımının piyasaya çok yakın çıkması tasarım gereğidir (±5 puan çapa); fark, kalıp + Poisson'un eklediği küçük kenardır. Piyasayı Brier'de geçmek nadirdir — hedef, ona yakın kalıp fiyat hatalarını yakalamaktır.</div>
+  </div>` : ''}
+  ${(r.pazarlar && r.pazarlar.length) ? `<div class="kart">
+    <h2>🧾 Pazar Karnesi <span class="ipucu">(hangi pazarı ne kadar biliyoruz?)</span></h2>
+    <div class="alt-baslik">Her pazarda modelin <b>söylediği</b> ortalama olasılık ile <b>gerçekleşen</b> oran yan yana.
+      "Sapma" sıfıra ne kadar yakınsa model o pazarda o kadar dürüst; Brier düşükse tahmin o kadar keskin.
+      Sıralama Brier'e göre — en üsttekiler en iyi bildiğimiz pazarlardır.</div>
+    <div style="overflow-x:auto"><table>
+      <tr><th>Pazar</th><th class="sag">Maç</th><th class="sag">Model</th><th class="sag">Gerçek</th><th class="sag">Sapma</th><th class="sag">Brier</th></tr>
+      ${r.pazarlar.map(x => `<tr>
+        <td><b>${esc(x.pazar)}</b></td>
+        <td class="sag">${x.n.toLocaleString('tr-TR')}</td>
+        <td class="sag">%${(x.model*100).toFixed(1)}</td>
+        <td class="sag">%${(x.gercek*100).toFixed(1)}</td>
+        <td class="sag ${Math.abs(x.sapma) <= 0.01 ? 'ev-poz' : 'ev-neg'}">${x.sapma >= 0 ? '+' : ''}${(x.sapma*100).toFixed(1)} puan</td>
+        <td class="sag">${x.brier.toFixed(4)}</td>
+      </tr>`).join('')}
+    </table></div>
+    ${r.guvenli_mod ? `<div class="not">🛡 <b>Güvenli mod denetimi</b> (her maçın en yüksek olasılıklı pazarı, ${r.guvenli_mod.n.toLocaleString('tr-TR')} maç):
+      model %${(r.guvenli_mod.model*100).toFixed(1)} dedi, gerçekte %${(r.guvenli_mod.gercek*100).toFixed(1)} tuttu —
+      ${r.guvenli_mod.gercek >= r.guvenli_mod.model ? 'model kendini olduğundan <b>güvensiz</b> gösteriyor, yani vaat edilen yüzdeler güvenilir.' : 'model bu modda hafif iyimser; yüzdeleri bir tık aşağı okuyun.'}</div>` : ''}
   </div>` : ''}
   <div class="kart"><h2>📉 Bakiye Eğrisi</h2>${egriSVG(r.egri)}</div>
   <div class="kart"><h2>Eşik-ROI Tablosu <span class="ipucu">eşiği değiştirince ne olurdu?</span></h2>
