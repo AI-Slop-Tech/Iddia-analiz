@@ -1292,9 +1292,13 @@ def uygulama_olustur():
                 if n_k and n_k >= analiz.IYMS_MIN_ORNEK and adet is not None:
                     frekans = adet / n_k
                     kanit = {"n": int(n_k), "adet": int(adet), "frekans": float(frekans)}
-                    if (frekans >= analiz.IYMS_ISARET_ESIGI
-                            and one_cikan not in analiz.IYMS_AVLANAMAZ):
+                    # Eşik kombo başına: 1/1 için 0.35, 2/2 için 0.30 (ölçümle
+                    # seçildi). 0.40 üstü "güçlü" kademe. 1/0 ve 2/0 hiç
+                    # işaretlenmez — frekansları eşiğe yapısal olarak ulaşmıyor.
+                    kademe = analiz.iyms_isaret(one_cikan, frekans, int(n_k))
+                    if kademe and one_cikan not in analiz.IYMS_AVLANAMAZ:
                         isaretli = one_cikan
+                        kanit["kademe"] = kademe
             neden = None
             if mod == "kalip":
                 neden = "takımlar arşivde çözülemedi — yalnız oran kalıbı konuşuyor"

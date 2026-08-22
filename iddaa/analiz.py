@@ -308,7 +308,36 @@ def saglam_secim(deger: dict | None, en_iyi: dict | None = None) -> dict | None:
 # Kırılım: 1/1 %49.0 (güçlü ev favorisi), 2/2 %43.9 (güçlü deplasman).
 # En olası İKİ kombo birden işaretlenirse en az biri %65.7 tutuyor.
 
-IYMS_ISARET_ESIGI = 0.40   # geçmiş frekans bu eşiği geçerse "işaretli" seçim
+# İşaret eşiği kombo başınadır. 15.546 maçlık dışörneklemde (25 ay; her ay
+# için eğitim = o aydan öncesi; sahadaki harman kuralının birebir aynısı)
+# ölçülen GERÇEK tutma:
+#   1/1 ≥0.40 → %41.0 (105 seçim) · 0.35-0.40 → %37.6 (386 seçim)
+#   2/2 ≥0.40 → %48.5 ( 33 seçim) · 0.30-0.40 → %38.7 (106 seçim)
+# Taban: 1/1 %26.2, 2/2 %17.1 → süzgeç 1/1'de tabanın 1.46, 2/2'de 2.40 katı.
+# Tek eşik 0.40 günde yalnız 0.25 seçim veriyordu (550 günde 138); kombo
+# başına alt sınır günde 1.15 seçime çıkarıyor, tutma %42.8 → %38.9.
+IYMS_ISARET_ESIGI = 0.40   # "güçlü" kademenin sınırı
+IYMS_ESIK = {"1/1": 0.35, "2/2": 0.30}   # işaret için kombo başına alt sınır
+IYMS_KARNE = {"guclu": 0.428, "orta": 0.378, "hepsi": 0.389,
+              "gunluk_guclu": 0.25, "gunluk_hepsi": 1.15,
+              "ornek": 15546, "gun": 550}
+
+
+def iyms_isaret(kombo: str, frekans: float, n: int) -> str | None:
+    """Kombo işaretlenir mi, hangi kademede? None / "orta" / "guclu".
+
+    1/0 ve 2/0 hiç işaretlenemez: dışörneklemde 1/0'ın kalıp frekansı 15.546
+    maçın yalnız 2'sinde %30'u geçti, 2/0'da hiç geçmedi (en yüksek %24) —
+    tabanları %5.4 olduğu için bu kombolar hiçbir zaman "en olası sonuç"
+    olamıyor. Onlar için frekans değil FİYAT aranır: çapraz sürpriz süzgeci.
+    """
+    if n < IYMS_MIN_ORNEK or kombo not in IYMS_ESIK:
+        return None
+    if frekans >= IYMS_ISARET_ESIGI:
+        return "guclu"
+    if frekans >= IYMS_ESIK[kombo]:
+        return "orta"
+    return None
 IYMS_MIN_ORNEK = 300       # bu kadar birebir oranlı geçmiş maç olmadan işaret yok
 IYMS_AVLANAMAZ = ("1/2", "2/1")  # tarihsel %2-2.5 — model ne derse desin avlanamaz
 
