@@ -186,6 +186,18 @@
   .sr-hucre .adil{font-size:11px;color:var(--cok-soluk)}
   .sr-hucre.normal{opacity:.5}
   .sr-hucre.yildiz{border-color:var(--sari);opacity:1;background:rgba(250,204,21,.08)}
+  .capraz-kutu{background:var(--kart-ic);border:1px solid var(--cizgi);border-radius:12px;padding:10px 12px;margin-bottom:8px}
+  .capraz-baslik{font-size:12.5px;font-weight:800;color:var(--soluk);margin-bottom:7px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .capraz-satir{display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:12.5px;padding:5px 0;border-top:1px solid var(--cizgi)}
+  .capraz-satir:first-of-type{border-top:0}
+  .capraz-satir .kombo{font-weight:800;font-size:14px;min-width:34px}
+  .capraz-satir .olasilik{font-weight:700;color:var(--metin)}
+  .capraz-satir .taban{color:var(--cok-soluk)}
+  .capraz-satir .kabarma{font-weight:800;border-radius:999px;padding:2px 8px;font-size:11.5px;
+    background:var(--kart);border:1px solid var(--cizgi);color:var(--soluk)}
+  .capraz-satir.dikkat{background:rgba(250,204,21,.06);border-radius:8px;padding:5px 6px}
+  .capraz-satir.dikkat .kabarma{border-color:var(--sari);color:var(--sari)}
+  .capraz-satir.sonuk{opacity:.5}
   .sr-alt{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:2px}
 
   /* ---------- mobil (iPhone) düzeni: altta iOS tarzı sekme çubuğu ---------- */
@@ -964,6 +976,20 @@ async function gunTara(){
 }
 
 let TARAMA_TUM = false, TARAMA_OYN = [], TARAMA_ACIK = {};
+// Oynanmış maçta seçim tuttu mu? (dünkü satırların denetimi için)
+function SECIM_SONUC(secim, sonuc){
+  if(!sonuc || !secim) return null;
+  if(secim === 'MS1') return sonuc.ms === '1';
+  if(secim === 'MS0') return sonuc.ms === '0';
+  if(secim === 'MS2') return sonuc.ms === '2';
+  if(secim.startsWith('ÜST') || secim.startsWith('ALT')){
+    const p = (sonuc.skor || '').split('-').map(Number);
+    if(p.length !== 2 || p.some(isNaN)) return null;
+    return secim.startsWith('ÜST') ? (p[0] + p[1] > 2.5) : (p[0] + p[1] < 2.5);
+  }
+  return null;
+}
+
 function taramaSatir(m, soluk){
   return `
     <div class="one-cikan ${m.karar} ${m.sinyal ? 'sinyal-kart' : ''}" ${soluk ? 'style="opacity:.55"' : ''}>
@@ -977,6 +1003,9 @@ function taramaSatir(m, soluk){
       <span class="ipucu">${m.kalip_n ? m.kalip_n + ' benzer maç' : ''}</span>
       ${yildizHTML(m.yildiz)}
       <span class="buyukev ${m.ev_degeri >= 0 ? 'ev-poz' : 'ev-neg'}" title="Liste oranıyla beklenen değer — karar (✅/🟡/⛔) bu sayıya göre verilir">${m.ev_degeri >= 0 ? '+' : ''}${(m.ev_degeri*100).toFixed(1)}%</span>
+      ${m.sonuc ? `<span class="ipucu">🏁 ${esc(m.sonuc.skor)}${
+        (() => { const t = SECIM_SONUC(m.secim, m.sonuc); return t === null ? '' : (t ? ' <b class="ev-poz">✅</b>' : ' <b class="ev-neg">❌</b>'); })()
+      }</span>` : ''}
       <button class="mini-btn" onclick="${soluk ? `detayToggle(${m.id}, true)` : `taramaDetayToggle(${m.id})`}">🔬 ${soluk ? 'Detay' : 'Tam analiz'}</button>
       ${soluk ? '' : `<button class="mini-btn" onclick="taramadanKupona(${m.id})" title="Kupona ekle">➕</button>`}
     </div>
@@ -2147,6 +2176,112 @@ let SR_ONERI = null;
 // (toplam gerçekleşme %15, ölçülen isabet %5.65). Artık 9 kombo yarışır ve
 // yalnız "aynı oran profilinden açılmış geçmiş maçların ≥%40'ı bu sonuçla
 // bitmiş" olanlar işaretlenir → ölçümde ~2 seçim/gün, %48 isabet.
+// 🎲 Çapraz sürpriz süzgeci: 1/0, 2/0, 2/1, 1/2 — "olur mu?" değil,
+// "normalden ne kadar olası?" sorusunu yanıtlar. Olasılık, aynı oran
+// profilinden açılmış geçmiş maçların frekansıdır; genel tabana bölünerek
+// "kabarma" katsayısı çıkar. Ölçümde 1.6 katın ötesi doğrulanmadığı için
+// gösterilen olasılık orada tavanlanır (sunucu tarafında).
+function srCaprazHTML(m){
+  const c = m.capraz;
+  if(!c || !c.length) return '';
+  const dikkatli = c.filter(x => x.dikkat);
+  const ozet = dikkatli.length
+    ? `<span class="ev-poz">🔥 ${dikkatli.map(x => x.kombo).join(', ')} normalden kabarık</span>`
+    : '<span class="ipucu">bu maçta işaretlenecek kabarma yok</span>';
+  const satirlar = c.map(x => {
+    const yuzde = (x.p * 100).toFixed(1), taban = (x.taban * 100).toFixed(1);
+    const kat = (x.kabarma_net || x.kabarma).toFixed(1);
+    const fiyat = x.piyasa
+      ? `<span>@ <b>${x.piyasa.toFixed(2)}</b> → <b class="${x.ev >= 0 ? 'ev-poz' : 'ev-neg'}">${x.ev >= 0 ? '+' : ''}${(x.ev*100).toFixed(0)}%</b></span>`
+      : `<span class="taban">adil oran ${x.adil_oran || '—'}</span>`;
+    const tut = m.sonuc ? (m.sonuc.iyms === x.kombo
+      ? '<b class="ev-poz">✅ geldi</b>' : '<span class="taban">gelmedi</span>') : '';
+    // 1/0 ve 2/0'da kabarma ölçümde bilgi taşımadı — katsayı gösterilir
+    // ama "kabarık" diye işaretlenmez; sebebi ipucu olarak yazılır.
+    const katEtiket = x.isaretlenebilir
+      ? `${kat}× ${x.dikkat ? '🔥' : ''}`
+      : `<span title="Bu komboda kabarma ölçümde ayırt etmedi">${kat}× ⃠</span>`;
+    return `<div class="capraz-satir ${x.dikkat ? 'dikkat' : (x.kabarma < 1 ? 'sonuk' : '')}">
+      <span class="kombo">${x.kombo}</span>
+      <span class="olasilik">%${yuzde}</span>
+      <span class="taban">(normalde %${taban})</span>
+      <span class="kabarma">${katEtiket}</span>
+      ${fiyat}
+      <span class="taban">${x.adet}/${x.n} maç${x.sinirlandi
+        ? ` · ham ${x.kabarma.toFixed(1)}× tavanlandı` : ''}</span>
+      ${tut}
+    </div>`;
+  }).join('');
+  return `<div class="capraz-kutu">
+    <div class="capraz-baslik">🎲 Çapraz sürpriz süzgeci ${ozet}</div>
+    ${satirlar}
+    <div class="ipucu" style="display:block;margin-top:6px">
+      Olasılık, benzer oranla açılmış <b>${c[0].n}</b> geçmiş maçın gerçek frekansıdır
+      (tabanın 1.4 katıyla tavanlanır — ölçümde ötesi tutmuyor).
+      🔥 yalnız <b>2/1</b> (kabarma ≥1.3×) ve <b>1/2</b> (≥1.5×) için yakılır: 15.243 maçlık
+      dışörneklemde eşiği geçenler gerçekte tabanın <b>1.59 katı</b> geldi
+      (2/1 %4.0 → adil oran 25 · 1/2 %3.1 → adil oran 32).
+      <b>1/0 ve 2/0'da ⃠</b> — o iki komboda kabarma ölçümde ayırt etmedi, katsayı bilgi amaçlıdır.
+      <b>Dürüst uyarı:</b> işaretli hâlinde bile bu sonuç 25 maçta ~1 gelir. Değer,
+      bülten oranı adil oranın üstündeyse doğar — sık tutması beklenmez.
+    </div>
+  </div>`;
+}
+
+// Günün en kabarık çaprazları: "tut" listesi DEĞİL — hangi maçta hangi
+// uzun ihtimalin normalden belirgin olası olduğunu ve bülten fiyatının
+// adil oranın üstünde olup olmadığını gösterir.
+function srCaprazGunu(liste){
+  const aday = [];
+  liste.forEach(m => (m.capraz || []).forEach(x => {
+    if(x.dikkat) aday.push({m, x});
+  }));
+  if(!aday.length) return '';
+  // Fiyatı bilinenler önce (gerçek beklenen değer ölçülebiliyor), sonra
+  // olasılığa göre: işaretli 2/1 (adil ~28) işaretli 1/2'den (adil ~36) iyidir.
+  aday.sort((a, b) => (b.x.ev != null) - (a.x.ev != null)
+    || (b.x.ev != null ? b.x.ev - a.x.ev : 0)
+    || b.x.p - a.x.p || b.x.kabarma - a.x.kabarma);
+  // Tek kombo listeyi doldurmasın — her kombodan en fazla 3 maç.
+  const sayac = {}, ust = [];
+  for(const a of aday){
+    sayac[a.x.kombo] = (sayac[a.x.kombo] || 0) + 1;
+    if(sayac[a.x.kombo] <= 3) ust.push(a);
+    if(ust.length >= 6) break;
+  }
+  const degerli = aday.filter(a => a.x.ev != null && a.x.ev > 0);
+  return `<div class="kart" style="border-color:#f59e0b55">
+    <h2>🎲 Çapraz Sürpriz Süzgeci <span class="ipucu">(${aday.length} işaret)</span></h2>
+    <div class="alt-baslik">Yüksek oranlı çapraz sonuçlar (1/0, 2/0, 2/1, 1/2) için ayrı ölçüt.
+      Ölçümde kabarma yalnız <b>2/1</b> ve <b>1/2</b>'de ayırt etti; eşiği geçen maçlarda bu sonuçlar
+      gerçekte tabanın <b>1.59 katı</b> geldi (2/1 %4.0 · 1/2 %3.1). 1/0 ve 2/0'da kabarma bilgi taşımadı.
+      <b>Bunlar banko değil, fiyatı doğruysa değerli uzun ihtimallerdir.</b></div>
+    ${ust.map(({m, x}) => `<div class="one-cikan" style="border-color:#f59e0b33">
+      <span class="ipucu">${m.saat} · ${esc(m.lig)}</span>
+      <span style="font-weight:700;flex:1;min-width:150px">${esc(m.ev)} – ${esc(m.dep)}</span>
+      <span>İY/MS <b>${x.kombo}</b> ${x.piyasa ? '@ <b>' + x.piyasa.toFixed(2) + '</b>' : '≈ ' + x.adil_oran}</span>
+      <span class="buyukev" style="color:var(--sari)">%${(x.p*100).toFixed(1)}</span>
+      <span class="chip">${(x.kabarma_net || x.kabarma).toFixed(1)}× kabarık${x.sinirlandi ? ' (tavan)' : ''}</span>
+      ${x.ev != null ? `<b class="${x.ev >= 0 ? 'ev-poz' : 'ev-neg'}">${x.ev >= 0 ? '+' : ''}${(x.ev*100).toFixed(0)}%</b>` : ''}
+      ${m.sonuc ? `<span class="${m.sonuc.iyms === x.kombo ? 'ev-poz' : 'ev-neg'}" style="font-weight:800">
+        ${m.sonuc.iyms === x.kombo ? '✅' : '❌'} ${esc(m.sonuc.iyms || m.sonuc.ms)} (${esc(m.sonuc.skor)})</span>` : ''}
+      <button class="mini-btn" onclick='kuponaEkle(${JSON.stringify({tarih:'', saat:m.saat||'', lig:m.lig||'',
+        ev:m.ev, dep:m.dep, pazar:'İY/MS '+x.kombo, oran:(x.piyasa || Number(x.adil_oran) || 0),
+        kaynak:'capraz'}).replace(/'/g,"&#39;")});fisCiz()'>➕</button>
+      <span class="ipucu" style="flex-basis:100%;margin-top:2px">↳ benzer oranla açılmış
+        <b>${x.n}</b> maçın <b>${x.adet}</b>'i ${x.kombo} bitti · normalde %${(x.taban*100).toFixed(1)} ·
+        adil oran <b>${x.adil_oran}</b>${x.piyasa ? (x.ev >= 0
+          ? ` — bülten ${x.piyasa.toFixed(2)} veriyor, <b class="ev-poz">fiyat lehinize</b>`
+          : ` — bülten ${x.piyasa.toFixed(2)}, adil oranın altında, <b class="ev-neg">değersiz</b>`) : ''}</span>
+    </div>`).join('')}
+    <div class="not">📌 <b>Beklentiyi doğru kurun:</b> işaretli bir 2/1 ortalama <b>25 maçta ~1</b>,
+      1/2 ise <b>32 maçta ~1</b> gelir. Bu süzgeç tutma sıklığını değil, <b>fiyat–olasılık farkını</b> arar:
+      ${degerli.length ? `bugün <b>${degerli.length}</b> işarette bülten oranı adil oranın üstünde.`
+        : 'bugün hiçbir işarette bülten fiyatı adil oranın üstünde değil — yani oynamak için matematiksel sebep yok.'}
+      Günde 1-2 tutan seçim istiyorsanız yukarıdaki <b>🎯 Kanıtlı İY/MS</b> listesini kullanın.</div>
+  </div>`;
+}
+
 function srGununOnerisi(liste){
   const isa = liste.filter(m => m.isaretli && m.kanit);
   if(!isa.length){
@@ -2178,6 +2313,8 @@ function srGununOnerisi(liste){
         <span style="font-weight:700;flex:1;min-width:150px">${esc(m.ev)} – ${esc(m.dep)}</span>
         <span>İY/MS <b>${esc(m.isaretli)}</b> ${c.piyasa ? '@ <b>' + c.piyasa.toFixed(2) + '</b>' : '≈ ' + c.adil_oran}</span>
         <span class="buyukev ev-poz">%${(k.frekans*100).toFixed(0)}</span>
+        ${m.sonuc ? `<span class="${m.sonuc.iyms === m.isaretli ? 'ev-poz' : 'ev-neg'}" style="font-weight:800">
+          ${m.sonuc.iyms === m.isaretli ? '✅' : '❌'} ${esc(m.sonuc.iyms || m.sonuc.ms)} (${esc(m.sonuc.skor)})</span>` : ''}
         <button class="mini-btn" onclick='kuponaEkle(${JSON.stringify({tarih:'', saat:m.saat||'', lig:m.lig||'',
           ev:m.ev, dep:m.dep, pazar:'İY/MS '+m.isaretli, oran:f, kaynak:'iyms'}).replace(/'/g,"&#39;")});fisCiz()'>➕</button>
         <span class="ipucu" style="flex-basis:100%;margin-top:2px">↳ kanıt: aynı oranla açılmış
@@ -2185,8 +2322,10 @@ function srGununOnerisi(liste){
           ${m.ikinci ? ` · ikinci ihtimal ${esc(m.ikinci)}` : ''}</span>
       </div>`;
     }).join('')}
-    <div class="not">⚠️ Çapraz sonuçlar (1/2, 2/1) tarihte yalnız %2.0 ve %2.6 geliyor — hiçbir model bunları
-      düzenli tutturamaz, bu yüzden artık işaret verilmiyor. Tabloda bilgi olarak kalıyorlar.</div>
+    <div class="not">⚠️ Çapraz sonuçlar (1/2, 2/1) tarihte yalnız %2.0 ve %2.5 geliyor — hiçbir model bunları
+      düzenli tutturamaz, bu yüzden <b>bu listede</b> işaret verilmiyor. Onlar için ayrı bir ölçüt var:
+      aşağıdaki <b>🎲 Çapraz sürpriz süzgeci</b> "tutar mı" değil, "normalden ne kadar olası" sorusunu
+      yanıtlar ve yalnız ölçümle doğrulanmış kabarmaları işaretler.</div>
   </div>`;
 }
 
@@ -2204,7 +2343,7 @@ function srCiz(){
        Muhtemel nedenler: arşiv eksik (üstteki <b>🔄 Veriyi Güncelle</b> ile 38 ligin arşivini indirin) ·
        oranlar henüz yayınlanmadı · Bet365 fiyatları için 🔑 odds-api.io anahtarı gerekli (aşağıdaki kutu).</div></div>`
     : '';
-  $('#surpriz-sonuc').innerHTML = ustNot + srGununOnerisi(liste) + liste.map((m, i) => {
+  $('#surpriz-sonuc').innerHTML = ustNot + srGununOnerisi(liste) + srCaprazGunu(liste) + liste.map((m, i) => {
     if(m.mod === 'liste'){
       return `<div class="mac-satir" style="opacity:.65">
         <span class="takimlar">${esc(m.ev)} – ${esc(m.dep)}</span>
@@ -2242,9 +2381,14 @@ function srCiz(){
         <span class="ipucu">${m.saat} · ${esc(m.lig)}${modNotu}</span>
       </div>
       <div class="sr-grid">${SR_SIRA.map(ad => srHucre(ad, m.kombolar[ad], ad === (m.isaretli || enIyi))).join('')}</div>
+      ${m.sonuc ? `<div class="ipucu" style="display:block;margin:4px 0">🏁 <b>Oynandı:</b> ${esc(m.sonuc.skor)}
+        ${m.sonuc.iy_skor ? `(İY ${esc(m.sonuc.iy_skor)}) → İY/MS <b>${esc(m.sonuc.iyms)}</b>` : ''}
+        ${m.isaretli ? (m.sonuc.iyms === m.isaretli
+            ? '<b class="ev-poz">· seçim TUTTU</b>' : '<b class="ev-neg">· seçim yattı</b>') : ''}</div>` : ''}
       ${m.kanit ? `<div class="ipucu" style="display:block;margin:4px 0">📜 En olası: <b>${esc(m.one_cikan)}</b> —
         aynı oranla açılmış ${m.kanit.n} maçın ${m.kanit.adet}'i (%${(m.kanit.frekans*100).toFixed(0)}) böyle bitti
         ${m.isaretli ? '<b class="ev-poz">· ✔ işaret eşiğini geçti</b>' : '<span class="ipucu">(işaret için %40 gerekir)</span>'}</div>` : ''}
+      ${srCaprazHTML(m)}
       ${tacYorum}
       ${karar}
       ${kanit ? `<div class="ipucu" style="margin-bottom:8px">${kanit}${(karar || !k) ? '' : ` Bülteninizde ${enIyi} oranı ${k.adil_oran ? `adil oran ${k.adil_oran}'in` : 'adil oranın'} üzerindeyse matematiksel değer var demektir.`}</div>` : ''}

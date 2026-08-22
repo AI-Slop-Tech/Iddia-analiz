@@ -815,6 +815,39 @@ def uygulama_olustur():
 
         threading.Thread(target=_isit, daemon=True, name="iddaa-piyasa-isitma").start()
 
+    def _dun_arsivden_ekle(df, fik):
+        """Dünkü OYNANMIŞ maçları arşivden takvime ekler.
+
+        Kaynak fikstür dosyası oynanan maçları listeden düşürüyor; oysa
+        kullanıcı radarın/taramanın dünkü seçimlerini gerçek sonuçla
+        karşılaştırmak istiyor. Arşiv satırları fikstür şemasına çevrilip
+        eklenir (maç öncesi oranlarıyla), sonuçları _gercek_sonuc doldurur.
+        """
+        simdi = veri.simdi_tr()
+        bas = simdi.normalize() - pd.Timedelta(days=1)
+        dun = df[(df["Tarih"] >= bas) & (df["Tarih"] < simdi.normalize())]
+        if dun.empty:
+            return fik
+        varolan = set(zip(fik["HomeTeam"].astype(str), fik["AwayTeam"].astype(str)))
+        dun = dun[~pd.Series(list(zip(dun["HomeTeam"].astype(str), dun["AwayTeam"].astype(str))),
+                             index=dun.index).isin(varolan)]
+        if dun.empty:
+            return fik
+        y = pd.DataFrame({
+            "Div": dun["Div"].astype(str), "Tarih": dun["Tarih"],
+            "HomeTeam": dun["HomeTeam"].astype(str), "AwayTeam": dun["AwayTeam"].astype(str),
+            "oran_ev": dun["oran_ev"], "oran_berabere": dun["oran_berabere"],
+            "oran_dep": dun["oran_dep"],
+            "oran_max_ev": dun["oran_ev_maks"].fillna(dun["oran_ev"]),
+            "oran_max_berabere": dun["oran_berabere_maks"].fillna(dun["oran_berabere"]),
+            "oran_max_dep": dun["oran_dep_maks"].fillna(dun["oran_dep"]),
+            "oran_ust25": dun["oran_ust25"], "oran_alt25": dun["oran_alt25"],
+            "oran_ust25_maks": dun["oran_ust25_maks"].fillna(dun["oran_ust25"]),
+            "oran_alt25_maks": dun["oran_alt25_maks"].fillna(dun["oran_alt25"]),
+            "analiz_yok": False, "OranKaynak": "arsiv", "oynandi": True,
+        })
+        return pd.concat([fik, y], ignore_index=True).sort_values("Tarih").reset_index(drop=True)
+
     def _fikstur(yenile: bool = False, bellek_ttl: bool = False):
         """bellek_ttl=True: listeleme çağrıları için TTL dolduysa yeniden oku.
         Detay/tarama çağrıları mevcut kopyayı kullanır ki satır id'leri kaymasın."""
@@ -825,6 +858,10 @@ def uygulama_olustur():
                 ligler=sorted(set(df["Div"].unique()) | set(veri.EK_LIGLER)), yenile=yenile
             )
             fik = _dis_kapsami_ekle(df, fik, yenile)
+            try:
+                fik = _dun_arsivden_ekle(df, fik)   # dünkü oynanmışlar denetim için
+            except Exception:  # noqa: BLE001
+                pass
             try:
                 fik = _af_kapsami_ekle(df, fik)
             except Exception:  # noqa: BLE001 — kapsama katmanı bülteni asla düşürmesin
@@ -838,6 +875,34 @@ def uygulama_olustur():
             _DURUM["fikstur_zaman"] = time.time()
         return _DURUM["fikstur"], _DURUM["kitapcilar"]
 
+
+    def _gercek_sonuc(df, r):
+        """Oynanmış maçın arşivdeki gerçek sonucu — dünkü seçimler denetlensin."""
+        try:
+            if r["Tarih"] >= veri.simdi_tr():
+                return None
+            cozucu = veri.takim_cozucu(df, hizli=True)
+            try:
+                ev, dep = cozucu(str(r["HomeTeam"])), cozucu(str(r["AwayTeam"]))
+            except ValueError:
+                return None
+            t = pd.Timestamp(r["Tarih"]).normalize()
+            aday = df[(df["Tarih"] >= t - pd.Timedelta(days=1))
+                      & (df["Tarih"] <= t + pd.Timedelta(days=1))
+                      & (df["HomeTeam"] == ev) & (df["AwayTeam"] == dep)]
+            if aday.empty:
+                return None
+            s = aday.iloc[-1]
+            cikti = {"skor": f"{int(s['FTHG'])}-{int(s['FTAG'])}",
+                     "ms": "1" if s["FTR"] == "H" else ("0" if s["FTR"] == "D" else "2")}
+            if pd.notna(s.get("HTHG")) and pd.notna(s.get("HTAG")):
+                iy_h, iy_d = int(s["HTHG"]), int(s["HTAG"])
+                iy = "1" if iy_h > iy_d else ("0" if iy_h == iy_d else "2")
+                cikti["iy_skor"] = f"{iy_h}-{iy_d}"
+                cikti["iyms"] = f"{iy}/{cikti['ms']}"
+            return cikti
+        except Exception:  # noqa: BLE001 — denetim katmanı yanıtı düşürmesin
+            return None
 
     def _en_iyi_hepsi(r, maks):
         """{"MS1": en iyi oran, ...} — sağlam seçim ölçümü en iyi fiyatla yapıldı."""
@@ -1017,6 +1082,7 @@ def uygulama_olustur():
                     "guvenli": analiz.guvenli_secimler(a, sinir=0.55)[:4],
                     "sinyal": sinyal,
                     "saglam": analiz.saglam_secim(a.get("deger"), _en_iyi_hepsi(r, maks)),
+                    "sonuc": _gercek_sonuc(df, r),
                 }
             )
             if r["Tarih"] > simdi:  # karne dürüstlüğü: yalnız başlamamış maç kaydedilir
@@ -1162,6 +1228,13 @@ def uygulama_olustur():
             # ±eşik kadar yakın olmalı (±0.05'ten başlar, örnek yetersizse genişler).
             birebir = (analiz.birebir_oran_maclari(df, tuple(oranlar), lig_ipucu=r["Div"])
                        if oranlar else None)
+            # Çapraz sürpriz süzgeci birebir eşleşmeyi DEĞİL, marj-arındırılmış
+            # olasılık bandını kullanır: birebir örneklem çoğu maçta 30-300
+            # arasında kalıyor, %2'lik bir olayı ölçmeye yetmiyor. Kalıp bandı
+            # aynı maçlarda binlerce örnek veriyor — kabarma ölçümü de bu
+            # tahminciyle doğrulandı.
+            kalip_bant = (analiz.oran_kalibi(df, tuple(oranlar), lig_ipucu=r["Div"])
+                          if oranlar else None)
             model = None
             if not analizsiz:
                 poisson = analiz.poisson_tahmini(df, r["HomeTeam"], r["AwayTeam"], lig_ipucu=r["Div"])
@@ -1248,6 +1321,11 @@ def uygulama_olustur():
                     "isaretli": isaretli,
                     "ikinci": ikinci,
                     "kanit": kanit,
+                    "capraz": analiz.capraz_surpriz(
+                        kalip_bant,
+                        {k: (kombolar[k] or {}).get("piyasa") for k in analiz.CAPRAZ_TABAN}
+                        if piyasa_iyms else None),
+                    "sonuc": _gercek_sonuc(df, r),
                     "piyasa": (
                         {"kitapci": piyasa["kitapci"], "guncel": piyasa["guncel"]}
                         if piyasa_iyms else None
