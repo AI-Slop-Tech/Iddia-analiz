@@ -999,10 +999,10 @@ function oneCikanCiz(){
     <div class="alt-baslik">✅ değerli = liste oranıyla EV ≥ +%8 (3 sezonluk backtestte kârlı tek bant) · 🟡 sınırda = +%4–%8.
       Değersiz ve başlamış maçlar gizlenir. Yüksek oranlı seçimlerde tekil isabet ~%30-35 normaldir — hedef seri kârı, maç başı isabet değil.</div>
     ${oyn.length > 1 ? `<div style="margin:8px 0"><button class="mini-btn" id="btn-tum-analiz" onclick="taramaHepsiniAc()">📖 ${oyn.length} önerinin tam analizini aç</button></div>` : ''}
+    ${saglamBolumu(liste)}
     ${sinyalBolumu(liste)}
     ${oyn.map(m => taramaSatir(m, false)).join('')}
     ${sistemKuponuHTML(oyn)}
-    ${guvenliKuponHTML(liste)}
     ${!oyn.length ? `<div class="bos-durum" style="padding:14px 0"><p>Bugün oynanabilir değer yok — <b>pas da bir karardır</b>; değersiz bahse girmemek kasayı korur.</p></div>` : ''}
     ${gizli.length ? `<div class="alt-baslik" style="cursor:pointer;user-select:none;margin-top:10px" onclick="TARAMA_TUM=!TARAMA_TUM;oneCikanCiz()">${ozet} — ${TARAMA_TUM ? '▾ gizle' : '▸ göster'}</div>` : ''}
     ${TARAMA_TUM ? gizli.map(m => taramaSatir(m, true)).join('') : ''}
@@ -1030,7 +1030,53 @@ function oranDugmeleri(m){
   </span>`;
 }
 
-// 🎯 Konsensüs Sapması — backtest kanıtlı ana motor (%44 tutma, +%18 ROI,
+// 🛡 SAĞLAM SEÇİMLER — güvenilirlik ekseninde ölçülmüş motor.
+// 22.199 maçlık ölçüm: MS1≥%65 → %78.7 tutma, MS2≥%55 → %69.8 (+%3.4 ROI),
+// ÜST≥%60 → %63.9; üçü birlikte %70.4 tutma, +%1.95 ROI, 3/3 sezon pozitif.
+// Kritik uyarı: çifte şans ve "en yüksek olasılık" modu %90 tutmasına rağmen
+// -%4..-%6 zarar yazdı — yüksek tutma tek başına kâr değildir.
+let SAGLAM_SON = [];
+function saglamBolumu(liste){
+  const sag = liste.filter(m => m.saglam && !m.basladi)
+                   .sort((a, b) => b.saglam.p - a.saglam.p);
+  SAGLAM_SON = sag;
+  if(!sag.length) return '';
+  const gost = sag.slice(0, 12);
+  const kombine = gost.slice(0, 3).reduce((x, m) => x * m.saglam.oran, 1);
+  return `<div class="kart" style="margin:10px 0;border-color:#22c55e55">
+    <h2>🛡 Sağlam Seçimler <span class="ipucu">(${sag.length} maç — tutma oranı odaklı motor)</span></h2>
+    <div class="alt-baslik">7 sezonluk ölçümde bu kural <b>%70 tutma</b> ve <b>+%2 getiri</b> verdi (3/3 sezon pozitif);
+      model %68 demişti, %70 geldi. Oranlar düşüktür — amaç yüksek kazanç değil, <b>tutarlılık</b>.
+      Kâr odaklı nadir seçimler için aşağıdaki 🎯 bölümüne bakın.</div>
+    ${gost.map(m => {
+      const g = m.saglam;
+      const arg = [m.id, JSON.stringify(g.secim), g.oran, JSON.stringify(m.ev), JSON.stringify(m.dep),
+                   JSON.stringify(m.saat || ''), JSON.stringify(m.lig || ''), JSON.stringify(AKTIF_GUN)].join(',');
+      return `<div class="one-cikan" style="border-color:#22c55e33">
+        <span class="ipucu">${m.saat} · ${esc(m.lig)}</span>
+        <span style="font-weight:700;flex:1;min-width:150px">${esc(m.ev)} – ${esc(m.dep)}</span>
+        <span><b>${SECIM_AD[g.secim] || esc(g.secim)}</b> @ <b>${g.oran.toFixed(2)}</b></span>
+        <span class="buyukev ev-poz">%${(g.p*100).toFixed(0)}</span>
+        <button class="mini-btn" onclick='oranSec(${arg})'>➕</button>
+      </div>`;
+    }).join('')}
+    <div class="ipucu" style="display:block;margin-top:8px">En olası 3 tanesi kombine: oran <b>${kombine.toFixed(2)}</b> ·
+      tutma şansı ~%${(gost.slice(0,3).reduce((x,m)=>x*m.saglam.p,1)*100).toFixed(0)}
+      <button class="mini-btn" onclick="saglamUcluKupona()">➕ Üçlüyü fişe ekle</button></div>
+    <div class="not">⚠️ Çifte şans (1X/X2) ve "en yüksek olasılıklı seçim" modları test edildi ve
+      %90 tutmalarına rağmen <b>−%4 ila −%6 zarar</b> yazdı; kitapçı marjı orada en kalın. Bu yüzden önerilmiyorlar.</div>
+  </div>`;
+}
+function saglamUcluKupona(){
+  SAGLAM_SON.slice(0, 3).forEach(m => {
+    const g = m.saglam;
+    kuponaEkle({tarih: AKTIF_GUN, saat: m.saat || '', lig: m.lig || '', ev: m.ev, dep: m.dep,
+                pazar: g.secim, oran: g.oran, kaynak: 'saglam'});
+  });
+  fisCiz();
+}
+
+// 🎯 Konsensüs Sapması — kâr odaklı motor (%44 tutma, +%18 ROI,
 // kapanışı %82 yenme). Piyasanın kendi ortalamasıyla tek bir kitapçının
 // fiyatı arasındaki ölçülebilir tutarsızlığı yakalar; model yalnız veto eder.
 function sinyalBolumu(liste){
@@ -1534,8 +1580,9 @@ function guvenliHTML(s, id){
   if(!s.guvenli || !s.guvenli.length) return '';
   return `<div class="kart"><h2>🛡 En Yüksek Olasılıklı Pazarlar</h2>
     <div class="alt-baslik">"En garantiye yakın" arayışı için tüm çekirdek pazarlar (MS, çifte şans, Alt/Üst, KG, İY gol çizgileri)
-      tek sırada — sıralama <b>olasılığa</b> göredir, değere değil. Gerçek oranı bilinmeyenlerde ≈ adil oran gösterilir;
-      bülteninizdeki fiyatla kıyaslayın. Yüksek olasılık ≠ garanti; düşük oranlı favoriler çoğu zaman değer taşımaz.</div>
+      tek sırada — sıralama <b>olasılığa</b> göredir, değere değil. Bu liste <b>bilgi amaçlıdır, strateji değildir</b>:
+      7 sezonluk ölçümde "en yüksek olasılıklı seçimi oyna" modu %90 tutmasına rağmen <b>−%4.2 zarar</b> yazdı,
+      çifte şans ise her eşikte −%4..−%6. Oynanacak seçimler yukarıdaki 🛡 Sağlam ve 🎯 Değer bölümlerindedir.</div>
     ${s.guvenli.map((g, gi) => `<div class="one-cikan" style="border:none;padding:5px 0">
       <span class="ev-poz" style="min-width:44px;font-weight:800">%${(g.p*100).toFixed(0)}</span>
       <span style="flex:1;min-width:120px"><b>${esc(g.pazar)}</b></span>

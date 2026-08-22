@@ -839,6 +839,15 @@ def uygulama_olustur():
         return _DURUM["fikstur"], _DURUM["kitapcilar"]
 
 
+    def _en_iyi_hepsi(r, maks):
+        """{"MS1": en iyi oran, ...} — sağlam seçim ölçümü en iyi fiyatla yapıldı."""
+        d = {}
+        for secim in ("MS1", "MS0", "MS2", "ÜST 2.5", "ALT 2.5"):
+            o = _en_iyi_oran(r, secim, maks)
+            if o:
+                d[secim] = o
+        return d
+
     def _sinyal(r, oranlar, maks, ust_alt, model_p=None):
         """Konsensüs sapması sinyali — backtest kanıtlı ana motor.
 
@@ -1007,6 +1016,7 @@ def uygulama_olustur():
                     # ve hedef toplam orana ulaşmak mümkün olur
                     "guvenli": analiz.guvenli_secimler(a, sinir=0.55)[:4],
                     "sinyal": sinyal,
+                    "saglam": analiz.saglam_secim(a.get("deger"), _en_iyi_hepsi(r, maks)),
                 }
             )
             if r["Tarih"] > simdi:  # karne dürüstlüğü: yalnız başlamamış maç kaydedilir
@@ -1391,6 +1401,7 @@ def uygulama_olustur():
         j["guvenli"] = analiz.guvenli_secimler(a)[:6]
         j["sinyal"] = _sinyal(r, oranlar, maks, ust_alt,
                               (a.get("deger") or {}).get("model_p"))
+        j["saglam"] = analiz.saglam_secim(a.get("deger"), _en_iyi_hepsi(r, maks))
         return jsonify(j)
 
     @app.post("/api/ayarlar")

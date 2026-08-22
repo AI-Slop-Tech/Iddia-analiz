@@ -224,6 +224,52 @@ def takim_dilimi(df: pd.DataFrame, takim: str) -> pd.DataFrame:
     return onb[anahtar]
 
 
+# ------------------------------------------------------- SAĞLAM seçim modu
+#
+# Kullanıcı şikâyeti: "10 önerinin 3'ü tuttu". Haklıydı — motor KÂR için
+# ayarlıydı (oran ~3.0, tutma ~%40). Güvenilirlik ekseninde 22.199 maçlık
+# ölçüm (7 sezon, gerçek en iyi fiyat) şunu gösterdi:
+#
+#   MS1  model p>=0.65 → 1723 bahis, TUTMA %78.7, ROI +%1.6
+#   MS2  model p>=0.55 → 1233 bahis, TUTMA %69.8, ROI +%3.4  (3/3 sezon +)
+#   ÜST  model p>=0.60 → 2431 bahis, TUTMA %63.9, ROI +%1.5  (3/3 sezon +)
+#   ÜÇÜ BİRDEN         → 4223 bahis, TUTMA %70.4, ROI +%1.95 (3/3 sezon +)
+#                        (model %68.1 demişti, %70.4 geldi — dürüst kalibrasyon)
+#
+# TUZAKLAR (aynı ölçümde elendi): çifte şans her eşikte -%4..-%6; "en yüksek
+# olasılıklı seçim" modu %90 tutmasına rağmen -%4.2. Yüksek tutma tek başına
+# kâr getirmez; kitapçı marjı o bölgede en kalındır.
+
+SAGLAM_ESIK = {"MS1": 0.65, "MS2": 0.55, "ÜST 2.5": 0.60}
+
+
+def saglam_secim(deger: dict | None, en_iyi: dict | None = None) -> dict | None:
+    """Yüksek tutma oranlı, geçmişte pozitif getirili seçim (varsa).
+
+    deger: deger_analizi çıktısı (piyasa çapalı model olasılıkları).
+    en_iyi: {"MS1": oran, ...} — piyasadaki en iyi gerçek fiyat; yoksa liste
+    oranı kullanılır. Ölçüm en iyi fiyatla yapıldı, fiyat düştükçe kenar erir.
+    """
+    if not deger:
+        return None
+    model_p = deger.get("model_p") or {}
+    satirlar = {s["secim"]: s for s in deger.get("satirlar", [])}
+    adaylar = []
+    for secim, esik in SAGLAM_ESIK.items():
+        p = model_p.get(secim)
+        satir = satirlar.get(secim)
+        if p is None or not satir or p < esik:
+            continue
+        oran = (en_iyi or {}).get(secim) or satir.get("oran")
+        if not oran or oran <= 1.01:
+            continue
+        adaylar.append({"secim": secim, "p": float(p), "oran": round(float(oran), 2),
+                        "esik": esik, "ev": float(p) * float(oran) - 1.0})
+    if not adaylar:
+        return None
+    return max(adaylar, key=lambda x: x["p"])
+
+
 # -------------------------------------------------------------------- 1) form
 
 def form_analizi(df: pd.DataFrame, takim: str, n: int = 10, saha: str | None = None) -> dict:
