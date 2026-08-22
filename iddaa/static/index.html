@@ -2186,7 +2186,8 @@ let SR_ONERI = null;
 // 🎯 Kanıta dayalı İY/MS seçimi. Eski sürüm yalnız çapraz dörtlüyü tarıyordu
 // (toplam gerçekleşme %15, ölçülen isabet %5.65). Artık 9 kombo yarışır ve
 // yalnız "aynı oran profilinden açılmış geçmiş maçların ≥%40'ı bu sonuçla
-// bitmiş" olanlar işaretlenir → ölçümde ~2 seçim/gün, %48 isabet.
+// bitmiş" olanlar işaretlenir. 15.546 maçlık dışörneklemde ölçülen
+// GERÇEK karne: günde 1.15 seçim, %38.9 tutma (güçlü kademe %42.8).
 // 🎲 Çapraz sürpriz süzgeci: 1/0, 2/0, 2/1, 1/2 — "olur mu?" değil,
 // "normalden ne kadar olası?" sorusunu yanıtlar. Olasılık, aynı oran
 // profilinden açılmış geçmiş maçların frekansıdır; genel tabana bölünerek
@@ -2302,7 +2303,7 @@ function srGununOnerisi(liste){
       <h2>🎯 Kanıtlı İY/MS Seçimi</h2>
       <div class="alt-baslik">Bugün eşiği geçen maç yok. Sistem yalnız, aynı oranla açılmış
         <b>en az 300 geçmiş maçın %40'ından fazlası</b> aynı sonuçla bitmişse işaret veriyor —
-        ölçümde bu kural günde ~2 seçim veriyor ve <b>%48 tutuyor</b>.
+        ölçümde bu kural günde <b>~1</b> seçim veriyor ve <b>%38.9 tutuyor</b>.
         ${yakin ? `En yakın aday: ${esc(yakin.ev)} – ${esc(yakin.dep)} · ${esc(yakin.one_cikan)}
           (geçmiş %${(yakin.kanit.frekans*100).toFixed(0)} — eşik %40).` : ''}</div>
     </div>`;
@@ -2314,8 +2315,11 @@ function srGununOnerisi(liste){
   return `<div class="kart" style="border-color:#22c55e55">
     <h2>🎯 Kanıtlı İY/MS Seçimleri <span class="ipucu">(${isa.length} maç)</span></h2>
     <div class="alt-baslik">Aynı oran profilinden açılmış geçmiş maçların <b>%40'ından fazlası</b> bu sonuçla bitmiş.
-      Son 3 sezonluk sızıntısız ölçümde bu kural günde ~2 seçim veriyor ve <b>%48 tutuyor</b>
-      (geçmiş %48.45 demişti, %48.06 geldi). Adil oran ~2.05 — bu fiyatın üstünü bulursanız kârdasınız.</div>
+      550 günlük sızıntısız ölçümde (15.546 maç) bu kural günde <b>1.15</b> seçim veriyor ve
+      <b>%38.9 tutuyor</b> — yani <b>10 seçimin ~4'ü</b>. Kademeler: 🔒 güçlü (frekans ≥%40)
+      %42.8, 🔎 orta %37.8. Süzgeç gerçek bilgi katıyor: 1/1 tabanı %26.2 iken işaretlide %38.3,
+      2/2 tabanı %17.1 iken %41.0. <b>Adil oran ~2.57 — banko değil; ancak bülten oranı bunun
+      üstündeyse matematiksel değer sizdedir.</b> Çeyreklik dalgalanma geniştir (%30–%56).</div>
     ${isa.map((m, i) => {
       const k = m.kanit, c = m.kombolar[m.isaretli];
       const f = (c.piyasa || Number(c.adil_oran) || 0);
@@ -2324,6 +2328,7 @@ function srGununOnerisi(liste){
         <span style="font-weight:700;flex:1;min-width:150px">${esc(m.ev)} – ${esc(m.dep)}</span>
         <span>İY/MS <b>${esc(m.isaretli)}</b> ${c.piyasa ? '@ <b>' + c.piyasa.toFixed(2) + '</b>' : '≈ ' + c.adil_oran}</span>
         <span class="buyukev ev-poz">%${(k.frekans*100).toFixed(0)}</span>
+        <span class="chip">${k.kademe === 'guclu' ? '🔒 güçlü · ölçüm %42.8' : '🔎 orta · ölçüm %37.8'}</span>
         ${m.sonuc ? `<span class="${m.sonuc.iyms === m.isaretli ? 'ev-poz' : 'ev-neg'}" style="font-weight:800">
           ${m.sonuc.iyms === m.isaretli ? '✅' : '❌'} ${esc(m.sonuc.iyms || m.sonuc.ms)} (${esc(m.sonuc.skor)})</span>` : ''}
         <button class="mini-btn" onclick='kuponaEkle(${JSON.stringify({tarih:'', saat:m.saat||'', lig:m.lig||'',
@@ -2398,7 +2403,7 @@ function srCiz(){
             ? '<b class="ev-poz">· seçim TUTTU</b>' : '<b class="ev-neg">· seçim yattı</b>') : ''}</div>` : ''}
       ${m.kanit ? `<div class="ipucu" style="display:block;margin:4px 0">📜 En olası: <b>${esc(m.one_cikan)}</b> —
         aynı oranla açılmış ${m.kanit.n} maçın ${m.kanit.adet}'i (%${(m.kanit.frekans*100).toFixed(0)}) böyle bitti
-        ${m.isaretli ? '<b class="ev-poz">· ✔ işaret eşiğini geçti</b>' : '<span class="ipucu">(işaret için %40 gerekir)</span>'}</div>` : ''}
+        ${m.isaretli ? `<b class="ev-poz">· ✔ işaret eşiğini geçti${m.kanit.kademe === 'guclu' ? ' (🔒 güçlü)' : ' (🔎 orta)'}</b>` : '<span class="ipucu">(işaret için 1/1\'de %35, 2/2\'de %30 gerekir; 1/0-2/0 işaretlenmez)</span>'}</div>` : ''}
       ${srCaprazHTML(m)}
       ${tacYorum}
       ${karar}
