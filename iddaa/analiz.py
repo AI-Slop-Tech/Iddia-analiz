@@ -312,6 +312,86 @@ IYMS_ISARET_ESIGI = 0.40   # geçmiş frekans bu eşiği geçerse "işaretli" se
 IYMS_MIN_ORNEK = 300       # bu kadar birebir oranlı geçmiş maç olmadan işaret yok
 IYMS_AVLANAMAZ = ("1/2", "2/1")  # tarihsel %2-2.5 — model ne derse desin avlanamaz
 
+# --------------------------------------------- çapraz sürpriz (yüksek oran)
+#
+# Çaprazlar avlanamaz ("bugün tutar mı" sorusuna dürüst yanıt: hayır),
+# ama "bu maçta normalden ne kadar olası" sorusu ÖLÇÜLEBİLİR. Kalibrasyon
+# eğitim = 2001/02–2023/24 (170.113 maç), test = son 3 sezon (15.243 maç,
+# kalıbı yeterli olanlar). Kalıp tahmincisi sahadakiyle aynı: oran_kalibi.
+#
+# Kabarma kovalarında GERÇEKLEŞEN oran (dışörneklem):
+#   kombo   <1.0×    1.0-1.2×   1.2-1.4×   1.4-1.6×   >1.6×
+#   1/0     %4.87    %5.82      %3.77        —          —      (taban %5.23)
+#   2/0     %4.69    %6.03      %6.18        —          —      (taban %4.98)
+#   2/1     %2.19    %3.06      %3.97      %3.37      %2.56    (taban %2.54)
+#   1/2     %1.60    %2.64      %2.51      %2.69      %3.16    (taban %1.97)
+# Kontrol grubu (kabarma <1.0×) dört komboda da tabanın ALTINDA kalıyor —
+# yani süzgeç gerçekten ayırıyor, gürültü değil.
+#
+# Genel taban oranları (2001/02–2023/24, 170.113 maç).
+CAPRAZ_TABAN = {"1/0": 0.0523, "2/0": 0.0498, "2/1": 0.0254, "1/2": 0.0197}
+# Ham frekans yüksek kabarmalarda fazla iyimser çıkıyor; tavan ölçümle
+# seçildi (15.243 maçlık dışörneklem): 1.4× tavanda HER kova muhafazakâr
+# kalıyor (söylenen ≤ gerçekleşen), 1.5× ve üstünde 1/2 iyimserleşiyor.
+CAPRAZ_MAKS_KABARMA = 1.4
+# İşaret eşiği kombo başınadır: kabarmanın gerçekten ayırt ettiği yerde
+# işaretlenir. Dışörneklemde eşiği geçen maçların GERÇEK gerçekleşmesi:
+#   2/1 ≥1.3× → %4.02 (tabanın 1.59 katı, adil oran 25) · maçların %11'i
+#   1/2 ≥1.5× → %3.12 (tabanın 1.59 katı, adil oran 32) · maçların %20'si
+# 1/0 ve 2/0'da kabarma bilgi taşımıyor (en iyi kova tabanın 1.08–1.23
+# katı; 1/0'da 1.2× üstü tabanın ALTINA düşüyor) — bu yüzden hiç
+# işaretlenmezler, yalnız olasılıkları bilgi olarak gösterilir.
+CAPRAZ_DIKKAT_ESIK = {"2/1": 1.3, "1/2": 1.5}
+CAPRAZ_MIN_ORNEK = 300
+
+
+def capraz_surpriz(kalip: dict | None, piyasa: dict | None = None) -> list[dict] | None:
+    """Çapraz İY/MS sonuçlarının bu maçtaki sürpriz şansı.
+
+    Her çapraz için: aynı oran profilinden açılmış geçmiş maçlardaki
+    frekans, genel taban oranı ve ikisinin katı ("kabarma"). Olasılık
+    tabanın CAPRAZ_MAKS_KABARMA katıyla sınırlanır — ötesi ölçümde
+    tutmadı. "dikkat" yalnız kabarmanın ayırt ettiği kombolarda (2/1,
+    1/2) yanar; 1/0 ve 2/0'da katsayı bilgi amaçlıdır.
+    piyasa verilirse gerçek fiyata göre beklenen değer de hesaplanır.
+    """
+    if not kalip:
+        return None
+    # oran_kalibi "iyms_n", birebir_oran_maclari "n" adını kullanır
+    n = int(kalip.get("iyms_n") or kalip.get("n") or 0)
+    if n < CAPRAZ_MIN_ORNEK:
+        return None
+    sayimlar = kalip.get("iyms") or {}
+    cikti = []
+    for kombo, taban in CAPRAZ_TABAN.items():
+        adet = int(sayimlar.get(kombo, 0))
+        ham = adet / n
+        kabarma = ham / taban if taban else 1.0
+        p = min(ham, taban * CAPRAZ_MAKS_KABARMA)   # dürüstlük tavanı
+        kayit = {
+            "kombo": kombo, "n": n, "adet": adet,
+            "taban": taban, "p": float(p), "kabarma": float(kabarma),
+            "sinirlandi": bool(ham > taban * CAPRAZ_MAKS_KABARMA),
+            # gösterimde tavanlanmış kabarma kullanılır: tavan yiyen iki maç
+            # farklı katsayı ama AYNI olasılık gösterirse tablo yanıltıcı olur
+            "kabarma_net": float(min(kabarma, CAPRAZ_MAKS_KABARMA)),
+            "adil_oran": round(1.0 / p, 1) if p > 0 else None,
+            "dikkat": bool(kombo in CAPRAZ_DIKKAT_ESIK
+                           and kabarma >= CAPRAZ_DIKKAT_ESIK[kombo]),
+            "isaretlenebilir": kombo in CAPRAZ_DIKKAT_ESIK,
+        }
+        fiyat = (piyasa or {}).get(kombo)
+        if fiyat and fiyat > 1:
+            kayit["piyasa"] = float(fiyat)
+            kayit["ev"] = float(p) * float(fiyat) - 1.0
+        cikti.append(kayit)
+    # Sıralama olasılığa göre: işaretli bir 2/1 (tavanda %3.6, adil 28)
+    # işaretli bir 1/2'den (%2.8, adil 36) daha iyi bir uzun ihtimaldir —
+    # ham kabarmaya göre sıralanırsa 1/2 hep öne geçip 2/1'i gizliyordu.
+    cikti.sort(key=lambda x: (-x["p"], -x["kabarma"]))
+    return cikti
+
+
 # -------------------------------------------------------------------- 1) form
 
 def form_analizi(df: pd.DataFrame, takim: str, n: int = 10, saha: str | None = None) -> dict:

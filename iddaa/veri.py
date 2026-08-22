@@ -823,7 +823,9 @@ def fikstur_yukle(ligler: list[str] | None = None,
             f[f"oran_{uc}_maks"] = f[f"oran_{uc}"]
 
     if gecmisi_at:
-        f = f[f["Tarih"] >= simdi_tr().normalize()]
+        # Dün de kalsın: kullanıcı radarın/taramanın dünkü seçimlerini gerçek
+        # sonuçlarıyla karşılaştırabilsin diye takvim bir gün geriye açıktır.
+        f = f[f["Tarih"] >= simdi_tr().normalize() - pd.Timedelta(days=1)]
 
     f = f.sort_values("Tarih").reset_index(drop=True)
     return f, mevcut_kitapcilar
