@@ -881,7 +881,7 @@ def uygulama_olustur():
         try:
             if r["Tarih"] >= veri.simdi_tr():
                 return None
-            cozucu = veri.takim_cozucu(df, hizli=True)
+            cozucu = veri.takim_cozucu_onbellekli(df, hizli=True)
             try:
                 ev, dep = cozucu(str(r["HomeTeam"])), cozucu(str(r["AwayTeam"]))
             except ValueError:
@@ -1373,7 +1373,7 @@ def uygulama_olustur():
                 maks = maks or piyasa_k.get("ms_maks")
                 ust_alt = ust_alt or piyasa_k.get("ust_alt25")
 
-            cozucu = veri.takim_cozucu(df, hizli=True)
+            cozucu = veri.takim_cozucu_onbellekli(df, hizli=True)
             taraflar = []
             for ad in (r["HomeTeam"], r["AwayTeam"]):
                 try:

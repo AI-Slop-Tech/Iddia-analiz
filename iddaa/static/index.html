@@ -938,7 +938,18 @@ async function haftaOtoTara(){
   // payıyla. (Tek işçili sunucuda arka arkaya tarama arayüzü kilitliyordu.)
   const gunler = (HAFTA.gunler || []).map(x => x.tarih);
   const sira = [AKTIF_GUN, ...gunler.filter(g => g !== AKTIF_GUN)].filter(Boolean);
-  const bekleyen = sira.filter(g => !(TARAMALAR[g] && Date.now() - (TARAMA_ZAMAN[g] || 0) < TARAMA_OMRU));
+  // Geçmiş günler arka planda taranmaz. Takvim bir gün geriye açık (dünkü
+  // seçimler sonuçlarıyla denetlenebilsin diye) ama dünün maçları oynanmış:
+  // her sayfa açılışında onları da taramak tek işçili sunucuda en ağır günü
+  // boşuna harcayıp öndeki isteği (ör. Sürpriz Radarı) kuyrukta bekletiyordu.
+  // Kullanıcı o günü seçtiğinde gunCiz() zaten taramayı kendisi başlatıyor.
+  const gecmis = g => {
+    if(g === AKTIF_GUN || !HAFTA.bugun) return false;
+    const [d, a, y] = g.split('.').map(Number), [bd, ba, by] = HAFTA.bugun.split('.').map(Number);
+    return (y * 10000 + a * 100 + d) < (by * 10000 + ba * 100 + bd);
+  };
+  const bekleyen = sira.filter(g => !gecmis(g)
+    && !(TARAMALAR[g] && Date.now() - (TARAMA_ZAMAN[g] || 0) < TARAMA_OMRU));
   let sayac = 0;
   const notEl = $('#oto-durum');
   try{

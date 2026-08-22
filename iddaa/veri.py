@@ -27,6 +27,7 @@ import re
 import time
 import unicodedata
 import warnings
+import weakref
 
 import numpy as np
 import pandas as pd
@@ -599,6 +600,26 @@ def _normalize(isim: str) -> str:
     # aynı anahtara düşsün; yoksa takma ad/tam eşleşme aksan yüzünden ıskalar
     duz = unicodedata.normalize("NFKD", duz).encode("ascii", "ignore").decode("ascii")
     return re.sub(r"[^a-z0-9]", "", duz.lower())
+
+
+_COZUCU_DURUM: dict = {"ref": None, "cozucu": {}}
+
+
+def takim_cozucu_onbellekli(df: pd.DataFrame, hizli: bool = False):
+    """takim_cozucu'nun istek boyu paylaşılan hâli.
+
+    Kurulum 248 bin satırı tarayıp isim haritası kuruyor (~38 ms) — "bir kez
+    öde" diye tasarlandı. Maç döngüsü içinde çağrılırsa 250 maçlık bültende
+    9 saniye boşa gider. Zayıf referansla tek aktif tablo izlenir; tablo
+    değişince (veri güncellemesi) önbellek kendiliğinden sıfırlanır.
+    """
+    mevcut = _COZUCU_DURUM["ref"]
+    if mevcut is None or mevcut() is not df:
+        _COZUCU_DURUM["ref"] = weakref.ref(df)
+        _COZUCU_DURUM["cozucu"] = {}
+    if hizli not in _COZUCU_DURUM["cozucu"]:
+        _COZUCU_DURUM["cozucu"][hizli] = takim_cozucu(df, hizli=hizli)
+    return _COZUCU_DURUM["cozucu"][hizli]
 
 
 def takim_cozucu(df: pd.DataFrame, hizli: bool = False):
