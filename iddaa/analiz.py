@@ -240,7 +240,15 @@ def takim_dilimi(df: pd.DataFrame, takim: str) -> pd.DataFrame:
 # olasılıklı seçim" modu %90 tutmasına rağmen -%4.2. Yüksek tutma tek başına
 # kâr getirmez; kitapçı marjı o bölgede en kalındır.
 
-SAGLAM_ESIK = {"MS1": 0.65, "MS2": 0.55, "ÜST 2.5": 0.60}
+SAGLAM_ESIK = {"MS1": 0.65, "MS2": 0.55, "ÜST 2.5": 0.65}
+SAGLAM_FAVORI_FARK = 0.55   # MS1: ev sahibi, deplasmandan bu kadar önde olmalı
+SAGLAM_MAKS_BERABERLIK = 0.25  # MS2: beraberlik riski bunun altında olmalı
+# İkinci tur iyileştirme (22.199 maç): bu iki filtre portföyü
+#   %70.4 tutma / +%1.95 ROI  →  %74.0 tutma / +%2.32 ROI (3/3 sezon +)
+# bandına taşıdı. Denenip ELENENLER: isabetli şut tabanlı takım gücü
+# (Brier 0.60312→0.60300, ihmal edilebilir; ROI kötüleşti), beraberlik
+# filtresinin MS1'e uygulanması (p1>=0.65 iken zaten bağlamıyor),
+# lig beyaz listesi (12 ligden 4'ünün şansa 3/3 pozitif çıkması beklenir).
 
 
 def saglam_secim(deger: dict | None, en_iyi: dict | None = None) -> dict | None:
@@ -255,16 +263,30 @@ def saglam_secim(deger: dict | None, en_iyi: dict | None = None) -> dict | None:
     model_p = deger.get("model_p") or {}
     satirlar = {s["secim"]: s for s in deger.get("satirlar", [])}
     adaylar = []
+    p1, p0, p2 = model_p.get("MS1", 0.0), model_p.get("MS0", 0.0), model_p.get("MS2", 0.0)
     for secim, esik in SAGLAM_ESIK.items():
         p = model_p.get(secim)
         satir = satirlar.get(secim)
         if p is None or not satir or p < esik:
             continue
+        gerekce = [f"model %{p * 100:.0f} (eşik %{esik * 100:.0f})"]
+        if secim == "MS1":
+            fark = p1 - p2
+            if fark <= SAGLAM_FAVORI_FARK:
+                continue  # favori yeterince baskın değil
+            gerekce.append(f"favori farkı {fark:.2f} (>{SAGLAM_FAVORI_FARK})")
+        if secim == "MS2":
+            if p0 >= SAGLAM_MAKS_BERABERLIK:
+                continue  # beraberlik riski yüksek
+            gerekce.append(f"beraberlik riski %{p0 * 100:.0f} (<%{SAGLAM_MAKS_BERABERLIK * 100:.0f})")
         oran = (en_iyi or {}).get(secim) or satir.get("oran")
         if not oran or oran <= 1.01:
             continue
+        basabas = 1.0 / float(oran)
+        gerekce.append(f"başabaş için %{basabas * 100:.0f} gerekiyor")
         adaylar.append({"secim": secim, "p": float(p), "oran": round(float(oran), 2),
-                        "esik": esik, "ev": float(p) * float(oran) - 1.0})
+                        "esik": esik, "ev": float(p) * float(oran) - 1.0,
+                        "basabas": float(basabas), "gerekce": gerekce})
     if not adaylar:
         return None
     return max(adaylar, key=lambda x: x["p"])
