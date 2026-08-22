@@ -1045,8 +1045,9 @@ function saglamBolumu(liste){
   const kombine = gost.slice(0, 3).reduce((x, m) => x * m.saglam.oran, 1);
   return `<div class="kart" style="margin:10px 0;border-color:#22c55e55">
     <h2>🛡 Sağlam Seçimler <span class="ipucu">(${sag.length} maç — tutma oranı odaklı motor)</span></h2>
-    <div class="alt-baslik">7 sezonluk ölçümde bu kural <b>%70 tutma</b> ve <b>+%2 getiri</b> verdi (3/3 sezon pozitif);
-      model %68 demişti, %70 geldi. Oranlar düşüktür — amaç yüksek kazanç değil, <b>tutarlılık</b>.
+    <div class="alt-baslik">7 sezonluk ölçümde bu kural <b>%74 tutma</b> ve <b>+%2.3 getiri</b> verdi (3/3 sezon pozitif).
+      Her satırın altında seçimin <b>neden</b> geçtiği yazar; yeşil yüzde, oranın gerektirdiği başabaş eşiğinin üstünde demektir.
+      Oranlar düşüktür — amaç yüksek kazanç değil, <b>tutarlılık</b>.
       Kâr odaklı nadir seçimler için aşağıdaki 🎯 bölümüne bakın.</div>
     ${gost.map(m => {
       const g = m.saglam;
@@ -1056,8 +1057,10 @@ function saglamBolumu(liste){
         <span class="ipucu">${m.saat} · ${esc(m.lig)}</span>
         <span style="font-weight:700;flex:1;min-width:150px">${esc(m.ev)} – ${esc(m.dep)}</span>
         <span><b>${SECIM_AD[g.secim] || esc(g.secim)}</b> @ <b>${g.oran.toFixed(2)}</b></span>
-        <span class="buyukev ev-poz">%${(g.p*100).toFixed(0)}</span>
+        <span class="buyukev ${g.basabas && g.p > g.basabas ? 'ev-poz' : 'ev-neg'}"
+              title="${g.basabas ? 'başabaş için %' + (g.basabas*100).toFixed(0) + ' gerekiyor' : ''}">%${(g.p*100).toFixed(0)}</span>
         <button class="mini-btn" onclick='oranSec(${arg})'>➕</button>
+        ${g.gerekce ? `<span class="ipucu" style="flex-basis:100%;margin-top:2px">↳ ${g.gerekce.map(esc).join(' · ')}</span>` : ''}
       </div>`;
     }).join('')}
     <div class="ipucu" style="display:block;margin-top:8px">En olası 3 tanesi kombine: oran <b>${kombine.toFixed(2)}</b> ·
