@@ -461,6 +461,7 @@
       </div>
     </div>
     <div class="gun-pilleri" id="gun-pilleri"></div>
+    <div class="ipucu" id="oto-durum" style="display:block;margin:2px 2px 6px"></div>
     <div id="one-cikanlar"></div>
     <div id="hafta-liste"></div>
   </section>
@@ -921,9 +922,17 @@ const TARAMA_OMRU = 20 * 60 * 1000;  // oranlar kayar: bu yaştan eski tarama ta
 async function haftaOtoTara(){
   if(HAFTA_OTO_CALISIYOR || !HAFTA) return;
   HAFTA_OTO_CALISIYOR = true;
+  // Görüntülenen gün her zaman ÖNCE taranır; kalanlar arkada, aralarında nefes
+  // payıyla. (Tek işçili sunucuda arka arkaya tarama arayüzü kilitliyordu.)
+  const gunler = (HAFTA.gunler || []).map(x => x.tarih);
+  const sira = [AKTIF_GUN, ...gunler.filter(g => g !== AKTIF_GUN)].filter(Boolean);
+  const bekleyen = sira.filter(g => !(TARAMALAR[g] && Date.now() - (TARAMA_ZAMAN[g] || 0) < TARAMA_OMRU));
+  let sayac = 0;
+  const notEl = $('#oto-durum');
   try{
-    for(const g of (HAFTA.gunler || []).map(x => x.tarih)){
-      if(TARAMALAR[g] && (Date.now() - (TARAMA_ZAMAN[g] || 0) < TARAMA_OMRU)) continue;
+    for(const g of bekleyen){
+      sayac++;
+      if(notEl) notEl.textContent = `⏳ Günler analiz ediliyor… (${sayac}/${bekleyen.length}) · ${g}`;
       try{
         const r = await api('/api/bulten-tara', {tarih: g});
         // oranlar hâlâ ısınıyorken gelen boş sonuç önbelleğe alınmaz ki
@@ -931,8 +940,12 @@ async function haftaOtoTara(){
         if(r.length || !HAFTA.piyasa_isitma){ TARAMALAR[g] = r; TARAMA_ZAMAN[g] = Date.now(); }
         if(g === AKTIF_GUN) oneCikanCiz();
       }catch(_h){ /* gün taranamadıysa sessiz geç; elle Günü Tara hâlâ çalışır */ }
+      await new Promise(r => setTimeout(r, 400));  // sunucuya nefes payı
     }
-  }finally{ HAFTA_OTO_CALISIYOR = false; }
+  }finally{
+    HAFTA_OTO_CALISIYOR = false;
+    if(notEl) notEl.textContent = '';
+  }
 }
 
 async function gunTara(){

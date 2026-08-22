@@ -577,6 +577,14 @@ def veriyi_yukle(ligler: list[str] | None = None) -> pd.DataFrame:
                 .sort_values("Tarih").reset_index(drop=True)
     except Exception:  # noqa: BLE001 — kupa katmanı asıl yüklemeyi asla düşürmesin
         pass
+
+    # Takım/lig kolonları KATEGORİK: analiz sırasında "df['HomeTeam'] == takim"
+    # gibi karşılaştırmalar 248 bin satırlık metin taramasıydı ve tarama
+    # süresinin yarısını yiyordu. Kategorik dtype'ta aynı karşılaştırma tamsayı
+    # üzerinden yapılır (ölçüm: 200 karşılaştırma 2.29 sn → 0.02 sn).
+    for kolon in ("HomeTeam", "AwayTeam", "Div", "Sezon"):
+        if kolon in birlesik.columns:
+            birlesik[kolon] = birlesik[kolon].astype("category")
     return birlesik
 
 
