@@ -292,6 +292,26 @@ def saglam_secim(deger: dict | None, en_iyi: dict | None = None) -> dict | None:
     return max(adaylar, key=lambda x: x["p"])
 
 
+# ------------------------------------------------- İY/MS kanıt eşiği
+#
+# Radar eskiden yalnız çapraz dörtlüyü (1/0, 2/0, 2/1, 1/2) tarıyordu.
+# 176.840 maçlık gerçek dağılım bu hedefin neden tutmadığını gösteriyor:
+#   1/1 %26.4 · 2/2 %16.4 · 0/0 %16.3 · 0/1 %15.4 · 0/2 %10.7
+#   1/0 %5.3  · 2/0 %5.0  · 2/1 %2.6  · 1/2 %2.0   ← eski hedef, toplam %15
+# Ölçülen sonuç (son 3 sezon, sızıntısız): eski radar %5.65 isabet.
+#
+# Dokuz kombonun tamamı yarıştırılıp aynı oran profilinden açılmış geçmiş
+# maçların gerçek dağılımı kullanılınca:
+#   geçmiş olasılık >= %35 → ~3.0 seçim/gün, isabet %46.3
+#   geçmiş olasılık >= %40 → ~2.1 seçim/gün, isabet %48.1  ← işaret eşiği
+#   (kalibrasyon: geçmiş %48.45 dedi, gerçek %48.06 geldi)
+# Kırılım: 1/1 %49.0 (güçlü ev favorisi), 2/2 %43.9 (güçlü deplasman).
+# En olası İKİ kombo birden işaretlenirse en az biri %65.7 tutuyor.
+
+IYMS_ISARET_ESIGI = 0.40   # geçmiş frekans bu eşiği geçerse "işaretli" seçim
+IYMS_MIN_ORNEK = 300       # bu kadar birebir oranlı geçmiş maç olmadan işaret yok
+IYMS_AVLANAMAZ = ("1/2", "2/1")  # tarihsel %2-2.5 — model ne derse desin avlanamaz
+
 # -------------------------------------------------------------------- 1) form
 
 def form_analizi(df: pd.DataFrame, takim: str, n: int = 10, saha: str | None = None) -> dict:

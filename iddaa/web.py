@@ -1201,9 +1201,27 @@ def uygulama_olustur():
             olasilikli = any(v["p"] is not None for v in kombolar.values())
             mod = ("model" if model is not None
                    else ("kalip" if olasilikli else ("piyasa" if piyasa_iyms else "liste")))
-            one_cikan = None
-            if any(kombolar[k]["p"] is not None for k in SURPRIZ):
-                one_cikan = max(SURPRIZ, key=lambda k: kombolar[k]["p"] or 0.0)
+            # DOKUZ kombonun tamamı yarışır. Eskiden yalnız çapraz dörtlü
+            # (1/0, 2/0, 2/1, 1/2) taranıyordu; o dördün toplam gerçekleşmesi
+            # %15 ve 1/0-2/0 yapısal olarak diğer ikisinden hep olası olduğu
+            # için radar sürekli aynı ikisini gösteriyor, isabet %5.65'te
+            # kalıyordu. Artık seçim kanıta dayanır: aynı oran profilinden
+            # açılmış geçmiş maçların gerçek frekansı.
+            one_cikan = isaretli = ikinci = None
+            kanit = None
+            olasi = [k for k in FOKUS if kombolar[k]["p"] is not None]
+            if olasi:
+                sirali = sorted(olasi, key=lambda k: kombolar[k]["p"] or 0.0, reverse=True)
+                one_cikan = sirali[0]
+                ikinci = sirali[1] if len(sirali) > 1 else None
+                ust = kombolar[one_cikan]
+                n_k, adet = ust.get("kalip_n"), ust.get("kalip_adet")
+                if n_k and n_k >= analiz.IYMS_MIN_ORNEK and adet is not None:
+                    frekans = adet / n_k
+                    kanit = {"n": int(n_k), "adet": int(adet), "frekans": float(frekans)}
+                    if (frekans >= analiz.IYMS_ISARET_ESIGI
+                            and one_cikan not in analiz.IYMS_AVLANAMAZ):
+                        isaretli = one_cikan
             neden = None
             if mod == "kalip":
                 neden = "takımlar arşivde çözülemedi — yalnız oran kalıbı konuşuyor"
@@ -1227,6 +1245,9 @@ def uygulama_olustur():
                     "neden": neden,
                     "kombolar": kombolar,
                     "one_cikan": one_cikan,
+                    "isaretli": isaretli,
+                    "ikinci": ikinci,
+                    "kanit": kanit,
                     "piyasa": (
                         {"kitapci": piyasa["kitapci"], "guncel": piyasa["guncel"]}
                         if piyasa_iyms else None
@@ -1243,7 +1264,8 @@ def uygulama_olustur():
                 }
             )
         MOD_SIRA = {"model": 0, "kalip": 1, "piyasa": 2, "liste": 3}
-        satirlar.sort(key=lambda x: (MOD_SIRA.get(x["mod"], 9), -x["surpriz"], x["saat"]))
+        satirlar.sort(key=lambda x: (x.get("isaretli") is None,
+                                     MOD_SIRA.get(x["mod"], 9), -x["surpriz"], x["saat"]))
         return jsonify(satirlar)
 
     @app.get("/api/mac-detay")

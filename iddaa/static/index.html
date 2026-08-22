@@ -2110,13 +2110,17 @@ async function surprizTara(){
 }
 
 const SR_SIRA = ['1/1', '1/0', '1/2', '0/1', '0/0', '0/2', '2/1', '2/0', '2/2'];
-const SR_ODAK = ['1/0', '1/2', '2/1', '2/0'];   // ⭐ adayları: İY'de öndeyken sonucun değiştiği çaprazlar
-const SR_NORMAL = ['1/1', '0/0', '2/2'];        // sonuç koruyan köşegen — soluk gösterilir
+const SR_ODAK = ['1/0', '1/2', '2/1', '2/0'];   // değer hesaplayıcısında sunulan çaprazlar
+const SR_NORMAL = ['1/1', '0/0', '2/2'];        // sonuç koruyan köşegen
+// 176.840 maçlık gerçek dağılım: 1/2 %2.0 · 2/1 %2.6 — model ne derse desin
+// bu iki sonuç istatistiksel olarak avlanamaz; işaret verilmez, uyarı yazılır.
+const SR_AVLANAMAZ = ['1/2', '2/1'];
 
 function srHucre(ad, k, yildiz){
   if(!k) return '';
   const kanit = k.kalip_n ? `Birebir oranlı ${k.kalip_n} geçmiş maçta ${k.kalip_adet} kez geldi` : 'birebir kalıp verisi yok';
-  const sinif = 'sr-hucre' + (yildiz ? ' yildiz' : (SR_NORMAL.includes(ad) ? ' normal' : ''));
+  const sinif = 'sr-hucre' + (yildiz ? ' yildiz' : (SR_NORMAL.includes(ad) ? ' normal' : ''))
+    + (SR_AVLANAMAZ.includes(ad) ? ' avlanamaz' : '');
   let piyasa = '';
   if(k.piyasa){
     const renk = k.ev == null ? 'var(--soluk)'
@@ -2139,36 +2143,50 @@ function srMsMetni(kalip){
 }
 
 let SR_ONERI = null;
+// 🎯 Kanıta dayalı İY/MS seçimi. Eski sürüm yalnız çapraz dörtlüyü tarıyordu
+// (toplam gerçekleşme %15, ölçülen isabet %5.65). Artık 9 kombo yarışır ve
+// yalnız "aynı oran profilinden açılmış geçmiş maçların ≥%40'ı bu sonuçla
+// bitmiş" olanlar işaretlenir → ölçümde ~2 seçim/gün, %48 isabet.
 function srGununOnerisi(liste){
-  // "iyice araştırılmış" günün sürprizi: odak kombolar içinde model olasılığı,
-  // pozitif piyasa değeri ve birebir kanıt (n>=30) birlikte puanlanır
-  const adaylar = [];
-  liste.forEach(m => {
-    if(m.mod === 'liste' || !m.kombolar) return;
-    SR_ODAK.forEach(ad => {
-      const k = m.kombolar[ad];
-      if(!k || !k.p) return;
-      const kanitli = (k.kalip_n || 0) >= 30;
-      const evBonus = (k.piyasa && k.ev != null) ? Math.max(0, k.ev) : 0;
-      // gerçek (oynanabilir) fiyat + pozitif değer, salt yüksek olasılığı geçer
-      adaylar.push({m, ad, k, skor: k.p * (1 + 2 * evBonus) * (kanitli ? 1.25 : 1) * (k.piyasa ? 1.15 : 1)});
-    });
-  });
-  if(!adaylar.length){ SR_ONERI = null; return ''; }
-  const s = adaylar.sort((a, b) => b.skor - a.skor)[0];
-  const oran = s.k.piyasa || Number(s.k.adil_oran) || Math.round(100 / s.k.p) / 100;
-  SR_ONERI = {tarih: AKTIF_SR_GUN, saat: s.m.saat || '', lig: s.m.lig || '',
-              ev: s.m.ev, dep: s.m.dep, pazar: 'İY/MS ' + s.ad, oran};
-  return `<div class="kart" style="border-color:#b45309">
-    <h2>🎯 Günün Sürpriz Önerisi</h2>
-    <div style="font-weight:700;font-size:15px">${esc(s.m.ev)} – ${esc(s.m.dep)}
-      <span class="ipucu">${s.m.saat || ''} · ${esc(s.m.lig || '')}</span></div>
-    <div style="margin:6px 0">İY/MS <b>${s.ad}</b> — model olasılığı <b>%${(s.k.p*100).toFixed(1)}</b> ·
-      adil oran <b>${s.k.adil_oran || (1/s.k.p).toFixed(1)}</b>${s.k.piyasa ? ` · piyasa <b>${s.k.piyasa.toFixed(2)}</b>${s.k.ev != null ? ` <span class="${s.k.ev >= 0 ? 'ev-poz' : 'ev-neg'}">(EV ${s.k.ev >= 0 ? '+' : ''}${(s.k.ev*100).toFixed(1)}%)</span>` : ''}` : ''}
-      ${(s.k.kalip_n || 0) >= 30 ? `<div class="ipucu">📜 Kanıt: birebir oranla açılmış ${s.k.kalip_n} maçın ${s.k.kalip_adet || 0}'i ${s.ad} bitti.</div>` : ''}</div>
-    <button class="mini-btn" onclick="if(SR_ONERI) kuponaEkle(SR_ONERI)">➕ Kupona ekle</button>
-    <div class="not">Sürprizler doğaları gereği düşük olasılıklıdır (~%${(s.k.p*100).toFixed(0)}) — çoğunun yatması normaldir,
-      kazanç nadir ama yüksek ödemeden gelir. Küçük ve ayrı bir kasayla oynanır. Bu kart günün en güçlü model + kanıt + fiyat birleşimini seçer.</div>
+  const isa = liste.filter(m => m.isaretli && m.kanit);
+  if(!isa.length){
+    SR_ONERI = null;
+    const yakin = liste.filter(m => m.kanit).sort((a,b) => b.kanit.frekans - a.kanit.frekans)[0];
+    return `<div class="kart">
+      <h2>🎯 Kanıtlı İY/MS Seçimi</h2>
+      <div class="alt-baslik">Bugün eşiği geçen maç yok. Sistem yalnız, aynı oranla açılmış
+        <b>en az 300 geçmiş maçın %40'ından fazlası</b> aynı sonuçla bitmişse işaret veriyor —
+        ölçümde bu kural günde ~2 seçim veriyor ve <b>%48 tutuyor</b>.
+        ${yakin ? `En yakın aday: ${esc(yakin.ev)} – ${esc(yakin.dep)} · ${esc(yakin.one_cikan)}
+          (geçmiş %${(yakin.kanit.frekans*100).toFixed(0)} — eşik %40).` : ''}</div>
+    </div>`;
+  }
+  const s0 = isa[0], kb = s0.kombolar[s0.isaretli];
+  const oran = kb.piyasa || Number(kb.adil_oran) || 0;
+  SR_ONERI = {tarih: AKTIF_SR_GUN, saat: s0.saat || '', lig: s0.lig || '',
+              ev: s0.ev, dep: s0.dep, pazar: 'İY/MS ' + s0.isaretli, oran: oran};
+  return `<div class="kart" style="border-color:#22c55e55">
+    <h2>🎯 Kanıtlı İY/MS Seçimleri <span class="ipucu">(${isa.length} maç)</span></h2>
+    <div class="alt-baslik">Aynı oran profilinden açılmış geçmiş maçların <b>%40'ından fazlası</b> bu sonuçla bitmiş.
+      Son 3 sezonluk sızıntısız ölçümde bu kural günde ~2 seçim veriyor ve <b>%48 tutuyor</b>
+      (geçmiş %48.45 demişti, %48.06 geldi). Adil oran ~2.05 — bu fiyatın üstünü bulursanız kârdasınız.</div>
+    ${isa.map((m, i) => {
+      const k = m.kanit, c = m.kombolar[m.isaretli];
+      const f = (c.piyasa || Number(c.adil_oran) || 0);
+      return `<div class="one-cikan" style="border-color:#22c55e33">
+        <span class="ipucu">${m.saat} · ${esc(m.lig)}</span>
+        <span style="font-weight:700;flex:1;min-width:150px">${esc(m.ev)} – ${esc(m.dep)}</span>
+        <span>İY/MS <b>${esc(m.isaretli)}</b> ${c.piyasa ? '@ <b>' + c.piyasa.toFixed(2) + '</b>' : '≈ ' + c.adil_oran}</span>
+        <span class="buyukev ev-poz">%${(k.frekans*100).toFixed(0)}</span>
+        <button class="mini-btn" onclick='kuponaEkle(${JSON.stringify({tarih:'', saat:m.saat||'', lig:m.lig||'',
+          ev:m.ev, dep:m.dep, pazar:'İY/MS '+m.isaretli, oran:f, kaynak:'iyms'}).replace(/'/g,"&#39;")});fisCiz()'>➕</button>
+        <span class="ipucu" style="flex-basis:100%;margin-top:2px">↳ kanıt: aynı oranla açılmış
+          <b>${k.n}</b> geçmiş maçın <b>${k.adet}</b>'i (%${(k.frekans*100).toFixed(0)}) ${esc(m.isaretli)} bitti
+          ${m.ikinci ? ` · ikinci ihtimal ${esc(m.ikinci)}` : ''}</span>
+      </div>`;
+    }).join('')}
+    <div class="not">⚠️ Çapraz sonuçlar (1/2, 2/1) tarihte yalnız %2.0 ve %2.6 geliyor — hiçbir model bunları
+      düzenli tutturamaz, bu yüzden artık işaret verilmiyor. Tabloda bilgi olarak kalıyorlar.</div>
   </div>`;
 }
 
@@ -2223,7 +2241,10 @@ function srCiz(){
         <b>${i === 0 ? '👑 ' : ''}${esc(m.ev)} – ${esc(m.dep)}</b>
         <span class="ipucu">${m.saat} · ${esc(m.lig)}${modNotu}</span>
       </div>
-      <div class="sr-grid">${SR_SIRA.map(ad => srHucre(ad, m.kombolar[ad], ad === enIyi)).join('')}</div>
+      <div class="sr-grid">${SR_SIRA.map(ad => srHucre(ad, m.kombolar[ad], ad === (m.isaretli || enIyi))).join('')}</div>
+      ${m.kanit ? `<div class="ipucu" style="display:block;margin:4px 0">📜 En olası: <b>${esc(m.one_cikan)}</b> —
+        aynı oranla açılmış ${m.kanit.n} maçın ${m.kanit.adet}'i (%${(m.kanit.frekans*100).toFixed(0)}) böyle bitti
+        ${m.isaretli ? '<b class="ev-poz">· ✔ işaret eşiğini geçti</b>' : '<span class="ipucu">(işaret için %40 gerekir)</span>'}</div>` : ''}
       ${tacYorum}
       ${karar}
       ${kanit ? `<div class="ipucu" style="margin-bottom:8px">${kanit}${(karar || !k) ? '' : ` Bülteninizde ${enIyi} oranı ${k.adil_oran ? `adil oran ${k.adil_oran}'in` : 'adil oranın'} üzerindeyse matematiksel değer var demektir.`}</div>` : ''}
