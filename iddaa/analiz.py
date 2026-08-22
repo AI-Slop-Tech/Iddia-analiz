@@ -17,6 +17,7 @@ karşılaştırılır; pozitif beklenen değer (EV) taşıyan seçimler işaretl
 from __future__ import annotations
 
 import math
+import weakref
 from functools import lru_cache
 
 import pandas as pd
@@ -182,6 +183,47 @@ def sinyal_tara(oranlar: tuple[float, float, float] | None,
     return max(bulunan, key=lambda x: x["ev"])
 
 
+# --- dilim önbelleği -------------------------------------------------------
+# Bir günün taraması aynı ligi ve aynı takımı defalarca diliyor; her dilimleme
+# 248 bin satırlık tablodan satır kopyalamak demek (profilde sürenin yarısı
+# buradaydı). Dilimler, uzun ömürlü arşiv nesnesinin üzerinde önbelleklenir.
+
+_DILIM_DURUM: dict = {"ref": None, "dilimler": {}}
+
+
+def _dilim_onbellek(df: pd.DataFrame) -> dict:
+    """Dilim önbelleği modül düzeyinde tutulur.
+
+    df.attrs içinde saklamak pandas'ın __finalize__ karşılaştırmasını bozuyor
+    (attrs sözlükleri == ile kıyaslanıyor, içinde DataFrame olunca patlıyor).
+    Bu yüzden zayıf referansla tek bir aktif tabloyu izleriz; tablo değişince
+    (veri güncellemesi) önbellek kendiliğinden sıfırlanır.
+    """
+    mevcut = _DILIM_DURUM["ref"]
+    if mevcut is None or mevcut() is not df:
+        _DILIM_DURUM["ref"] = weakref.ref(df)
+        _DILIM_DURUM["dilimler"] = {}
+    return _DILIM_DURUM["dilimler"]
+
+
+def lig_dilimi(df: pd.DataFrame, lig_kodu: str) -> pd.DataFrame:
+    """Ligin maçları — aynı istek içinde tekrar tekrar kesilmez."""
+    onb = _dilim_onbellek(df)
+    anahtar = ("lig", lig_kodu)
+    if anahtar not in onb:
+        onb[anahtar] = df[df["Div"] == lig_kodu]
+    return onb[anahtar]
+
+
+def takim_dilimi(df: pd.DataFrame, takim: str) -> pd.DataFrame:
+    """Takımın tüm maçları (ev+deplasman) — önbellekli."""
+    onb = _dilim_onbellek(df)
+    anahtar = ("takim", takim)
+    if anahtar not in onb:
+        onb[anahtar] = df[(df["HomeTeam"] == takim) | (df["AwayTeam"] == takim)]
+    return onb[anahtar]
+
+
 # -------------------------------------------------------------------- 1) form
 
 def form_analizi(df: pd.DataFrame, takim: str, n: int = 10, saha: str | None = None) -> dict:
@@ -191,7 +233,7 @@ def form_analizi(df: pd.DataFrame, takim: str, n: int = 10, saha: str | None = N
     elif saha == "dep":
         m = df[df["AwayTeam"] == takim]
     else:
-        m = df[(df["HomeTeam"] == takim) | (df["AwayTeam"] == takim)]
+        m = takim_dilimi(df, takim)
     m = m.sort_values("Tarih").tail(n)
 
     seri, puan, atilan, yenilen, maclar = [], 0, 0, 0, []
@@ -281,14 +323,14 @@ def poisson_tahmini(df: pd.DataFrame, ev: str, dep: str, lig_ipucu: str | None =
 
     # Modeli ev sahibinin ligindeki maçlarla kur (lig ortalamaları o lige ait olmalı).
     # Takımın geçmişi yoksa (yeni çıkan) fikstürden gelen lig ipucu kullanılır.
-    ev_maclari = df[(df["HomeTeam"] == ev) | (df["AwayTeam"] == ev)]
+    ev_maclari = takim_dilimi(df, ev)
     if not ev_maclari.empty:
         lig_kodu = ev_maclari.sort_values("Tarih")["Div"].iloc[-1]
     elif lig_ipucu and (df["Div"] == lig_ipucu).any():
         lig_kodu = lig_ipucu
     else:
         lig_kodu = df["Div"].iloc[-1]
-    L = df[df["Div"] == lig_kodu]
+    L = lig_dilimi(df, lig_kodu)
 
     w_lig = _agirlik(L["Tarih"], referans)
     lig_ev_ort = _agirlikli_ort(L["FTHG"], w_lig, 1.5)
@@ -406,6 +448,45 @@ def _ulke_kodlari(lig_ipucu: str | None) -> list[str]:
     return [k for k, v in ULKE_GRUBU.items() if v == ulke] if ulke else []
 
 
+def _kalip_verisi(df: pd.DataFrame) -> dict:
+    """Oran kalıbı için sayısal arşiv görünümü — tablo başına BİR KEZ kurulur.
+
+    Eskiden oran_kalibi her çağrıda 248 bin satırlık tabloyu .copy() ediyor ve
+    tüm arşivin marj arındırılmış olasılıklarını yeniden hesaplıyordu; tarama
+    süresinin üçte ikisi buradaydı (maç başına 136 ms). Artık diziler bir kez
+    hazırlanır, her maç yalnız numpy karşılaştırması yapar.
+    """
+    onb = _dilim_onbellek(df)
+    if "kalip_verisi" in onb:
+        return onb["kalip_verisi"]
+    import numpy as np
+
+    o1 = pd.to_numeric(df["oran_ev"], errors="coerce").to_numpy(float)
+    o0 = pd.to_numeric(df["oran_berabere"], errors="coerce").to_numpy(float)
+    o2 = pd.to_numeric(df["oran_dep"], errors="coerce").to_numpy(float)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        q1, q0, q2 = 1.0 / o1, 1.0 / o0, 1.0 / o2
+        toplam = q1 + q0 + q2
+        p1, p0, p2 = q1 / toplam, q0 / toplam, q2 / toplam
+    gecerli = np.isfinite(p1) & np.isfinite(p0) & np.isfinite(p2)
+    ftr = df["FTR"].astype(str).to_numpy()
+    fthg = pd.to_numeric(df["FTHG"], errors="coerce").to_numpy(float)
+    ftag = pd.to_numeric(df["FTAG"], errors="coerce").to_numpy(float)
+    hthg = pd.to_numeric(df["HTHG"], errors="coerce").to_numpy(float)
+    htag = pd.to_numeric(df["HTAG"], errors="coerce").to_numpy(float)
+    div = df["Div"].astype(str).to_numpy()
+    veri = {
+        "np": np, "p1": p1, "p0": p0, "p2": p2, "gecerli": gecerli,
+        "ftr_h": ftr == "H", "ftr_d": ftr == "D", "ftr_a": ftr == "A",
+        "fthg": fthg, "ftag": ftag, "hthg": hthg, "htag": htag,
+        "gol": fthg + ftag, "div": div,
+        "iy_var": np.isfinite(hthg) & np.isfinite(htag),
+        "tarih": df["Tarih"].to_numpy(),
+    }
+    onb["kalip_verisi"] = veri
+    return veri
+
+
 def oran_kalibi(df: pd.DataFrame, oranlar: tuple[float, float, float],
                 tolerans: float = 0.02, min_mac: int = 40,
                 ornek_sayisi: int = 0, lig_ipucu: str | None = None) -> dict | None:
@@ -415,39 +496,47 @@ def oran_kalibi(df: pd.DataFrame, oranlar: tuple[float, float, float],
     farklı bahisçilerin/yılların marj farkları kalıbı bozmaz. Yeterli örnek
     bulunamazsa tolerans kademeli olarak genişletilir.
     """
-    D = df.dropna(subset=["oran_ev", "oran_berabere", "oran_dep"]).copy()
-    if D.empty:
+    V = _kalip_verisi(df)
+    np = V["np"]
+    if not V["gecerli"].any():
         return None
 
     h_ev, h_b, h_dep = adil_olasilik(*oranlar)
-    q_ev, q_b, q_dep = 1 / D["oran_ev"], 1 / D["oran_berabere"], 1 / D["oran_dep"]
-    s = q_ev + q_b + q_dep
-    fark = pd.concat(
-        [(q_ev / s - h_ev).abs(), (q_b / s - h_b).abs(), (q_dep / s - h_dep).abs()], axis=1
-    ).max(axis=1)
+    fark = np.maximum(np.abs(V["p1"] - h_ev),
+                      np.maximum(np.abs(V["p0"] - h_b), np.abs(V["p2"] - h_dep)))
+    fark = np.where(V["gecerli"], fark, np.inf)
 
-    kullanilan_tol, sec = tolerans, D[fark <= tolerans]
+    kullanilan_tol = tolerans
+    maske = fark <= tolerans
     for carpan in (1.5, 2.0, 2.5):
-        if len(sec) >= min_mac:
+        if int(maske.sum()) >= min_mac:
             break
         kullanilan_tol = tolerans * carpan
-        sec = D[fark <= kullanilan_tol]
-    if len(sec) < 10:
+        maske = fark <= kullanilan_tol
+    n = int(maske.sum())
+    if n < 10:
         return None
 
-    n = len(sec)
-    toplam_gol = sec["FTHG"] + sec["FTAG"]
-    skor_sayimi = (sec["FTHG"].astype(str) + "-" + sec["FTAG"].astype(str)).value_counts()
+    gol = V["gol"][maske]
+    fthg_s, ftag_s = V["fthg"][maske], V["ftag"][maske]
+    skor_etiket = np.char.add(np.char.add(fthg_s.astype(int).astype(str), "-"),
+                              ftag_s.astype(int).astype(str))
+    etiketler, adetler = np.unique(skor_etiket, return_counts=True)
+    sirali_skor = sorted(zip(etiketler, adetler), key=lambda x: -x[1])
 
     # İY/MS kombinasyonlarının bu oran kalıbındaki gerçekleşme sayıları
     # (sürpriz radarı: "1/2", "2/1" gibi çapraz sonuçlar tarihte kaç kez geldi?)
-    ht = sec.dropna(subset=["HTHG", "HTAG"])
-    iyms_n = int(len(ht))
+    iy_maske = maske & V["iy_var"]
+    iyms_n = int(iy_maske.sum())
     iyms: dict[str, int] = {}
     if iyms_n:
-        iy_harf = (ht["HTHG"] - ht["HTAG"]).map(lambda f: "1" if f > 0 else ("0" if f == 0 else "2"))
-        ms_harf = ht["FTR"].map({"H": "1", "D": "0", "A": "2"})
-        iyms = {k: int(v) for k, v in (iy_harf + "/" + ms_harf).value_counts().items()}
+        iy_fark = V["hthg"][iy_maske] - V["htag"][iy_maske]
+        iy_harf = np.where(iy_fark > 0, "1", np.where(iy_fark == 0, "0", "2"))
+        ms_harf = np.where(V["ftr_h"][iy_maske], "1",
+                           np.where(V["ftr_d"][iy_maske], "0", "2"))
+        kombo = np.char.add(np.char.add(iy_harf, "/"), ms_harf)
+        k_et, k_ad = np.unique(kombo, return_counts=True)
+        iyms = {str(a): int(b) for a, b in zip(k_et, k_ad)}
 
     # Aynı ülkenin liglerindeki kalıp (kullanıcı isteği: "Çin maçına Çin
     # liglerinden benzerler") — küçük örneklem yanıltmasın diye genel kalıpla
@@ -456,26 +545,29 @@ def oran_kalibi(df: pd.DataFrame, oranlar: tuple[float, float, float],
     ulke_blok = None
     if ulke_kodlari:
         # önce genel kalıpla aynı tolerans; örnek yetmezse ülkeye özel genişleme
-        u = D[D["Div"].isin(ulke_kodlari) & (fark <= kullanilan_tol)]
-        if len(u) < 15:
-            u = D[D["Div"].isin(ulke_kodlari) & (fark <= tolerans * 2.5)]
-        if len(u) >= 15:
-            ug = u["FTHG"] + u["FTAG"]
+        ulke_m = np.isin(V["div"], list(ulke_kodlari))
+        u_maske = ulke_m & maske
+        if int(u_maske.sum()) < 15:
+            u_maske = ulke_m & (fark <= tolerans * 2.5)
+        u_n = int(u_maske.sum())
+        if u_n >= 15:
+            ug = V["gol"][u_maske]
             ulke_blok = {
                 "ad": ULKE_GRUBU.get(str(lig_ipucu)),
-                "n": int(len(u)),
-                "ms1": float((u["FTR"] == "H").mean()),
-                "ms0": float((u["FTR"] == "D").mean()),
-                "ms2": float((u["FTR"] == "A").mean()),
+                "n": u_n,
+                "ms1": float(V["ftr_h"][u_maske].mean()),
+                "ms0": float(V["ftr_d"][u_maske].mean()),
+                "ms2": float(V["ftr_a"][u_maske].mean()),
                 "gol_ort": float(ug.mean()),
                 "ust25": float((ug > 2.5).mean()),
-                "kg_var": float(((u["FTHG"] > 0) & (u["FTAG"] > 0)).mean()),
+                "kg_var": float(((V["fthg"][u_maske] > 0) & (V["ftag"][u_maske] > 0)).mean()),
             }
 
     ornekler = []
     if ornek_sayisi > 0:
         # Örnek önceliği: (1) aynı ülke + İY'li, (2) aynı ülke, (3) İY'li, (4) kalan
         # — her katman kendi içinde en yeniden eskiye.
+        sec = df.iloc[np.flatnonzero(maske)]
         sirali = sec.sort_values("Tarih", ascending=False).copy()
         ayni_ulke_s = (sirali["Div"].isin(ulke_kodlari)
                        if ulke_kodlari else pd.Series(False, index=sirali.index))
@@ -507,15 +599,15 @@ def oran_kalibi(df: pd.DataFrame, oranlar: tuple[float, float, float],
         "iyms": iyms,
         "n": n,
         "tolerans": kullanilan_tol,
-        "lig_sayisi": int(sec["Div"].nunique()),
-        "ilk_tarih": sec["Tarih"].min(),
-        "ms1": float((sec["FTR"] == "H").mean()),
-        "ms0": float((sec["FTR"] == "D").mean()),
-        "ms2": float((sec["FTR"] == "A").mean()),
-        "gol_ort": float(toplam_gol.mean()),
-        "ust25": float((toplam_gol > 2.5).mean()),
-        "kg_var": float(((sec["FTHG"] > 0) & (sec["FTAG"] > 0)).mean()),
-        "skorlar": [(skor, int(adet), adet / n) for skor, adet in skor_sayimi.head(6).items()],
+        "lig_sayisi": int(len(np.unique(V["div"][maske]))),
+        "ilk_tarih": pd.Timestamp(V["tarih"][maske].min()),
+        "ms1": float(V["ftr_h"][maske].mean()),
+        "ms0": float(V["ftr_d"][maske].mean()),
+        "ms2": float(V["ftr_a"][maske].mean()),
+        "gol_ort": float(gol.mean()),
+        "ust25": float((gol > 2.5).mean()),
+        "kg_var": float(((fthg_s > 0) & (ftag_s > 0)).mean()),
+        "skorlar": [(str(skor), int(adet), int(adet) / n) for skor, adet in sirali_skor[:6]],
     }
 
 
