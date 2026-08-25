@@ -371,6 +371,14 @@ def uygulama_olustur():
 
         return jsonify({"surum": SURUM, "kontroller": kontroller})
 
+    @app.get("/api/af-test")
+    def af_test():
+        """API-Football anahtarını kaynağın kendi /status yanıtıyla sınar."""
+        try:
+            return jsonify(veri.af_tanilama())
+        except Exception as hata:  # noqa: BLE001
+            return jsonify({"sonuc": "Test çalıştırılamadı.", "hata": str(hata)[:300]}), 500
+
     @app.get("/api/durum")
     def durum():
         try:

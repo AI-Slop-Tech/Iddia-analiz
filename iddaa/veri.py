@@ -1745,6 +1745,63 @@ AF_LIG_ADLARI = {"ŞL": "UEFA Şampiyonlar Ligi", "EL": "UEFA Avrupa Ligi",
                  "KL": "UEFA Konferans Ligi", "TK": "Türkiye Kupası"}
 
 
+def af_tanilama() -> dict:
+    """Anahtarı KAYNAĞIN KENDİ yanıtıyla test eder — tahmin yok.
+
+    /status hesabın durumunu ve kotasını söyler; ardından bugünün fikstürü
+    tek istekle çekilip kaç maç görüldüğü ve bunların kaça kadarının bültene
+    girebileceği raporlanır. Kullanıcı "hâlâ bulmuyor" dediğinde sorunun
+    anahtarda mı, kotada mı, eşleştirmede mi olduğu buradan okunur.
+    """
+    rapor: dict = {"anahtar_var": bool(_af_anahtar())}
+    if not rapor["anahtar_var"]:
+        rapor["sonuc"] = "Anahtar kayıtlı değil."
+        return rapor
+    try:
+        yanit = requests.get(
+            APIFOOTBALL_TABAN + "/status",
+            headers={"x-apisports-key": _af_anahtar(), "User-Agent": KULLANICI_AJANI},
+            timeout=15,
+        )
+        rapor["http"] = yanit.status_code
+        govde = yanit.json()
+        if govde.get("errors"):
+            rapor["hata"] = str(govde["errors"])[:300]
+            rapor["sonuc"] = "Kaynak anahtarı reddetti."
+            return rapor
+        c = (govde.get("response") or {})
+        abone = c.get("subscription") or {}
+        istek = c.get("requests") or {}
+        rapor["hesap"] = (c.get("account") or {}).get("email")
+        rapor["plan"] = abone.get("plan")
+        rapor["aktif"] = abone.get("active")
+        rapor["biten"] = abone.get("end")
+        rapor["gunluk_kullanim"] = istek.get("current")
+        rapor["gunluk_limit"] = istek.get("limit_day")
+    except Exception as h:  # noqa: BLE001
+        rapor["hata"] = str(h)[:300]
+        rapor["sonuc"] = "Kaynağa ulaşılamadı."
+        return rapor
+
+    # Kota varsa bugünün fikstürünü dene
+    try:
+        gun = (simdi_tr() - pd.Timedelta(hours=3)).strftime("%Y-%m-%d")
+        maclar = _af_gun_fiksturu(gun)
+        rapor["bugun_mac"] = len(maclar)
+        ligler: dict = {}
+        for m in maclar:
+            ad = f"{m.get('ulke') or ''} {m.get('lig_ad') or ''}".strip()
+            ligler[ad] = ligler.get(ad, 0) + 1
+        rapor["ornek_ligler"] = sorted(ligler.items(), key=lambda x: -x[1])[:12]
+        rapor["sonuc"] = (f"Çalışıyor — kaynak bugün {len(maclar)} maç görüyor."
+                          if maclar else
+                          "Anahtar geçerli ama kaynak bugün için maç döndürmedi.")
+    except Exception as h:  # noqa: BLE001
+        rapor["fikstur_hata"] = str(h)[:300]
+        rapor["sonuc"] = "Anahtar geçerli ama fikstür çekilemedi."
+    return rapor
+
+
 def _af_gun_fiksturu(gun: str, sadece_onbellek: bool = False) -> list:
     """Günün tüm dünya fikstürü — TEK istek, 6 saat önbellek. gun: YYYY-MM-DD."""
     onbellek = _oddsapi_onbellek("af_fikstur.json")
