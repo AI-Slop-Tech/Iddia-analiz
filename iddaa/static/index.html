@@ -1678,8 +1678,14 @@ const HUCRE_RENK = {
   'A':'248,113,113', 'Yok':'248,113,113', '2':'248,113,113',
   'X':'251,191,36'
 };
-const TAB_KOLONLAR = ['iy05','iy15','ms15','ms25','ms35','kg','iy_skor','y2_skor','ms_skor','iy_sonuc','ms_sonuc'];
-const TAB_BASLIK = `<th class="orta">İY 0.5</th><th class="orta">İY 1.5</th><th class="orta">MS 1.5</th>
+const TAB_KOLONLAR = ['iy05','iy15','iy_kg','y2_gol','y2_kg','iki_yari','ms15','ms25','ms35','kg',
+  'iy_skor','y2_skor','ms_skor','iy_sonuc','ms_sonuc'];
+const TAB_BASLIK = `<th class="orta">İY 0.5</th><th class="orta">İY 1.5</th>
+  <th class="orta" title="İlk yarıda iki takım da gol atar">İY KG</th>
+  <th class="orta" title="İkinci yarıda en az 1 gol">2Y Gol</th>
+  <th class="orta" title="İkinci yarıda iki takım da gol atar">2Y KG</th>
+  <th class="orta" title="Hem ilk hem ikinci yarıda gol">İki Yarı</th>
+  <th class="orta">MS 1.5</th>
   <th class="orta">MS 2.5</th><th class="orta">MS 3.5</th><th class="orta">KG</th><th class="orta">İY Skor</th>
   <th class="orta">2Y Skor</th><th class="orta">MS Skor</th><th class="orta">İY</th><th class="orta">MS</th>`;
 
@@ -1739,7 +1745,13 @@ function tabloCiz(){
         <td><button class="mini-btn" onclick="tabloDetay(${m.id})">🔬</button></td>
       </tr>`).join('')}
     </table></div>
-    <div class="not">Skor hücreleri modelin en olası tekil skorudur — olasılığı doğal olarak düşüktür (%8-15 bandı tipiktir); yön hücreleri (Alt/Üst, KG, 1X2) daha güvenilirdir.</div>
+    <div class="not">Skor hücreleri modelin en olası tekil skorudur — olasılığı doğal olarak düşüktür (%8-15 bandı tipiktir); yön hücreleri (Alt/Üst, KG, 1X2) daha güvenilirdir.
+      <br>🆕 <b>Yarı pazarları</b> (İY KG, 2Y Gol, 2Y KG, İki Yarı) 15.936 maçlık sızıntısız testle kalibre edildi.
+      Ayırt gücü (modelin en yüksek %25'i ile en düşük %25'i arasındaki gerçekleşme farkı):
+      <b>İki Yarı +12.4</b> · İY 0.5 +9.4 · 2Y Gol +7.1 puan — bunlar güvenilir.
+      <b>İY KG yalnız +3.6, 2Y KG +4.6 puan</b>: model bu iki pazarda maça özel pek bir şey bilmiyor,
+      ağırlıkla lig ortalamasını söylüyor. Bu yüzden <b>öneri listesine alınmıyorlar</b> — tabloda
+      bilgi olarak duruyorlar, kararı siz verin.</div>
   </div>`;
 }
 

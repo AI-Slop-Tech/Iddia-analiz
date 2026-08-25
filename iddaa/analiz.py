@@ -514,6 +514,44 @@ def _guc_katsayisi(maclar: pd.DataFrame, gol_kolonu: str, referans: pd.Timestamp
     return float(min(max(katsayi, 0.25), 4.0)), float(w.sum())
 
 
+# --------------------------------------------------- yarı bazlı gol pazarları
+#
+# İY/2Y gol ve karşılıklı gol pazarları saf Poisson'dan AŞIRI YAYILMIŞ
+# çıkıyor (iki yarı bağımsız değil: maç durumu ikinci yarıyı değiştiriyor).
+# 15.936 maçlık sızıntısız testte (25 ay; her ay için eğitim = o aydan
+# öncesi) ölçülen ham sapma, seçilen büzülme ve ayırt gücü:
+#
+#   pazar      taban   en büyük kova sapması      k     ayırt gücü
+#   İY GOL     %70.7   16.5 puan → 3.9 puan      0.5    +9.4 puan
+#   İY KG      %19.5    9.3 puan → 0.6 puan      0.4    +3.6 puan
+#   2Y GOL     %78.7   11.4 puan → 3.8 puan      0.4    +7.1 puan
+#   2Y KG      %26.3   18.7 puan → 6.7 puan      0.4    +4.6 puan
+#   İKİ YARI   %56.3   16.0 puan → 1.5 puan      0.4   +12.4 puan
+#
+# "Ayırt gücü" = modelin en yüksek %25'i ile en düşük %25'i arasındaki
+# gerçekleşme farkı. İY KG ve 2Y KG'de bu fark küçük — model o pazarlarda
+# maça özel pek bir şey bilmiyor, ağırlıkla lig ortalamasını söylüyor. Bu
+# yüzden ikisi "güvenli seçim" listesine GİRMEZ (YARI_ONERILMEZ); olasılık
+# olarak tabloda gösterilir, öneri diye sunulmaz.
+#
+# Uyarı: büzülme küresel tabana doğrudur, lig farkını bir miktar siler.
+# Ölçümde Brier'i düşürdüğü (%0.8-1.4) için kabul edildi.
+YARI_BUZULME = {
+    "iy_gol":   (0.5, 0.707),
+    "iy_kg":    (0.4, 0.195),
+    "y2_gol":   (0.4, 0.787),
+    "y2_kg":    (0.4, 0.263),
+    "iki_yari": (0.4, 0.563),
+}
+YARI_ONERILMEZ = ("İY KG VAR", "İY KG YOK", "2Y KG VAR", "2Y KG YOK")
+
+
+def _yari_kalibre(pazar: str, p: float) -> float:
+    """Aşırı yayılmayı ölçülen tabana doğru büzerek düzeltir."""
+    k, taban = YARI_BUZULME[pazar]
+    return min(0.98, max(0.02, taban + k * (p - taban)))
+
+
 def poisson_tahmini(df: pd.DataFrame, ev: str, dep: str, lig_ipucu: str | None = None) -> dict:
     """Zaman ağırlıklı hücum/savunma güçleriyle gol beklentisi ve olasılıklar."""
     referans = df["Tarih"].max() + pd.Timedelta(days=1)
@@ -596,12 +634,21 @@ def poisson_tahmini(df: pd.DataFrame, ev: str, dep: str, lig_ipucu: str | None =
             "ms0": sum(m[i][i] for i in range(MAKS_GOL + 1)) / t,
             "ust05": 1.0 - math.exp(-lam_t),
             "ust15": 1.0 - math.exp(-lam_t) * (1.0 + lam_t),
+            # o yarıda İKİ takım da gol atar: iki bağımsız Poisson da >0
+            "kg": (1.0 - math.exp(-lam_e)) * (1.0 - math.exp(-lam_d)),
             "skor": skor,
         }
 
     iy = _yari_blok(lam_ev * iy_pay, lam_dep * iy_pay)
     y2 = _yari_blok(lam_ev * (1 - iy_pay), lam_dep * (1 - iy_pay))
     iy["ms2"] = 1.0 - iy["ms1"] - iy["ms0"]
+    y2["ms2"] = 1.0 - y2["ms1"] - y2["ms0"]
+    iki_yari = iy["ust05"] * y2["ust05"]   # bağımsızlık; hemen altta düzeltilir
+    iy["ust05"] = _yari_kalibre("iy_gol", iy["ust05"])
+    iy["kg"] = _yari_kalibre("iy_kg", iy["kg"])
+    y2["ust05"] = _yari_kalibre("y2_gol", y2["ust05"])
+    y2["kg"] = _yari_kalibre("y2_kg", y2["kg"])
+    iki_yari = _yari_kalibre("iki_yari", iki_yari)
 
     return {
         "lig": lig_kodu,
@@ -618,7 +665,9 @@ def poisson_tahmini(df: pd.DataFrame, ev: str, dep: str, lig_ipucu: str | None =
         "skorlar": skorlar,
         "iy_pay": iy_pay,
         "iy": iy,
+        "y2": y2,
         "y2_skor": y2["skor"],
+        "iki_yari_gol": iki_yari,
         "uyarilar": uyarilar,
     }
 
@@ -1112,9 +1161,16 @@ def tahmin_hucreleri(poisson: dict, kalip: dict | None = None) -> dict:
     p_kg = min(0.98, p_kg + KG_DUZELTME)  # pazar karnesinde ölçülen sapma düzeltmesi
 
     iy = poisson["iy"]
+    y2 = poisson.get("y2") or {}
     return {
         "iy05": ikili(iy["ust05"]),
         "iy15": ikili(iy["ust15"]),
+        # yarı bazlı karşılıklı gol — kalibre edilmiş (bkz. YARI_BUZULME)
+        "iy_kg": ikili(iy["kg"], "Var", "Yok") if "kg" in iy else None,
+        "y2_kg": ikili(y2["kg"], "Var", "Yok") if "kg" in y2 else None,
+        "y2_gol": ikili(y2["ust05"], "Var", "Yok") if "ust05" in y2 else None,
+        "iki_yari": (ikili(poisson["iki_yari_gol"], "Var", "Yok")
+                     if poisson.get("iki_yari_gol") is not None else None),
         "ms15": ikili(poisson["ust15"]),
         "ms25": ikili(p_ust25),
         "ms35": ikili(poisson["ust35"]),
@@ -1183,7 +1239,24 @@ def guvenli_secimler(a: dict, sinir: float = 0.70) -> list[dict]:
     if "ust15" in iy:
         ekle("İY 1.5 ÜST", iy["ust15"])
         ekle("İY 1.5 ALT", 1 - iy["ust15"])
+    if "kg" in iy:
+        ekle("İY KG VAR", iy["kg"])
+        ekle("İY KG YOK", 1 - iy["kg"])
+    y2 = p.get("y2") or {}
+    if "ust05" in y2:
+        ekle("2Y GOL VAR", y2["ust05"])
+        ekle("2Y GOL YOK", 1 - y2["ust05"])
+    if "kg" in y2:
+        ekle("2Y KG VAR", y2["kg"])
+        ekle("2Y KG YOK", 1 - y2["kg"])
+    if p.get("iki_yari_gol") is not None:
+        ekle("HER İKİ YARI GOL VAR", p["iki_yari_gol"])
+        ekle("HER İKİ YARI GOL YOK", 1 - p["iki_yari_gol"])
 
+    # Ayırt gücü ölçümde zayıf çıkan pazarlar öneri listesinden düşer: model
+    # onlarda maça özel bilgi taşımıyor (İY KG +3.6, 2Y KG +4.6 puan), yalnız
+    # lig ortalamasını tekrarlıyor. Tahmin tablosunda olasılık olarak kalır.
+    adaylar = [x for x in adaylar if x["pazar"] not in YARI_ONERILMEZ]
     adaylar.sort(key=lambda x: -x["p"])
     return adaylar
 
@@ -1202,6 +1275,7 @@ def gercek_hucreler(fthg: int, ftag: int, hthg: int | None, htag: int | None) ->
         "ms_skor": f"{fthg}-{ftag}",
         "ms_sonuc": sonuc(fthg, ftag),
         "iy05": None, "iy15": None, "iy_skor": None, "y2_skor": None, "iy_sonuc": None,
+        "iy_kg": None, "y2_gol": None, "y2_kg": None, "iki_yari": None,
     }
     if hthg is not None and htag is not None:
         iy_toplam = hthg + htag
@@ -1209,6 +1283,11 @@ def gercek_hucreler(fthg: int, ftag: int, hthg: int | None, htag: int | None) ->
             {
                 "iy05": "Ü" if iy_toplam > 0.5 else "A",
                 "iy15": "Ü" if iy_toplam > 1.5 else "A",
+                "iy_kg": "Var" if hthg > 0 and htag > 0 else "Yok",
+                "y2_gol": "Var" if (fthg - hthg) + (ftag - htag) > 0 else "Yok",
+                "y2_kg": ("Var" if (fthg - hthg) > 0 and (ftag - htag) > 0 else "Yok"),
+                "iki_yari": ("Var" if iy_toplam > 0
+                             and (fthg - hthg) + (ftag - htag) > 0 else "Yok"),
                 "iy_skor": f"{hthg}-{htag}",
                 "y2_skor": f"{fthg - hthg}-{ftag - htag}",
                 "iy_sonuc": sonuc(hthg, htag),
