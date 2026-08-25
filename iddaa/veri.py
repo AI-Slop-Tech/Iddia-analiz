@@ -24,6 +24,7 @@ import glob
 import json
 import os
 import re
+import threading
 import time
 import unicodedata
 import warnings
@@ -1692,14 +1693,45 @@ def _af_sayac_artir() -> bool:
     return True
 
 
-def _af_getir(yol: str, parametreler: dict):
-    if not _af_sayac_artir():
-        raise RuntimeError("API-Football günlük istek tavanına ulaşıldı (90)")
+# Ücretsiz plan DAKİKADA 10 istek kabul ediyor. Kaynağın kendi uyarısı:
+# limit aşılırsa "uyarı olmadan geçici veya kalıcı engel" geliyor ve engel
+# yalnız anahtarı değil ÇIKIŞ IP'sini de hedefliyor. Eskiden yalnız günlük
+# tavan (90) vardı; radar 138 maçlık bülteni dönerken istekler saniyeler
+# içinde patlıyor, bu da anahtarın askıya alınmasına yol açabiliyordu.
+# Artık iki istek arasında en az _AF_MIN_ARALIK saniye bırakılır.
+_AF_MIN_ARALIK = 6.5          # 60/10 = 6 sn + emniyet payı
+_AF_BEKLEME_TAVANI = 3.0      # sıradan istek bundan uzun beklemez, atlar
+_AF_ONCELIKLI_TAVAN = 8.0     # fikstür listesi: tam aralığı beklemeye değer
+_AF_SON_ISTEK = {"zaman": 0.0}
+_AF_KILIT = threading.Lock()
+
+
+def _af_getir(yol: str, parametreler: dict, oncelikli: bool = False):
+    """oncelikli=True: sıra gelene kadar BEKLER (fikstür listesi gibi az sayıda,
+    yüksek değerli istekler için — atlanırsa bütün maçlar kaybolur).
+    oncelikli=False: sıra yakın değilse isteği ATLAR (maç başına oran gibi çok
+    sayıda istek; atlanan sonraki taramada önbellekten tamamlanır)."""
+    with _AF_KILIT:
+        bekle = _AF_MIN_ARALIK - (time.time() - _AF_SON_ISTEK["zaman"])
+        if bekle > (_AF_ONCELIKLI_TAVAN if oncelikli else _AF_BEKLEME_TAVANI):
+            raise RuntimeError("API-Football hız sınırı: istek aralığı korunuyor")
+        if bekle > 0:
+            time.sleep(bekle)
+        if not _af_sayac_artir():
+            raise RuntimeError("API-Football günlük istek tavanına ulaşıldı (90)")
+        _AF_SON_ISTEK["zaman"] = time.time()
+
     yanit = requests.get(
         APIFOOTBALL_TABAN + yol, params=parametreler,
         headers={"x-apisports-key": _af_anahtar(), "User-Agent": KULLANICI_AJANI},
         timeout=12,
     )
+    if yanit.status_code == 429:
+        # Sınır yine de yendi: bir sonraki isteği tam bir dakika geri it.
+        with _AF_KILIT:
+            _AF_SON_ISTEK["zaman"] = time.time() + 60.0
+        AF_SON_DURUM["hata"] = "hız sınırı (429) — istekler bir dakika duraklatıldı"
+        raise RuntimeError("API-Football hız sınırı (429)")
     yanit.raise_for_status()
     govde = yanit.json()
     if govde.get("errors"):
@@ -1722,7 +1754,9 @@ def _af_gun_fiksturu(gun: str, sadece_onbellek: bool = False) -> list:
         return kayit["veri"]
     if sadece_onbellek:
         return [] if eski_bicim else (kayit or {}).get("veri", [])
-    govde = _af_getir("/fixtures", {"date": gun, "timezone": "UTC"})
+    # Fikstür listesi tek istekte O GÜNÜN TÜM maçlarını getirir — atlanırsa
+    # bülten boşalır, o yüzden sırasını bekler.
+    govde = _af_getir("/fixtures", {"date": gun, "timezone": "UTC"}, oncelikli=True)
     maclar = [
         {
             "id": r["fixture"]["id"],
