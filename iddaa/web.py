@@ -623,14 +623,20 @@ def uygulama_olustur():
         birlesik = pd.concat([fik, pd.DataFrame(satirlar)], ignore_index=True)
         return birlesik.sort_values("Tarih").reset_index(drop=True)
 
+    AF_KAPSAM_SINIRI = 400   # günlük dünya fikstürü tavanı
+
     def _af_kapsami_ekle(df: pd.DataFrame, fik: pd.DataFrame) -> pd.DataFrame:
         """API-Football günlük dünya fikstürünü bültene 3. katman olarak katar.
 
         CSV kaynağı kupa/eleme maçlarını bilmez, football-data.org ücretsizi
         eleme-playoff vermez — Fenerbahçe'nin Avrupa maçları bu yüzden
         görünmüyordu. AF'nin gün penceresi (Free: bugün ±1) buradan girer.
-        Sel önleme: yalnız beyaz listedeki turnuvalar (ŞL/UEL/KL/T1/TK) VEYA
-        iki takımı da arşive güvenle eşleşen maçlar eklenir; üst sınır 120.
+        Kapsam: varsayılan olarak günün TÜM dünya fikstürü listelenir. Eskiden
+        yalnız beyaz listedeki turnuvalar (ŞL/UEL/KL/T1/TK) veya iki takımı da
+        arşive oturan maçlar eklenirdi; kullanıcı "bütün maçları dökmüyor"
+        dediği için bu sel önleme kaldırıldı. Takımı arşivde çözülemeyen maç
+        da listelenir, "analiz_yok" ile işaretlenir — satırda nedeni yazar.
+        Üst sınır 120'den AF_KAPSAM_SINIRI'na çıkarıldı.
         """
         if not veri.gizli_anahtar("APIFOOTBALL_KEY", "apifootball_key"):
             return fik
@@ -698,7 +704,7 @@ def uygulama_olustur():
 
         satirlar = []
         for m in kayitlar:
-            if len(satirlar) >= 120:
+            if len(satirlar) >= AF_KAPSAM_SINIRI:
                 break
             if m.get("durum") in ("PST", "CANC", "ABD", "AWD", "WO"):
                 continue
@@ -714,10 +720,10 @@ def uygulama_olustur():
             kod = veri.AF_LIG_ESLEME.get(m.get("lig_id"))
             ev, dep = _esle(str(m.get("ev") or "")), _esle(str(m.get("dep") or ""))
             if kod is None:
-                # beyaz liste dışı: yalnız iki takımı da arşive oturan maçlar
-                if not (ev and dep):
-                    continue
-                kod = son_lig.get(ev, "AF")
+                # Beyaz liste dışı maçlar da listelenir. Takımlar arşive
+                # oturuyorsa lig kodu onlardan türetilir ve maç tam analiz
+                # alır; oturmuyorsa "AF" koduyla yalnız listelenir.
+                kod = son_lig.get(ev, "AF") if ev else "AF"
                 if kod in veri.LIGLER and (son_lig.get(ev) != son_lig.get(dep)):
                     kod = "AF"  # ligler-arası (kupa benzeri): kod iddiasında bulunma
             analiz_var = bool(ev and dep)
