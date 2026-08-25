@@ -390,6 +390,8 @@ def uygulama_olustur():
                 "piyasa_iyms": bool(veri.gizli_anahtar("ODDS_API_IO_KEY", "odds_api_io_key"))
                                or bool(veri.gizli_anahtar("APIFOOTBALL_KEY", "apifootball_key")),
                 "apifootball": bool(veri.gizli_anahtar("APIFOOTBALL_KEY", "apifootball_key")),
+                "kapsam": _DURUM.get("kapsam"),
+                "af_durum": dict(veri.AF_SON_DURUM),
                 "oddsapi": bool(veri.gizli_anahtar("ODDS_API_IO_KEY", "odds_api_io_key")),
                 "veri_zamani": time.strftime("%d.%m %H:%M", time.localtime(_DURUM["arsiv_zaman"])),
                 "ligler": [
@@ -863,15 +865,34 @@ def uygulama_olustur():
             fik, kitapcilar = veri.fikstur_yukle(
                 ligler=sorted(set(df["Div"].unique()) | set(veri.EK_LIGLER)), yenile=yenile
             )
-            fik = _dis_kapsami_ekle(df, fik, yenile)
+            # Katman katman kaç maç eklendiği ve hata varsa nedeni kaydedilir:
+            # eskiden bu hatalar sessizce yutuluyordu, "neden az maç var"
+            # sorusu ancak sunucu günlüğüne bakarak yanıtlanabiliyordu.
+            kapsam = {"csv": int(len(fik))}
+            n = len(fik)
+            try:
+                fik = _dis_kapsami_ekle(df, fik, yenile)
+                kapsam["fdorg"] = int(len(fik) - n)
+            except Exception as h:  # noqa: BLE001
+                kapsam["fdorg"] = 0
+                kapsam["fdorg_hata"] = str(h)[:200]
+            n = len(fik)
             try:
                 fik = _dun_arsivden_ekle(df, fik)   # dünkü oynanmışlar denetim için
-            except Exception:  # noqa: BLE001
-                pass
+                kapsam["dun"] = int(len(fik) - n)
+            except Exception as h:  # noqa: BLE001
+                kapsam["dun"] = 0
+                kapsam["dun_hata"] = str(h)[:200]
+            n = len(fik)
             try:
                 fik = _af_kapsami_ekle(df, fik)
-            except Exception:  # noqa: BLE001 — kapsama katmanı bülteni asla düşürmesin
-                pass
+                kapsam["af"] = int(len(fik) - n)
+            except Exception as h:  # noqa: BLE001 — kapsama katmanı bülteni düşürmesin
+                kapsam["af"] = 0
+                kapsam["af_hata"] = str(h)[:200]
+            kapsam["toplam"] = int(len(fik))
+            kapsam["af_anahtar"] = bool(veri.gizli_anahtar("APIFOOTBALL_KEY", "apifootball_key"))
+            _DURUM["kapsam"] = kapsam
             try:
                 _piyasa_fuzyonu_uygula(fik)      # önbellekte ne varsa satırlara işle
                 _piyasa_isit_baslat(fik)         # eksikleri arka planda çek
