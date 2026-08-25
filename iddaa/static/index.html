@@ -2459,7 +2459,8 @@ function kapsamCiz(d){
   // dediğinde sorunun dağıtım gecikmesi mi yoksa veri mi olduğu hemen belli olsun.
   const surumSatiri = `<div class="capraz-satir" style="border-top:0">
     <span style="flex:1">çalışan sürüm</span><b>v${esc(d.surum || '?')}</b>
-    <button class="mini-btn" onclick="kapsamYenile()">🔄 Kapsamı Yenile</button></div>`;
+    <button class="mini-btn" onclick="kapsamYenile()">🔄 Kapsamı Yenile</button>
+    <button class="mini-btn" onclick="afTest()">🔑 Anahtarı Test Et</button></div>`;
   if(!k){
     kutu.innerHTML = surumSatiri + `<div class="capraz-satir">
       <span class="ipucu" style="flex-basis:100%">Bülten henüz kurulmadı — <b>🔄 Kapsamı Yenile</b>'ye basın.</span></div>`;
@@ -2488,6 +2489,35 @@ function kapsamCiz(d){
 // Fikstürü sıfırdan kurdurur ve teşhisi tazeler: kapsam bilgisi yalnız
 // bülten (yeniden) kurulurken yazılıyor; önbellekten servis edilen bir
 // oturumda kutu boş kalabiliyordu.
+// Anahtarı kaynağın KENDİ /status yanıtıyla sınar: hesap aktif mi, plan ne,
+// kota ne kadar dolmuş, bugün kaç maç görüyor. "Hâlâ bulmuyor" denildiğinde
+// sorunun anahtarda mı kotada mı eşleştirmede mi olduğu buradan okunur.
+async function afTest(){
+  const kutu = $('#ay-kapsam');
+  if(kutu) kutu.innerHTML = '<span class="ipucu">⏳ anahtar kaynağa soruluyor…</span>';
+  try{
+    const r = await api('/api/af-test');
+    const sat = (ad, deger) => deger === undefined || deger === null ? '' :
+      `<div class="capraz-satir"><span style="flex:1">${ad}</span><b>${esc(String(deger))}</b></div>`;
+    const ligler = (r.ornek_ligler || []).map(x => `${esc(x[0])} (${x[1]})`).join(' · ');
+    kutu.innerHTML = `
+      <div class="capraz-satir" style="border-top:0"><b style="flex:1">${esc(r.sonuc || '—')}</b></div>
+      ${sat('hesap', r.hesap)}
+      ${sat('plan', r.plan)}
+      ${sat('abonelik aktif mi', r.aktif === undefined ? undefined : (r.aktif ? 'EVET' : 'HAYIR'))}
+      ${sat('bitiş', r.biten)}
+      ${sat('bugünkü kullanım', r.gunluk_kullanim === undefined ? undefined
+            : `${r.gunluk_kullanim} / ${r.gunluk_limit}`)}
+      ${sat('kaynak bugün kaç maç görüyor', r.bugun_mac)}
+      ${r.hata ? `<div class="capraz-satir"><span class="ev-neg" style="flex-basis:100%">⚠ ${esc(r.hata)}</span></div>` : ''}
+      ${r.fikstur_hata ? `<div class="capraz-satir"><span class="ev-neg" style="flex-basis:100%">⚠ fikstür: ${esc(r.fikstur_hata)}</span></div>` : ''}
+      ${ligler ? `<div class="capraz-satir"><span class="ipucu" style="flex-basis:100%">ligler: ${ligler}</span></div>` : ''}
+      <div class="capraz-satir"><button class="mini-btn" onclick="kapsamYenile()">🔄 Bülteni Yeniden Kur</button></div>`;
+  }catch(h){
+    if(kutu) kutu.innerHTML = `<span class="ev-neg">⚠ ${esc(h.message)}</span>`;
+  }
+}
+
 async function kapsamYenile(){
   const kutu = $('#ay-kapsam');
   if(kutu) kutu.innerHTML = '<span class="ipucu">⏳ bülten yeniden kuruluyor, bu 1-2 dakika sürebilir…</span>';
