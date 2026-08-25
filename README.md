@@ -54,6 +54,17 @@ python tahmin.py analiz --ev Alanyaspor --dep Konyaspor --oran 2.20 3.30 3.30 --
 Takım adlarında Türkçe karakter ve kısaltma serbesttir: `başakşehir`,
 `göztepe`, `bayern münih`, `man city`, `real` gibi girişler otomatik eşlenir.
 
+## 💻 Kendi bilgisayarında çalıştırma
+
+Sunucu yerine kendi makinende çalıştırmak istersen adım adım kılavuz:
+**[KURULUM.md](KURULUM.md)** — Python kurulumu, veri indirme, API anahtarı
+tanımlama ve sık sorunlar. Yerelde çalıştırmanın bir avantajı, API
+anahtarının tek bir IP'den kullanılması: aynı anahtarı hem sunucudan hem
+başka yerden kullanmak sağlayıcının hesabı askıya almasına yol açabiliyor.
+
+> ⚠️ Türkiye'den `football-data.co.uk` engelli. İlk iş
+> `python tahmin.py baglanti` çalıştırıp `✅` görmek; `❌` çıkarsa VPN açın.
+
 ## 🌐 Web arayüzü
 
 ```bash
