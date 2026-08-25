@@ -1,0 +1,22 @@
+# ── İddaa Analiz — ayar dosyası ────────────────────────────────────
+#
+# KULLANIM: Bu dosyanın adını "ayarlar.txt" yapın (kopyalayıp yeniden
+# adlandırın), sonra gereken satırların başındaki # işaretini silin.
+# BASLAT.bat bu dosyayı otomatik okur.
+#
+# Satır biçimi:  ANAHTAR=deger      (eşittirin etrafında boşluk BIRAKMAYIN)
+# ───────────────────────────────────────────────────────────────────
+
+# Türkiye'den veri kaynağına erişim için (VPN kullanmıyorsanız).
+# Kendi ücretsiz Cloudflare Worker adresiniz — tarifi KURULUM.md'de.
+#IDDAA_KAYNAK_TABAN=https://iddaa-veri.hesabiniz.workers.dev
+
+# Alternatif: elinizde bir HTTP/SOCKS5 vekil varsa
+#IDDAA_PROXY=http://kullanici:parola@vekil.example.com:8080
+
+# API-Football anahtarı — Şampiyonlar Ligi, kupalar ve dünya ligleri için
+# (ücretsiz: dashboard.api-football.com)
+#APIFOOTBALL_KEY=buraya_anahtariniz
+
+# football-data.org anahtarı — takvim genişletme (ücretsiz)
+#FOOTBALL_DATA_ORG_KEY=buraya_anahtariniz

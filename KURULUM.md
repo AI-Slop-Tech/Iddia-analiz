@@ -24,9 +24,59 @@ python tahmin.py baglanti
 - `✅ erişim var` → harika, hiçbir şey yapmana gerek yok
 - `❌ erişilemedi` → **VPN aç** (yurt dışı sunucu seç) ve komutu tekrarla
 
-VPN en pratik çözüm. Kalıcı çözüm istersen README'deki
-"Erişim sorunu (Türkiye)" bölümünde vekil (proxy) ve Cloudflare Worker
-seçenekleri anlatılıyor.
+**Hızlı çözüm:** VPN aç, indirme bitene kadar açık kalsın (2-3 dakika),
+sonra kapatabilirsin. Arşiv diske iner, bir daha inmez.
+
+**Kalıcı çözüm:** aşağıdaki bölüm — 5 dakika, ücretsiz, bir daha VPN
+gerekmez.
+
+---
+
+## 🔓 VPN'siz kalıcı çözüm — ücretsiz Cloudflare Worker
+
+Kaynağın önüne kendi ücretsiz "aynanı" koyuyorsun. `workers.dev` adresi
+Türkiye'den erişilebilir olduğu için engel devre dışı kalır.
+
+**1.** [dash.cloudflare.com](https://dash.cloudflare.com) → ücretsiz hesap aç
+(kredi kartı istemez).
+
+**2.** Sol menüden **Workers & Pages** → **Create** → **Start with Hello
+World!** → **Deploy**.
+
+**3.** Açılan sayfada **Edit code** (veya **</> Edit**) düğmesine bas.
+Editördeki tüm kodu sil, yerine bunu yapıştır:
+
+```js
+export default {
+  async fetch(request) {
+    const url = new URL(request.url);
+    const hedef = "https://www.football-data.co.uk" + url.pathname + url.search;
+    const yanit = await fetch(hedef, { headers: { "User-Agent": "iddaa-analiz/1.0" } });
+    return new Response(yanit.body, {
+      status: yanit.status,
+      headers: { "Content-Type": yanit.headers.get("Content-Type") || "text/csv" },
+    });
+  },
+};
+```
+
+**4.** Sağ üstten **Deploy** (veya **Save and deploy**).
+
+**5.** Sayfada Worker'ının adresi yazar, şuna benzer:
+`https://hello-world.kullaniciadin.workers.dev` — **bu adresi kopyala.**
+
+**6.** Proje klasöründe `ayarlar.ornek.txt` dosyasını kopyala, adını
+**`ayarlar.txt`** yap. Not Defteri ile aç ve şu satırı ekle (başındaki
+`#` olmadan, kendi adresinle):
+
+```
+IDDAA_KAYNAK_TABAN=https://hello-world.kullaniciadin.workers.dev
+```
+
+**7.** `BASLAT.bat`'a tekrar çift tıkla. Artık VPN'siz çalışır.
+
+> Ücretsiz kota günde 100.000 istek. Bu proje ilk kurulumda ~242, sonra
+> günde birkaç istek yapar — kotaya yaklaşman mümkün değil.
 
 ---
 
@@ -200,6 +250,11 @@ python3 tahmin.py web
 Kalıcı olması için `~/.zshrc` veya `~/.bashrc` dosyasının sonuna aynı
 satırı ekle.
 
+> **En kolayı:** proje klasöründeki `ayarlar.ornek.txt` dosyasını kopyalayıp
+> adını `ayarlar.txt` yap, Not Defteri ile aç, ilgili satırın başındaki `#`
+> işaretini sil ve anahtarını yaz. `BASLAT.bat` bu dosyayı otomatik okur —
+> `setx` ile uğraşmana gerek kalmaz.
+>
 > Anahtarı panelden de kaydedebilirsin (⚙️ Ayarlar). O da `data/ayarlar.json`
 > dosyasına yazılır ve kalıcıdır. Ortam değişkeni önceliklidir.
 

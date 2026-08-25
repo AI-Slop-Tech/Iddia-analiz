@@ -5,3 +5,6 @@ __pycache__/
 *.pyc
 .env
 .venv/
+
+# kullanicinin kendi ayar dosyasi (anahtar icerir, asla commitlenmez)
+ayarlar.txt
