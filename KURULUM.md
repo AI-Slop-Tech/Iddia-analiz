@@ -50,6 +50,33 @@ python3 --version     # Mac/Linux
 
 ---
 
+## 1.5. ⚠️ Komutları NEREYE yazacaksın
+
+Bu en sık yapılan hata: komutlar **PowerShell'e** yazılır, Python'un
+kendi içine değil.
+
+Ekranda gördüğün işarete bak:
+
+| gördüğün | neredesin | doğru mu? |
+|---|---|---|
+| `>>>` | Python yorumlayıcısının **içindesin** | ❌ komutlar burada çalışmaz |
+| `PS C:\Users\...>` | PowerShell | ✅ doğru yer |
+| `C:\Users\...>` | CMD | ✅ doğru yer |
+
+`>>>` görüyorsan Python'un içindesin demektir. `python tahmin.py baglanti`
+yazarsan şu hatayı alırsın:
+
+```
+SyntaxError: invalid syntax
+```
+
+Çünkü orası Python **kodu** yazılan yer, komut yazılan yer değil.
+
+**Çıkmak için:** `exit()` yaz, Enter.
+**Doğru yeri açmak için:** Başlat menüsüne `PowerShell` yaz ve aç.
+
+---
+
 ## 2. Projeyi indir
 
 **Git varsa:**
@@ -65,6 +92,18 @@ cd Iddia-analiz
 ---
 
 ## 3. Gerekli paketleri kur
+
+Önce **proje klasörünün içinde** olduğundan emin ol. PowerShell'de:
+
+```powershell
+cd "$env:USERPROFILE\Desktop\Iddia-analiz-main"    # klasörünü nereye çıkardıysan
+dir tahmin.py                                       # dosyayı listelemeli
+```
+
+`tahmin.py` listeleniyorsa doğru yerdesin. "bulunamadı" diyorsa yanlış
+klasördesin — `dir` ile bak, doğru klasöre `cd` ile gir.
+
+Sonra:
 
 ```bash
 pip install -r requirements.txt
@@ -174,6 +213,8 @@ gösterir: hesap aktif mi, kota ne kadar dolmuş, bugün kaç maç görüyor.
 | Belirti | Sebep / çözüm |
 |---|---|
 | `python: command not found` | PATH'e eklenmemiş. Python'u kaldırıp "Add to PATH" işaretli kur. |
+| `SyntaxError: invalid syntax` | Python'un **içindesin** (`>>>` işareti). `exit()` yaz, PowerShell aç. Bkz. adım 1.5 |
+| `can't open file 'tahmin.py'` | Yanlış klasördesin. `dir tahmin.py` ile kontrol et, `cd` ile proje klasörüne gir. |
 | `baglanti` → `❌ erişilemedi` | Türkiye engeli. VPN aç. |
 | `guncelle` yarıda kesiliyor | Bağlantı koptu; komutu tekrar çalıştır — kaldığı yerden devam eder. |
 | Panel açılıyor ama maç yok | Önce `guncelle` çalıştırdın mı? Sonra ⚙️ → 🔄 Kapsamı Yenile. |
