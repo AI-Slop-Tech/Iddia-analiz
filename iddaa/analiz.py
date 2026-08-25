@@ -1477,6 +1477,44 @@ def oneri_uret(deger: dict, poisson: dict, kalip: dict | None,
     }
 
 
+def kalip_analizi(df: pd.DataFrame, oranlar: tuple[float, float, float],
+                  ust_alt: tuple[float, float] | None = None,
+                  lig_ipucu: str | None = None,
+                  ornek_sayisi: int = 0) -> dict | None:
+    """Takımlar arşivde yokken: YALNIZ oran kalıbına dayalı analiz.
+
+    Şampiyonlar Ligi elemesi gibi maçlarda taraflar (ör. Sabah FA, Hapoel
+    Beer Sheva) football-data.co.uk arşivinde bulunmuyor; takım gücü modeli
+    kurulamıyor ve maç "yalnız listeleme" olarak kalıyordu. Oysa oran kalıbı
+    takım adına HİÇ ihtiyaç duymaz: "aynı oranlarla açılmış geçmiş maçlarda
+    ne oldu" sorusu bu maçlar için de yanıtlanabilir.
+
+    Poisson yerine kalıbın kendi dağılımı konur; böylece deger_analizi'nin
+    harmanı piyasa + kalıp olur (takım modeli payı kalıba devredilir). Bu
+    dürüst bir vekildir — uydurma bir takım gücü üretmez.
+    """
+    kalip = oran_kalibi(df, tuple(oranlar), ornek_sayisi=ornek_sayisi, lig_ipucu=lig_ipucu)
+    if not kalip:
+        return None
+    vekil = {
+        "ms1": kalip["ms1"], "ms0": kalip["ms0"], "ms2": kalip["ms2"],
+        "ust25": kalip["ust25"], "kg_var": kalip.get("kg_var", 0.5),
+        "uyarilar": [f"Takımlar arşivde yok — analiz yalnız oran kalıbına dayanıyor "
+                     f"({kalip['n']} benzer maç)."],
+    }
+    notr = {"puan": 0}   # form verisi yok: yıldız katkısı nötr kalsın
+    deger = deger_analizi(tuple(oranlar), vekil, kalip, ust_alt=ust_alt)
+    oneri = oneri_uret(deger, vekil, kalip, notr, notr, elo_farki=None)
+    return {
+        "oranlar": tuple(oranlar),
+        "poisson": vekil,
+        "kalip": kalip,
+        "deger": deger,
+        "oneri": oneri,
+        "yalniz_kalip": True,
+    }
+
+
 def mac_analizi(df: pd.DataFrame, ev: str, dep: str,
                 oranlar: tuple[float, float, float] | None = None,
                 tolerans: float = 0.02,

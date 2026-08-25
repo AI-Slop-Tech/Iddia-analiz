@@ -1021,6 +1021,7 @@ function taramaSatir(m, soluk){
           ? ` <span class="ipucu">en iyi ${m.en_iyi_oran.toFixed(2)} → ${m.ev_max >= 0 ? '+' : ''}${(m.ev_max*100).toFixed(1)}%</span>` : ''}</span>
       ${m.sinyal ? `<span class="sinyal-rozet" title="Konsensüs sapması sinyali">🎯 ${esc(m.sinyal.secim)} @${m.sinyal.oran.toFixed(2)} · +${(m.sinyal.ev*100).toFixed(1)}%</span>` : ''}
       <span class="ipucu">${m.kalip_n ? m.kalip_n + ' benzer maç' : ''}</span>
+      ${m.yalniz_kalip ? `<span class="ipucu" title="Takımlar arşivde yok — analiz, aynı oranlarla açılmış geçmiş maçların gerçek sonuçlarına dayanıyor; takım gücü modeli kullanılmadı">📐 kalıp analizi</span>` : ''}
       ${yildizHTML(m.yildiz)}
       <span class="buyukev ${m.ev_degeri >= 0 ? 'ev-poz' : 'ev-neg'}" title="Liste oranıyla beklenen değer — karar (✅/🟡/⛔) bu sayıya göre verilir">${m.ev_degeri >= 0 ? '+' : ''}${(m.ev_degeri*100).toFixed(1)}%</span>
       ${m.sonuc ? `<span class="ipucu">🏁 ${esc(m.sonuc.skor)}${
@@ -2483,7 +2484,19 @@ function kapsamCiz(d){
     ${satir('🕰 dünkü arşiv', k.dun, k.dun_hata, 'sonuç denetimi için')}
     ${satir('⚽ API-Football (dünya)', k.af, k.af_hata || af.hata, afNot)}
     <div class="capraz-satir" style="border-top:2px solid var(--cizgi)">
-      <span style="flex:1"><b>TOPLAM BÜLTEN</b></span><b>${k.toplam} maç</b></div>`;
+      <span style="flex:1"><b>TOPLAM BÜLTEN</b></span><b>${k.toplam} maç</b></div>
+    ${k.oranli !== undefined ? `<div class="capraz-satir">
+      <span style="flex:1"><b>bunlardan ORANLI</b></span>
+      <b class="${k.oranli > 0 ? 'ev-poz' : 'ev-neg'}">${k.oranli} maç</b>
+      <span class="ipucu" style="flex-basis:100%">
+        Oran yalnız <b>fixtures.csv</b>'den gelir (ana ~22 lig, birkaç gün ileri).
+        API-Football ve football-data.org katmanları maçı <b>listeler ama fiyat getirmez</b> —
+        onların oranı maç başına ayrı istek gerektirir ve ücretsiz planda günde 100 istekle sınırlıdır.
+        ${k.fikstur_yok ? '<b class="ev-neg">⚠ fixtures.csv indirilmemiş — oran kaynağı yok.</b>'
+          : (k.fikstur_saat !== undefined
+             ? `fixtures.csv: ${k.fikstur_kb} KB · ${k.fikstur_saat} saat önce indi`
+             : '')}
+      </span></div>` : ''}`;
 }
 
 // Fikstürü sıfırdan kurdurur ve teşhisi tazeler: kapsam bilgisi yalnız
