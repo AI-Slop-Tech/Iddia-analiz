@@ -207,7 +207,7 @@ adım kaynağa bağlanmayı gerektiriyor.
 python tahmin.py guncelle
 ```
 
-26 sezonluk arşiv iner (~250 bin maç, oranlarıyla). `data/` klasörüne
+33 sezonluk arşiv + milli maç arşivi iner (~344 bin maç; 2001 sonrası oranlarıyla). `data/` klasörüne
 kaydedilir; bir daha inmez, sonraki çalıştırmalarda yalnız güncel sezon ve
 fikstür tazelenir.
 
