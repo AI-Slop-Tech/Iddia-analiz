@@ -412,6 +412,15 @@
       <input id="ay-oa" type="password" placeholder="odds-api.io anahtarı" autocomplete="off">
     </div>
     <div class="alan" style="margin-bottom:14px">
+      <label>📊 Bülten kapsamı — hangi kaynak kaç maç ekledi</label>
+      <div class="capraz-kutu" id="ay-kapsam"><span class="ipucu">yükleniyor…</span></div>
+      <div class="ipucu" style="display:block;margin-top:6px">
+        Az maç görüyorsanız cevabı burada bulursunuz. API-Football ücretsiz planı
+        <b>dakikada 10 istek</b> kabul eder ve penceresi <b>bugün ±1 gündür</b>;
+        sistem bu sınırlara uyar (istekler arası 6.5 sn), böylece anahtarınız askıya alınmaz.
+      </div>
+    </div>
+    <div class="alan" style="margin-bottom:14px">
       <label>Gemini — yazılı analist raporu (opsiyonel) <span class="ipucu" id="ay-gm-durum"></span></label>
       <input id="ay-gm" type="password" placeholder="Gemini anahtarı" autocomplete="off">
     </div>
@@ -2440,12 +2449,40 @@ function srSecimDegisti(i){
   srDeger(i);
 }
 
+// Kapsam teşhisi: hangi katman kaç maç ekledi, hata varsa ne? Eskiden bu
+// hatalar sessizce yutuluyordu ve "neden az maç görüyorum" sorusu ancak
+// sunucu günlüğüne bakılarak yanıtlanabiliyordu.
+function kapsamCiz(d){
+  const kutu = $('#ay-kapsam'); if(!kutu) return;
+  const k = d.kapsam, af = d.af_durum || {};
+  if(!k){ kutu.innerHTML = '<span class="ipucu">Bülten henüz yüklenmedi.</span>'; return; }
+  const satir = (ad, adet, hata, not) => `<div class="capraz-satir">
+    <span style="flex:1;min-width:140px">${ad}</span>
+    <b class="${adet > 0 ? 'ev-poz' : 'taban'}">${adet > 0 ? '+' + adet : '0'} maç</b>
+    ${hata ? `<span class="ev-neg" style="flex-basis:100%">⚠ ${esc(hata)}</span>` : ''}
+    ${not ? `<span class="ipucu" style="flex-basis:100%">${not}</span>` : ''}
+  </div>`;
+  const afNot = !k.af_anahtar
+    ? 'anahtar kayıtlı değil — yukarıdaki alana yapıştırın'
+    : (af.hata ? '' : (af.pencere_free
+        ? 'ücretsiz plan penceresi: yalnız bugün ve yarın'
+        : `bugün ${af.bugun_istek || 0} istek harcandı (günlük tavan 90)`));
+  kutu.innerHTML = `
+    ${satir('📄 football-data.co.uk (oranlı)', k.csv, null, 'ana kaynak, anahtar gerekmez')}
+    ${satir('🌍 football-data.org', k.fdorg, k.fdorg_hata, k.fdorg_hata ? '' : 'takvim genişletme (oransız)')}
+    ${satir('🕰 dünkü arşiv', k.dun, k.dun_hata, 'sonuç denetimi için')}
+    ${satir('⚽ API-Football (dünya)', k.af, k.af_hata || af.hata, afNot)}
+    <div class="capraz-satir" style="border-top:2px solid var(--cizgi)">
+      <span style="flex:1"><b>TOPLAM BÜLTEN</b></span><b>${k.toplam} maç</b></div>`;
+}
+
 async function ayarAc(){
   $('#ayar-kaplama').style.display = '';
   try{
     const d = await api('/api/durum');
     const isaret = v => v ? '· ✅ kayıtlı' : '· kayıtlı değil';
     $('#ay-af-durum').textContent = isaret(d.apifootball);
+    kapsamCiz(d);
     $('#ay-oa-durum').textContent = isaret(d.oddsapi);
     $('#ay-fd-durum').textContent = isaret(d.dis_kapsam);
     $('#ay-gm-durum').textContent = isaret(d.gemini);
