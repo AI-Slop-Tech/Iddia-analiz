@@ -661,7 +661,11 @@ def uygulama_olustur():
         for g in gunler_utc:
             try:
                 kayitlar.extend(veri._af_gun_fiksturu(g))
-            except Exception:  # noqa: BLE001 — pencere/kota hatası bülteni düşürmesin
+            except Exception as h:  # noqa: BLE001 — pencere/kota hatası bülteni düşürmesin
+                # Hata kapsam kutusunda GÖRÜNSÜN: kullanıcı "anahtar kayıtlı
+                # ama AF 0 maç" durumunda sebebi (askı, kota, 429...) ekrandan
+                # okuyabilsin — daha önce sessizce yutuluyordu.
+                veri.AF_SON_DURUM["hata"] = str(h)[:160]
                 try:
                     # kota/ağ yoksa bayat önbellek hiç yoktan iyidir
                     kayitlar.extend(veri._af_gun_fiksturu(g, sadece_onbellek=True))
