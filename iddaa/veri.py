@@ -241,6 +241,7 @@ EK_LIGLER = {
     "USA": ("USA", "ABD MLS"),
 }
 LIGLER.update({kod: ad for kod, (_ulke, ad) in EK_LIGLER.items()})
+LIGLER["INT"] = "Milli Takımlar"   # martj42 CC0 arşivi (oran/İY yok)
 EK_ULKE_KODU = {ulke: kod for kod, (ulke, _ad) in EK_LIGLER.items()}
 
 # Varsayılan: tüm ligler — fikstürdeki her maçın geçmişi bulunsun diye
@@ -324,15 +325,17 @@ def sezon_kodlari(sezon_sayisi: int) -> list[str]:
     return [f"{y % 100:02d}{(y + 1) % 100:02d}" for y in range(bas, bas - sezon_sayisi, -1)]
 
 
-def indir(ligler: list[str] | None = None, sezon_sayisi: int = 26, yenile: bool = False) -> dict:
+def indir(ligler: list[str] | None = None, sezon_sayisi: int = 33, yenile: bool = False) -> dict:
     """Seçilen liglerin sezon CSV'lerini indirir ve data/ altında önbelleğe alır.
 
     Güncel sezon dosyası her çağrıda tazelenir; eski sezonlar değişmediği için
     yalnızca eksikse indirilir (yenile=True hepsini yeniden indirir).
 
-    26 sezon: 2001/02'den bugüne — bu aralıkta ana lig dosyalarında kitapçı
-    oranları (B365/WH/IW zinciri) mevcut, birebir oran kalıbı havuzu böylece
-    çeyrek asrı kapsar. Daha eskisi oran içermediği için katılmaz.
+    33 sezon: kaynağın gittiği en eskiye, 1993/94'e kadar. 2001 öncesi
+    dosyalarda kitapçı oranı yoktur — o yıllar oran kalıbına girmez (geçerli
+    maskesi zaten eler) ama Elo derinliği ve lig/H2H arşivini büyütür. Takım
+    gücü ve lig ortalamaları zaman-ağırlıklı olduğundan (YARI_OMUR_GUN) eski
+    yıllar bugünkü tahminlere sızmaz; yalnız tarih görünümü zenginleşir.
     """
     ligler = ligler or VARSAYILAN_LIGLER
     os.makedirs(VERI_KLASORU, exist_ok=True)
@@ -348,6 +351,11 @@ def indir(ligler: list[str] | None = None, sezon_sayisi: int = 26, yenile: bool 
         for sezon in kodlar:
             hedef = os.path.join(VERI_KLASORU, f"{sezon}_{lig}.csv")
             if os.path.exists(hedef) and not yenile and sezon != guncel_kod:
+                ozet["onbellek"] += 1
+                continue
+            # Kaynakta hiç var olmamış kombinasyon (ör. EC ligi 2005 öncesi):
+            # bir kez "yok" işaretlenir, her güncellemede yeniden denenmez.
+            if os.path.exists(hedef + ".yok") and not yenile and sezon != guncel_kod:
                 ozet["onbellek"] += 1
                 continue
             url = kaynak_url(sezon, lig)
@@ -372,6 +380,18 @@ def indir(ligler: list[str] | None = None, sezon_sayisi: int = 26, yenile: bool 
             except Exception as h:  # noqa: BLE001 - tek dosya hatası akışı durdurmasın
                 ozet["hata"].append(f"{lig} {sezon}: {h}")
                 print(f"  ✗ {lig} {sezon[:2]}/{sezon[2:]} indirilemedi ({h})")
+                if "HTTP 300" in str(h) or "HTTP 404" in str(h) or "yayınlanmamış" in str(h):
+                    try:
+                        open(hedef + ".yok", "w").close()
+                    except OSError:
+                        pass
+
+    # milli maç arşivi (GitHub, ayrı kaynak — football-data engeli kapsamaz)
+    if milli_indir(yenile=yenile):
+        ozet["indirilen"] += 1
+        print("  ✓ Milli maç arşivi güncel (1872'den bugüne)")
+    else:
+        print("  ✗ Milli maç arşivi indirilemedi (analiz onsuz da çalışır)")
 
     # ekstra ligler: tüm sezonlar tek dosyada; sonuçlar işlendikçe değiştiği
     # için her güncellemede tazelenir
@@ -579,6 +599,13 @@ def veriyi_yukle(ligler: list[str] | None = None) -> pd.DataFrame:
                 .sort_values("Tarih").reset_index(drop=True)
     except Exception:  # noqa: BLE001 — kupa katmanı asıl yüklemeyi asla düşürmesin
         pass
+    try:
+        milli = _milli_yukle()
+        if milli is not None and not milli.empty:
+            birlesik = pd.concat([birlesik, milli], ignore_index=True) \
+                .sort_values("Tarih").reset_index(drop=True)
+    except Exception:  # noqa: BLE001 — milli katman asıl yüklemeyi asla düşürmesin
+        pass
 
     # Takım/lig kolonları KATEGORİK: analiz sırasında "df['HomeTeam'] == takim"
     # gibi karşılaştırmalar 248 bin satırlık metin taramasıydı ve tarama
@@ -679,6 +706,72 @@ def simdi_tr() -> pd.Timestamp:
         return pd.Timestamp.now(tz=ZoneInfo("Europe/Istanbul")).tz_localize(None)
     except Exception:  # tz veritabanı yoksa sistem saatiyle yetin
         return pd.Timestamp.now()
+
+
+# ------------------------------------------------- milli maç arşivi (CC0)
+# Kaynak: github.com/martj42/international_results — 1872'den bugüne tüm
+# milli A takım maçları (Dünya Kupası, EURO, elemeler, hazırlık). Lisans
+# CC0 (kamu malı). Oran ve ilk yarı içermez; katkısı takım gücü/Elo/H2H:
+# bülten AF katmanıyla milli maçları da listeliyor ama takımlar arşivde
+# olmadığı için model analizi alamıyordu.
+MILLI_URL = ("https://raw.githubusercontent.com/martj42/"
+             "international_results/master/results.csv")
+MILLI_DOSYASI = os.path.join(VERI_KLASORU, "milli.csv")
+MILLI_TTL_GUN = 30
+
+
+def milli_indir(yenile: bool = False) -> str | None:
+    """Milli maç arşivini indirir/tazeler; başarısızlıkta eldeki kopya kalır."""
+    taze = (os.path.exists(MILLI_DOSYASI) and not yenile
+            and time.time() - os.path.getmtime(MILLI_DOSYASI) < MILLI_TTL_GUN * 86400)
+    if taze:
+        return MILLI_DOSYASI
+    try:
+        # GitHub'a doğrudan gidilir: IDDAA_KAYNAK_TABAN yalnız
+        # football-data.co.uk engeli içindir, GitHub Türkiye'den erişilir.
+        yanit = requests.get(MILLI_URL, timeout=60,
+                             headers={"User-Agent": KULLANICI_AJANI},
+                             proxies=proxy_ayari() or None)
+        if yanit.status_code != 200 or b"home_team" not in yanit.content[:200]:
+            raise ValueError(f"HTTP {yanit.status_code}")
+        os.makedirs(VERI_KLASORU, exist_ok=True)
+        with open(MILLI_DOSYASI, "wb") as f:
+            f.write(yanit.content)
+        return MILLI_DOSYASI
+    except Exception:  # noqa: BLE001 — milli arşiv eksikliği hiçbir şeyi durdurmaz
+        return MILLI_DOSYASI if os.path.exists(MILLI_DOSYASI) else None
+
+
+def _milli_yukle() -> pd.DataFrame | None:
+    """data/milli.csv'yi arşiv şemasına çevirir (Div=INT, oran/İY yok)."""
+    if not os.path.exists(MILLI_DOSYASI):
+        return None
+    try:
+        m = pd.read_csv(MILLI_DOSYASI)
+    except Exception:  # noqa: BLE001
+        return None
+    gerek = {"date", "home_team", "away_team", "home_score", "away_score"}
+    if not gerek <= set(m.columns):
+        return None
+    m = m.dropna(subset=["date", "home_team", "away_team", "home_score", "away_score"]).copy()
+    tarih = pd.to_datetime(m["date"], errors="coerce")
+    fthg = pd.to_numeric(m["home_score"], errors="coerce")
+    ftag = pd.to_numeric(m["away_score"], errors="coerce")
+    gecerli = tarih.notna() & fthg.notna() & ftag.notna()
+    m, tarih, fthg, ftag = m[gecerli], tarih[gecerli], fthg[gecerli], ftag[gecerli]
+    yil = tarih.dt.year - (tarih.dt.month < 7).astype(int)   # Tem-Haz sezonu
+    cikti = pd.DataFrame({
+        "Div": "INT",
+        "Tarih": tarih.values,
+        "HomeTeam": m["home_team"].astype(str).values,
+        "AwayTeam": m["away_team"].astype(str).values,
+        "FTHG": fthg.values, "FTAG": ftag.values,
+        "FTR": np.where(fthg.values > ftag.values, "H",
+                        np.where(fthg.values == ftag.values, "D", "A")),
+        "Sezon": (yil % 100).map("{:02d}".format).values
+                 + ((yil + 1) % 100).map("{:02d}".format).values,
+    })
+    return cikti
 
 
 def fikstur_indir(yenile: bool = False) -> str:

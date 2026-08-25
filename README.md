@@ -138,7 +138,7 @@ Finlandiya, İrlanda, Japonya, Meksika, Norveç, Polonya, Romanya, Rusya, İsve�
 İsviçre, ABD (MLS). Ekstra ligler yaz takvimli olduğundan ana Avrupa bülteni
 boşken bile (hafta içi) takvimi doldururlar; fikstürleri ayrı beslemeden
 (`new_league_fixtures.csv`) otomatik gelir. Varsayılan `guncelle` hepsini
-indirir (~140 bin maç) — fikstürde görünen her maçın hem geçmişi hem oran
+indirir (~344 bin maç: 33 sezon + 1872'den bugüne milli maç arşivi) — fikstürde görünen her maçın hem geçmişi hem oran
 kalıbı örneklemi hazır olur. (Ekstra lig dosyalarında ilk yarı skoru, maç
 istatistiği ve Alt/Üst oranı bulunmaz; o kolonlar bu liglerde boş kalır.)
 
