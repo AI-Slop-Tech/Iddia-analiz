@@ -421,6 +421,87 @@ def capraz_surpriz(kalip: dict | None, piyasa: dict | None = None) -> list[dict]
     return cikti
 
 
+# ------------------------------------------ 1Y/2Y karşılıklı gol kombinasyonu
+#
+# Kullanıcının kitapçısındaki pazar: "1. Yarı / 2. Yarı Karşılıklı Gol"
+# (Evet/Evet, Evet/Hayır, Hayır/Evet, Hayır/Hayır). Ölçümler (eğitim
+# 2001-2024, 170.556 maç · test son 3 sezon, 15.936 maç):
+#
+#   kombo        taban(eğitim)  test    model kalibrasyonu (dışörneklem)
+#   Evet/Evet      %4.91        %5.35   dedi %5.21 → geldi %5.35  ✓
+#   Evet/Hayır    %13.70       %14.19   dedi %13.86 → %14.19      ✓
+#   Hayır/Evet    %20.56       %20.97   dedi %20.87 → %20.97      ✓
+#   Hayır/Hayır   %60.84       %59.49   dedi %60.06 → %59.49      ✓
+#
+# İki yarı NEREDEYSE BAĞIMSIZ: odds ratio eğitimde 1.062, testte 1.070 —
+# Brier'de bağımsız çarpımla fark yok (0.57812 vs 0.57814). Bu yüzden
+# model eklemi düz çarpımla kurulur: p11 = p_iy_kg × p_y2_kg.
+#
+# Ayırt gücü sınırlı (en yüksek %25 - en düşük %25): Evet/Evet +1.7,
+# Hayır/Hayır +6.9 puan. Yani bu pazarda maça özel bilgi AZDIR; kutunun
+# asıl işi kitapçı marjını görünür kılmaktır (kullanıcının örneğinde
+# 13.15/5.10/3.52/1.45 → %24.6 marj, dört tarafta da EV −%14 ile −%30).
+YARIKG_TABAN = {"11": 0.0491, "10": 0.1370, "01": 0.2056, "00": 0.6084}
+YARIKG_AD = {"11": "Evet/Evet", "10": "Evet/Hayır", "01": "Hayır/Evet", "00": "Hayır/Hayır"}
+YARIKG_MIN_ORNEK = 300
+# Kalıp frekansı tavanı (taban×T) — 14.706 maçlık dışörneklemde kombo
+# başına doğrulandı. Kalıp bu pazarda GERÇEK sinyal taşıyor (çeyrek farkı:
+# Evet/Evet +2.6, Evet/Hayır +3.3, Hayır/Hayır +6.2 puan) ve kovalar
+# kalibre: Evet/Evet 1.2-1.5× kovası söylenen %6.31 → gerçek %7.51 bile
+# (muhafazakâr). Tek istisna 1.5× ÜSTÜ Evet/Evet (159 maç: dedi %8.0,
+# geldi %6.3) — tavan 1.35 o uç kovayı kırpar, gerisine dokunmaz.
+YARIKG_MAKS_KABARMA = {"11": 1.35, "10": 1.35, "01": 1.25, "00": 1.10}
+
+
+def yari_kg_kombo(kalip: dict | None, poisson: dict | None = None) -> dict | None:
+    """1Y/2Y karşılıklı gol kombinasyonlarının bu maçtaki olasılıkları.
+
+    Kaynaklar: (a) kalibre model marjinalleri (iy.kg × y2.kg — bağımsızlık
+    ölçümle doğrulandı), (b) aynı oran profilinden açılmış geçmiş maçların
+    gerçek kombo frekansı. İkisi radar kuralıyla harmanlanır
+    (w = min(n/300, 1) × 0.5); yalnız biri varsa o konuşur.
+    """
+    model = None
+    if poisson:
+        iy, y2 = poisson.get("iy") or {}, poisson.get("y2") or {}
+        if "kg" in iy and "kg" in y2:
+            a, b = float(iy["kg"]), float(y2["kg"])
+            p11 = a * b
+            model = {"11": p11, "10": a - p11, "01": b - p11, "00": 1 - a - b + p11}
+
+    n = int((kalip or {}).get("iyms_n") or 0)
+    sayim = (kalip or {}).get("yari_kg") or {}
+    desen = ({k: sayim.get(k, 0) / n for k in YARIKG_TABAN}
+             if n >= YARIKG_MIN_ORNEK and sayim else None)
+
+    if model is None and desen is None:
+        return None
+    w = min(n / 300.0, 1.0) * 0.5 if (model and desen) else (1.0 if desen and not model else 0.0)
+    cikti = []
+    for k, taban in YARIKG_TABAN.items():
+        m_p = model[k] if model else taban
+        d_p = desen[k] if desen else m_p
+        p = (1 - w) * m_p + w * d_p
+        # dürüstlük tavanı: kalıp frekansı ölçümde ancak taban×T'ye kadar
+        # doğrulandı; harman da bu tavanı aşmasın
+        p_ham = p
+        p = min(p, taban * YARIKG_MAKS_KABARMA[k])
+        cikti.append({
+            "kombo": k, "ad": YARIKG_AD[k],
+            "p": float(p), "taban": taban,
+            "kabarma": float((desen[k] / taban) if desen else (m_p / taban)),
+            "sinirlandi": bool(p_ham > p + 1e-12),
+            "adil_oran": round(1.0 / p, 2) if p > 0 else None,
+            "desen_adet": int(sayim.get(k, 0)) if desen else None,
+        })
+    t = sum(x["p"] for x in cikti)
+    for x in cikti:   # tavan sonrası toplam 1'e çekilir
+        x["p"] = float(x["p"] / t)
+        x["adil_oran"] = round(1.0 / x["p"], 2)
+    return {"komb": cikti, "n": n if desen else 0, "kaynak":
+            ("model+kalıp" if model and desen else ("kalıp" if desen else "model"))}
+
+
 # -------------------------------------------------------------------- 1) form
 
 def form_analizi(df: pd.DataFrame, takim: str, n: int = 10, saha: str | None = None) -> dict:
@@ -784,6 +865,19 @@ def oran_kalibi(df: pd.DataFrame, oranlar: tuple[float, float, float],
         k_et, k_ad = np.unique(kombo, return_counts=True)
         iyms = {str(a): int(b) for a, b in zip(k_et, k_ad)}
 
+    # 1Y/2Y karşılıklı gol kombinasyonları (Evet/Evet=11, Evet/Hayır=10,
+    # Hayır/Evet=01, Hayır/Hayır=00) — aynı İY'li altkümede sayılır.
+    yari_kg: dict[str, int] = {}
+    if iyms_n:
+        e_iy = (V["hthg"][iy_maske] > 0) & (V["htag"][iy_maske] > 0)
+        y2h = V["fthg"][iy_maske] - V["hthg"][iy_maske]
+        y2a = V["ftag"][iy_maske] - V["htag"][iy_maske]
+        e_y2 = (y2h > 0) & (y2a > 0)
+        yari_kg = {
+            "11": int((e_iy & e_y2).sum()), "10": int((e_iy & ~e_y2).sum()),
+            "01": int((~e_iy & e_y2).sum()), "00": int((~e_iy & ~e_y2).sum()),
+        }
+
     # Aynı ülkenin liglerindeki kalıp (kullanıcı isteği: "Çin maçına Çin
     # liglerinden benzerler") — küçük örneklem yanıltmasın diye genel kalıpla
     # birlikte sunulur ve ancak n>=15'te doldurulur.
@@ -843,6 +937,7 @@ def oran_kalibi(df: pd.DataFrame, oranlar: tuple[float, float, float],
         "ulke": ulke_blok,
         "iyms_n": iyms_n,
         "iyms": iyms,
+        "yari_kg": yari_kg,
         "n": n,
         "tolerans": kullanilan_tol,
         "lig_sayisi": int(len(np.unique(V["div"][maske]))),

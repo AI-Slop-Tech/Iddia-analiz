@@ -198,6 +198,13 @@
   .capraz-satir.dikkat{background:rgba(250,204,21,.06);border-radius:8px;padding:5px 6px}
   .capraz-satir.dikkat .kabarma{border-color:var(--sari);color:var(--sari)}
   .capraz-satir.sonuk{opacity:.5}
+  .yarikg-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin:6px 0}
+  .yarikg-hucre{background:var(--kart);border:1px solid var(--cizgi);border-radius:10px;padding:8px 10px}
+  .yarikg-hucre .ad{font-weight:800;font-size:12.5px}
+  .yarikg-hucre .p{font-size:13px;font-weight:700}
+  .yarikg-hucre .adil{font-size:11px;color:var(--cok-soluk)}
+  .yarikg-hucre input{width:64px;padding:4px 6px;font-size:12px;margin-top:4px}
+  .yarikg-hucre .evc{font-size:11.5px;font-weight:800;margin-left:6px}
   .sr-alt{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:2px}
 
   /* ---------- mobil (iPhone) düzeni: altta iOS tarzı sekme çubuğu ---------- */
@@ -2215,6 +2222,45 @@ let SR_ONERI = null;
 // profilinden açılmış geçmiş maçların frekansıdır; genel tabana bölünerek
 // "kabarma" katsayısı çıkar. Ölçümde 1.6 katın ötesi doğrulanmadığı için
 // gösterilen olasılık orada tavanlanır (sunucu tarafında).
+// 🥅 1Y/2Y Karşılıklı Gol: kullanıcının kitapçısındaki 4 sonuçlu pazar.
+// Olasılık = kalibre model (iy_kg × y2_kg; bağımsızlık ölçümle doğrulandı,
+// OR≈1.06) + aynı oran kalıbındaki geçmiş frekansın harmanı. Kutunun asıl
+// işi kitapçı marjını görünür kılmak: kullanıcı oranı girer, EV anında çıkar.
+function srYariKgHTML(m, i){
+  const y = m.yari_kg;
+  if(!y || !y.komb) return '';
+  const hucre = y.komb.map((x, j) => `<div class="yarikg-hucre">
+    <span class="ad">${esc(x.ad)}</span>
+    <span class="p" style="float:right">%${(x.p*100).toFixed(1)}</span><br>
+    <span class="adil">adil ${x.adil_oran}${x.sinirlandi ? ' · tavanlı' : ''}${
+      x.desen_adet !== null && y.n ? ` · ${x.desen_adet}/${y.n} benzer` : ''}</span><br>
+    <input type="number" step="0.01" min="1" placeholder="oran"
+      oninput="ykDeger(this, ${x.p})"><span class="evc"></span>
+  </div>`).join('');
+  return `<div class="capraz-kutu">
+    <div class="capraz-baslik">🥅 1Y/2Y Karşılıklı Gol
+      <span class="ipucu">(${esc(y.kaynak)}${y.n ? ' · ' + y.n + ' benzer maç' : ''})</span></div>
+    <div class="yarikg-grid">${hucre}</div>
+    <div class="ipucu" style="display:block">
+      Kitapçınızın oranını girin — beklenen değer anında hesaplanır.
+      <b>Dürüst uyarı:</b> bu pazarda kitapçı marjı tipik olarak <b>%20-25</b>tir
+      (örnek bültende 13.15/5.10/3.52/1.45 → %24.6 marj, dört tarafta da EV eksiydi).
+      Model bu pazarda maça özel sınırlı bilgi taşır (dışörneklem ayırt gücü:
+      Hayır/Hayır +6.9, Evet/Evet +1.7 puan) — kutunun işi size adil oranı gösterip
+      kötü fiyattan korumaktır, sık "değer" bulmak değil.
+    </div>
+  </div>`;
+}
+
+function ykDeger(inp, p){
+  const c = inp.nextElementSibling, o = parseFloat(inp.value);
+  if(!c) return;
+  if(!o || o <= 1){ c.textContent = ''; return; }
+  const ev = p * o - 1;
+  c.textContent = `${ev >= 0 ? '+' : ''}${(ev*100).toFixed(0)}%`;
+  c.className = 'evc ' + (ev >= 0 ? 'ev-poz' : 'ev-neg');
+}
+
 function srCaprazHTML(m){
   const c = m.capraz;
   if(!c || !c.length) return '';
@@ -2427,6 +2473,7 @@ function srCiz(){
         aynı oranla açılmış ${m.kanit.n} maçın ${m.kanit.adet}'i (%${(m.kanit.frekans*100).toFixed(0)}) böyle bitti
         ${m.isaretli ? `<b class="ev-poz">· ✔ işaret eşiğini geçti${m.kanit.kademe === 'guclu' ? ' (🔒 güçlü)' : ' (🔎 orta)'}</b>` : '<span class="ipucu">(işaret için 1/1\'de %35, 2/2\'de %30 gerekir; 1/0-2/0 işaretlenmez)</span>'}</div>` : ''}
       ${srCaprazHTML(m)}
+      ${srYariKgHTML(m, i)}
       ${tacYorum}
       ${karar}
       ${kanit ? `<div class="ipucu" style="margin-bottom:8px">${kanit}${(karar || !k) ? '' : ` Bülteninizde ${enIyi} oranı ${k.adil_oran ? `adil oran ${k.adil_oran}'in` : 'adil oranın'} üzerindeyse matematiksel değer var demektir.`}</div>` : ''}
