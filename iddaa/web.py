@@ -634,7 +634,10 @@ def uygulama_olustur():
         birlesik = pd.concat([fik, pd.DataFrame(satirlar)], ignore_index=True)
         return birlesik.sort_values("Tarih").reset_index(drop=True)
 
-    AF_KAPSAM_SINIRI = 400   # günlük dünya fikstürü tavanı
+    # İki günlük pencere (bugün+yarın) tipik olarak 400-550 maç getiriyor;
+    # 400 tavanı yarını kırpıyordu. Tavan yalnız listeleme maliyetini
+    # sınırlar, tarama zaten gün gün çalışır.
+    AF_KAPSAM_SINIRI = 800   # dünya fikstürü tavanı (bugün + yarın)
 
     def _af_kapsami_ekle(df: pd.DataFrame, fik: pd.DataFrame) -> pd.DataFrame:
         """API-Football günlük dünya fikstürünü bültene 3. katman olarak katar.
