@@ -904,6 +904,22 @@ def uygulama_olustur():
                 kapsam["af_hata"] = str(h)[:200]
             kapsam["toplam"] = int(len(fik))
             kapsam["af_anahtar"] = bool(veri.gizli_anahtar("APIFOOTBALL_KEY", "apifootball_key"))
+            # "Oran neden yok" sorusu ekrandan okunabilsin: oran bültenin
+            # kendisinden (fixtures.csv) gelir; AF/fd.org katmanları maçı
+            # listeler ama fiyat getirmez. Bu ikisini ayırmak şart.
+            try:
+                oran_kol = ["oran_ev", "oran_berabere", "oran_dep"]
+                if all(k in fik.columns for k in oran_kol):
+                    kapsam["oranli"] = int(fik[oran_kol].notna().all(axis=1).sum())
+                yol = os.path.join(veri.VERI_KLASORU, "fixtures.csv")
+                if os.path.exists(yol):
+                    yas = (time.time() - os.path.getmtime(yol)) / 3600.0
+                    kapsam["fikstur_saat"] = round(yas, 1)
+                    kapsam["fikstur_kb"] = int(os.path.getsize(yol) / 1024)
+                else:
+                    kapsam["fikstur_yok"] = True
+            except Exception:  # noqa: BLE001 — teşhis asla bülteni düşürmesin
+                pass
             _DURUM["kapsam"] = kapsam
             try:
                 _piyasa_fuzyonu_uygula(fik)      # önbellekte ne varsa satırlara işle
@@ -1073,8 +1089,11 @@ def uygulama_olustur():
         sonuclar, gunluk_kayitlar = [], []
         piyasa_butce = time.time() + 25.0
         for idx, r in hedef.iterrows():
-            if bool(r.get("analiz_yok", False) is True):
-                continue
+            # Takımları arşivde çözülemeyen maç ELENMEZ: oranı varsa oran
+            # kalıbı ile analiz edilir. ŞL elemesi gibi maçlarda taraflar
+            # (Sabah FA, Hapoel Beer Sheva...) arşivde yok ama "aynı oranla
+            # açılmış geçmiş maçlarda ne oldu" sorusu yine yanıtlanabiliyor.
+            kalip_modu = bool(r.get("analiz_yok", False) is True)
             oranlar, maks, ust_alt = _fikstur_oranlari(r)
             if not oranlar and time.time() < piyasa_butce:
                 # API füzyonu: bülten oranı yoksa canlı piyasa 1X2'si kullanılır
@@ -1088,12 +1107,21 @@ def uygulama_olustur():
                     ust_alt = ust_alt or pk.get("ust_alt25")
             if not oranlar:
                 continue
-            a = analiz.mac_analizi(
-                df, r["HomeTeam"], r["AwayTeam"],
-                oranlar=tuple(oranlar), elo=_DURUM["elo"],
-                ust_alt=tuple(ust_alt) if ust_alt else None,
-                lig_ipucu=r["Div"],
-            )
+            if kalip_modu:
+                a = analiz.kalip_analizi(
+                    df, tuple(oranlar),
+                    ust_alt=tuple(ust_alt) if ust_alt else None,
+                    lig_ipucu=r["Div"],
+                )
+                if not a:      # benzer oranlı geçmiş maç da yoksa gerçekten yapacak bir şey yok
+                    continue
+            else:
+                a = analiz.mac_analizi(
+                    df, r["HomeTeam"], r["AwayTeam"],
+                    oranlar=tuple(oranlar), elo=_DURUM["elo"],
+                    ust_alt=tuple(ust_alt) if ust_alt else None,
+                    lig_ipucu=r["Div"],
+                )
             o = a["oneri"]
             en_iyi = _en_iyi_oran(r, o["secim"], maks)
             model_p = a["deger"]["model_p"].get(o["secim"], 0.0)
@@ -1119,6 +1147,7 @@ def uygulama_olustur():
                     # 0.55'e inince 1.80'e kadar adil oranlı taraflar da girer
                     # ve hedef toplam orana ulaşmak mümkün olur
                     "guvenli": analiz.guvenli_secimler(a, sinir=0.55)[:4],
+                    "yalniz_kalip": kalip_modu,
                     "sinyal": sinyal,
                     "saglam": analiz.saglam_secim(a.get("deger"), _en_iyi_hepsi(r, maks)),
                     "sonuc": _gercek_sonuc(df, r),
