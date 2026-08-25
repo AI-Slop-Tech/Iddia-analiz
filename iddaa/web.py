@@ -1303,7 +1303,7 @@ def uygulama_olustur():
             # tahminciyle doğrulandı.
             kalip_bant = (analiz.oran_kalibi(df, tuple(oranlar), lig_ipucu=r["Div"])
                           if oranlar else None)
-            model = None
+            model, poisson = None, None   # poisson önceki maçtan sarkmasın
             if not analizsiz:
                 poisson = analiz.poisson_tahmini(df, r["HomeTeam"], r["AwayTeam"], lig_ipucu=r["Div"])
                 model = analiz.iyms_olasiliklar(poisson)
@@ -1397,6 +1397,9 @@ def uygulama_olustur():
                         kalip_bant,
                         {k: (kombolar[k] or {}).get("piyasa") for k in analiz.CAPRAZ_TABAN}
                         if piyasa_iyms else None),
+                    # 1Y/2Y karşılıklı gol kombinasyonu (kullanıcının kitapçısındaki
+                    # "1. Yarı / 2. Yarı Karşılıklı Gol" pazarı için karar desteği)
+                    "yari_kg": analiz.yari_kg_kombo(kalip_bant, poisson),
                     "sonuc": _gercek_sonuc(df, r),
                     "piyasa": (
                         {"kitapci": piyasa["kitapci"], "guncel": piyasa["guncel"]}
