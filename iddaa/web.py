@@ -376,10 +376,11 @@ def uygulama_olustur():
         try:
             df = _df()
         except FileNotFoundError:
-            return jsonify({"veri_yok": True})
+            return jsonify({"veri_yok": True, "surum": SURUM})
         return jsonify(
             {
                 "veri_yok": False,
+                "surum": SURUM,
                 "toplam_mac": int(len(df)),
                 "ilk_tarih": _t(df["Tarih"].min()),
                 "son_tarih": _t(df["Tarih"].max()),
