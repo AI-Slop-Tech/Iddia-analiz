@@ -2455,7 +2455,16 @@ function srSecimDegisti(i){
 function kapsamCiz(d){
   const kutu = $('#ay-kapsam'); if(!kutu) return;
   const k = d.kapsam, af = d.af_durum || {};
-  if(!k){ kutu.innerHTML = '<span class="ipucu">Bülten henüz yüklenmedi.</span>'; return; }
+  // Sürüm rozeti kutunun içinde de gösterilir: kullanıcı "kapsam kutusu yok"
+  // dediğinde sorunun dağıtım gecikmesi mi yoksa veri mi olduğu hemen belli olsun.
+  const surumSatiri = `<div class="capraz-satir" style="border-top:0">
+    <span style="flex:1">çalışan sürüm</span><b>v${esc(d.surum || '?')}</b>
+    <button class="mini-btn" onclick="kapsamYenile()">🔄 Kapsamı Yenile</button></div>`;
+  if(!k){
+    kutu.innerHTML = surumSatiri + `<div class="capraz-satir">
+      <span class="ipucu" style="flex-basis:100%">Bülten henüz kurulmadı — <b>🔄 Kapsamı Yenile</b>'ye basın.</span></div>`;
+    return;
+  }
   const satir = (ad, adet, hata, not) => `<div class="capraz-satir">
     <span style="flex:1;min-width:140px">${ad}</span>
     <b class="${adet > 0 ? 'ev-poz' : 'taban'}">${adet > 0 ? '+' + adet : '0'} maç</b>
@@ -2467,13 +2476,27 @@ function kapsamCiz(d){
     : (af.hata ? '' : (af.pencere_free
         ? 'ücretsiz plan penceresi: yalnız bugün ve yarın'
         : `bugün ${af.bugun_istek || 0} istek harcandı (günlük tavan 90)`));
-  kutu.innerHTML = `
+  kutu.innerHTML = surumSatiri + `
     ${satir('📄 football-data.co.uk (oranlı)', k.csv, null, 'ana kaynak, anahtar gerekmez')}
     ${satir('🌍 football-data.org', k.fdorg, k.fdorg_hata, k.fdorg_hata ? '' : 'takvim genişletme (oransız)')}
     ${satir('🕰 dünkü arşiv', k.dun, k.dun_hata, 'sonuç denetimi için')}
     ${satir('⚽ API-Football (dünya)', k.af, k.af_hata || af.hata, afNot)}
     <div class="capraz-satir" style="border-top:2px solid var(--cizgi)">
       <span style="flex:1"><b>TOPLAM BÜLTEN</b></span><b>${k.toplam} maç</b></div>`;
+}
+
+// Fikstürü sıfırdan kurdurur ve teşhisi tazeler: kapsam bilgisi yalnız
+// bülten (yeniden) kurulurken yazılıyor; önbellekten servis edilen bir
+// oturumda kutu boş kalabiliyordu.
+async function kapsamYenile(){
+  const kutu = $('#ay-kapsam');
+  if(kutu) kutu.innerHTML = '<span class="ipucu">⏳ bülten yeniden kuruluyor, bu 1-2 dakika sürebilir…</span>';
+  try{
+    await api('/api/bulten?yenile=1');
+    kapsamCiz(await api('/api/durum'));
+  }catch(h){
+    if(kutu) kutu.innerHTML = `<span class="ev-neg">⚠ ${esc(h.message)}</span>`;
+  }
 }
 
 async function ayarAc(){
