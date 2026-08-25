@@ -1,3 +1,3 @@
 """İddaa Analiz Sistemi — ücretsiz tarihsel veriyle profesyonel maç analizi."""
 
-__version__ = "3.8.3"
+__version__ = "3.9.0"

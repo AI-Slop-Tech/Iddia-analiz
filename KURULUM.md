@@ -30,6 +30,30 @@ seçenekleri anlatılıyor.
 
 ---
 
+## ⚡ EN KOLAY YOL — çift tıkla, bitsin (Windows)
+
+Terminal komutlarıyla uğraşmak istemiyorsan: proje klasöründeki
+**`BASLAT.bat`** dosyasına **çift tıkla.** Hepsi bu.
+
+Dosya sırayla şunları kendisi yapar:
+
+1. Python'u bulur (`py` veya `python`) — yoksa ne yapman gerektiğini yazar
+2. Gerekli paketleri kurar
+3. Veri kaynağına erişimi test eder — engelliyse "VPN aç" der ve durur
+4. Arşiv yoksa indirir (ilk sefer 2-3 dakika)
+5. Paneli başlatır ve tarayıcıyı açar
+
+Bir hata olursa pencere **kapanmaz**, ne olduğunu okursun.
+
+> **Not defteri açılıyorsa:** dosyaya sağ tık → **Birlikte aç** →
+> **Windows Komut İşlemcisi**. `.bat` uzantısı yanlış programa
+> bağlanmış demektir.
+
+Aşağıdaki adımlar bu dosyanın elle yapılışıdır — `BASLAT.bat` çalışıyorsa
+onlara ihtiyacın yok.
+
+---
+
 ## 1. Python kur
 
 **Windows:** [python.org/downloads](https://www.python.org/downloads/) →
@@ -214,6 +238,8 @@ gösterir: hesap aktif mi, kota ne kadar dolmuş, bugün kaç maç görüyor.
 |---|---|
 | `python: command not found` | PATH'e eklenmemiş. Python'u kaldırıp "Add to PATH" işaretli kur. |
 | `SyntaxError: invalid syntax` | Python'un **içindesin** (`>>>` işareti). `exit()` yaz, PowerShell aç. Bkz. adım 1.5 |
+| Komut yazınca **Not Defteri açılıyor** | Windows dosyayı çalıştırmak yerine açıyor. Komutun başında `py ` veya `python ` olmalı. Ya da `BASLAT.bat`'a çift tıkla. |
+| "Bu dosyayı nasıl açmak istersiniz?" | Aynı sebep. `.py` dosyası çalıştırılmıyor, açılıyor. `py tahmin.py ...` şeklinde yaz. |
 | `can't open file 'tahmin.py'` | Yanlış klasördesin. `dir tahmin.py` ile kontrol et, `cd` ile proje klasörüne gir. |
 | `baglanti` → `❌ erişilemedi` | Türkiye engeli. VPN aç. |
 | `guncelle` yarıda kesiliyor | Bağlantı koptu; komutu tekrar çalıştır — kaldığı yerden devam eder. |
