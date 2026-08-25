@@ -814,6 +814,20 @@ def _kalip_verisi(df: pd.DataFrame) -> dict:
     return veri
 
 
+# Zaman-ağırlıklı kalıp ÖLÇÜLDÜ ve REDDEDİLDİ (deney21, 12.000 dışörneklem
+# maçı): örneklere yarı-ömür ağırlığı (2y/4y/8y) verildiğinde MS Brier'i
+# 0.59955/0.59949/0.59945, ağırlıksız (mevcut) 0.59939 — sınırsız zaten en
+# iyi ya da eşit; Ü2.5'te de fark gürültü bandında (±0.00015). Oran kalıbı
+# marj-arındırılmış uzayda eşleştiği için piyasanın çağlar arası kayması
+# zaten normalize oluyor; ayrıca eskiye ağırlık kısmak örneklemi küçültüp
+# nadir kombo sayımlarını (İY/MS, yarı-KG) bozardı. Eşit ağırlık kalır.
+#
+# Korner 9.5 kalıbı da ÖLÇÜLDÜ ve YAYINA ALINMADI (deney21, 8.906 maç):
+# kalıp frekansı aşırı iyimser — 0.55-0.65 kovasında dedi %57.9, geldi
+# %51.1 (6.990 maç); ortalamada dedi %56.6, gerçek %50.2. Korner sayıları
+# lig ve çağa göre sistematik kaydığından oran benzerliği korner dağılımını
+# taşıyamıyor. Korner bilgisi radar kartında BİLGİ olarak kalır, karar/
+# güvenli-seçim üretmez.
 def oran_kalibi(df: pd.DataFrame, oranlar: tuple[float, float, float],
                 tolerans: float = 0.02, min_mac: int = 40,
                 ornek_sayisi: int = 0, lig_ipucu: str | None = None) -> dict | None:
@@ -1407,6 +1421,15 @@ def elo_hesapla(df: pd.DataFrame, k: float = 20.0, ev_avantaji: float = 60.0) ->
 
 # ------------------------------------------------------------ değer + öneri
 
+# W_PIYASA ızgarası ÖLÇÜLDÜ (deney21, 11.998 dışörneklem maçı): MS Brier'i
+# W arttıkça monoton düşüyor (0.35→0.60610 · 0.50→0.60222 · 0.65→0.59994).
+# Bu beklenen bir sonuç — piyasa en iyi tekil tahmincidir ve Brier'i tek
+# ölçüt alan W→1'e gider; o noktada model piyasanın kopyası olur ve değer
+# sinyali ÖLÜR (ayrışma sıfırlanır, öneri çıkmaz). W'nin işi tahmin
+# doğruluğu değil KÂRLI AYRIŞMA üretmektir; 0.50 değeri kâr/ROI temelli
+# önceki ölçümlerle (konsensüs sinyali kontrol grupları) seçildi ve kalır.
+# Pazar-bazlı ayrı W de aynı gerekçeyle reddedildi: Brier her pazarda aynı
+# yönü gösteriyor, kârlılık kanıtı olmadan W oynamak kalibre sistemi bozar.
 W_PIYASA = 0.50      # model karışımında piyasa (marj arındırılmış oran) payı
 MAKS_AYRISMA = 0.05  # model, piyasadan sonuç başına en çok bu kadar ayrışabilir
                      # (backtest kanıtı: serbest ayrışma her eşikte zarar yazdı)

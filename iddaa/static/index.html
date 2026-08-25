@@ -1189,14 +1189,33 @@ function fisRozet(){
 
 function fisToplamOran(){ return KUPON_TASLAK.reduce((a, s) => a * (s.oran || 1), 1); }
 
+// Aynı maçtan birden fazla seçim BAĞIMLIDIR: kombine "toplam oran" iki
+// bağımsız olay varsayımıyla çarpılır, oysa aynı maçın iki pazarı (ör.
+// ÜST 2.5 + KG VAR) birlikte gelme eğilimindedir — gerçek olasılık çarpım
+// formülünün söylediğinden FARKLI olur. Kullanıcı bunu görmeden kupon
+// kurmasın diye fiş, aynı-maç tekrarını sayıp uyarır.
+function fisAyniMacSayisi(){
+  const say = {};
+  for(const b of KUPON_TASLAK){
+    const a = `${b.tarih}|${b.ev}|${b.dep}`;
+    say[a] = (say[a] || 0) + 1;
+  }
+  return Object.values(say).filter(x => x > 1).length;
+}
+
 function fisOzetCiz(){
   const alt = $('#fis-alt'); if(!alt) return;
   const n = KUPON_TASLAK.length;
   if(!n){ alt.innerHTML = ''; return; }
   const toplam = fisToplamOran(), kazanc = toplam * FIS_TUTAR;
+  const bagimli = fisAyniMacSayisi();
   alt.innerHTML = `
+    ${bagimli ? `<div class="not" style="border-color:var(--sari);margin-bottom:8px">⚠️ <b>${bagimli} maçtan
+      birden fazla seçim var.</b> Aynı maçın pazarları bağımsız değildir (ör. ÜST 2.5 ile KG VAR birlikte
+      gelmeye eğilimlidir) — "toplam oran"ın ima ettiği olasılık, kombinasyonun gerçek olasılığından sapar.
+      Çoğu kitapçı aynı maçtan çoklu seçimi zaten kabul etmez.</div>` : ''}
     <div class="fis-ozet"><span>Maç sayısı</span><b>${n}</b></div>
-    <div class="fis-ozet"><span>Toplam oran</span><b>${toplam.toFixed(2)}</b></div>
+    <div class="fis-ozet"><span>Toplam oran</span><b>${toplam.toFixed(2)}${bagimli ? ' <span class="ipucu">≈ bağımlı</span>' : ''}</b></div>
     <label class="ipucu" style="display:block;margin:8px 0 4px">Bahis tutarı (₺)</label>
     <input type="number" min="0" step="10" value="${FIS_TUTAR}" oninput="fisTutarGir(this.value)">
     <div class="fis-tut">
