@@ -27,12 +27,60 @@ MAKS_PLAN = 20
 MAKS_ADIM = 60
 
 
+MAKS_BACAK = 8
+
+
 def _oku() -> list[dict]:
     try:
         with open(ROLLING_DOSYASI, encoding="utf-8") as f:
-            return json.load(f)
+            planlar = json.load(f)
     except (OSError, json.JSONDecodeError):
         return []
+    # Göç: eski düz adımlar (tek maç alanları adımın kendisinde) tek bacaklı
+    # kombine biçimine çevrilir — kod tek şekil üzerinde çalışır, ilk yazmada
+    # dosya da bu biçime oturur. İdempotent.
+    for plan in planlar:
+        for a in plan.get("adimlar", []):
+            if "bacaklar" not in a:
+                bacak = {k: a.pop(k) for k in ("tarih", "saat", "lig", "ev", "dep",
+                                               "pazar", "oran", "durum", "elle", "skor")
+                         if k in a}
+                a["bacaklar"] = [bacak]
+    return planlar
+
+
+def _adim_durumu(a: dict) -> str:
+    """Kombine kuralı: bir bacak yattıysa adım yatar; hepsi tuttuysa tutar."""
+    durumlar = [b.get("durum", "bekliyor") for b in a.get("bacaklar", [])]
+    if "yatti" in durumlar:
+        return "yatti"
+    if durumlar and all(d == "tuttu" for d in durumlar):
+        return "tuttu"
+    return "bekliyor"
+
+
+def _adim_orani(a: dict) -> float:
+    carpim = 1.0
+    for b in a.get("bacaklar", []):
+        carpim *= float(b.get("oran", 1.0))
+    return carpim
+
+
+def _bacak_dogrula(secim: dict) -> dict:
+    oran = float(secim.get("oran", 0))
+    if not (1.01 <= oran <= 1000):
+        raise ValueError("Geçerli bir oran girin (1.01 - 1000).")
+    return {
+        "tarih": str(secim.get("tarih", ""))[:10],
+        "saat": str(secim.get("saat", ""))[:5],
+        "lig": str(secim.get("lig", ""))[:8],
+        "ev": str(secim.get("ev", ""))[:60],
+        "dep": str(secim.get("dep", ""))[:60],
+        "pazar": str(secim.get("pazar", ""))[:24],
+        "oran": oran,
+        "durum": "bekliyor",
+        "elle": False,
+    }
 
 
 def _yaz(planlar: list[dict]) -> None:
@@ -73,35 +121,73 @@ def sil(plan_id: int) -> bool:
 
 
 def adim_ekle(plan_id: int, secim: dict) -> dict:
-    oran = float(secim.get("oran", 0))
-    if not (1.01 <= oran <= 1000):
-        raise ValueError("Geçerli bir oran girin (1.01 - 1000).")
+    """Yeni adım açar. secim tek bacak alanları YA DA {"bacaklar": [...]}."""
+    ham = secim.get("bacaklar") if isinstance(secim.get("bacaklar"), list) else [secim]
+    if not (1 <= len(ham) <= MAKS_BACAK):
+        raise ValueError(f"Bir adım 1-{MAKS_BACAK} bacak içerebilir.")
+    bacaklar = [_bacak_dogrula(b) for b in ham]
     planlar = _oku()
     for p in planlar:
         if p.get("id") != plan_id:
             continue
         if len(p["adimlar"]) >= MAKS_ADIM:
             raise ValueError(f"Plan en fazla {MAKS_ADIM} adım içerebilir.")
-        if any(a["durum"] == "yatti" for a in p["adimlar"]):
+        if any(_adim_durumu(a) == "yatti" for a in p["adimlar"]):
             raise ValueError("Bu seri bitti (bir adım yattı) — yeni plan açın.")
-        p["adimlar"].append({
-            "tarih": str(secim.get("tarih", ""))[:10],
-            "saat": str(secim.get("saat", ""))[:5],
-            "lig": str(secim.get("lig", ""))[:8],
-            "ev": str(secim.get("ev", ""))[:60],
-            "dep": str(secim.get("dep", ""))[:60],
-            "pazar": str(secim.get("pazar", ""))[:24],
-            "oran": oran,
-            "durum": "bekliyor",
-            "elle": False,
-        })
+        p["adimlar"].append({"bacaklar": bacaklar})
         _yaz(planlar)
         return p
     raise ValueError("Plan bulunamadı.")
 
 
+def bacak_ekle(plan_id: int, adim_indeks: int, secim: dict) -> dict:
+    """Var olan BEKLEYEN adıma bacak ekler — kombineyi tek tek yazma akışı."""
+    bacak = _bacak_dogrula(secim)
+    planlar = _oku()
+    for p in planlar:
+        if p.get("id") != plan_id:
+            continue
+        if not (0 <= adim_indeks < len(p["adimlar"])):
+            raise ValueError("Adım bulunamadı.")
+        a = p["adimlar"][adim_indeks]
+        if _adim_durumu(a) != "bekliyor":
+            raise ValueError("Sonuçlanmış adıma bacak eklenemez.")
+        if len(a["bacaklar"]) >= MAKS_BACAK:
+            raise ValueError(f"Bir adım en fazla {MAKS_BACAK} bacak içerebilir.")
+        a["bacaklar"].append(bacak)
+        _yaz(planlar)
+        return p
+    raise ValueError("Plan bulunamadı.")
+
+
+def bacak_sil(plan_id: int, adim_indeks: int, bacak_indeks: int) -> bool:
+    """Bekleyen bacak silinir; adımın son bacağı silinirse adım da silinir
+    (yalnız son adımda — zincir bozulmasın)."""
+    planlar = _oku()
+    for p in planlar:
+        if p.get("id") != plan_id:
+            continue
+        if not (0 <= adim_indeks < len(p["adimlar"])):
+            return False
+        a = p["adimlar"][adim_indeks]
+        if not (0 <= bacak_indeks < len(a["bacaklar"])):
+            return False
+        if a["bacaklar"][bacak_indeks].get("durum") != "bekliyor":
+            raise ValueError("Sonuçlanmış bacak silinemez — önce ↺ ile geri alın.")
+        if len(a["bacaklar"]) == 1:
+            if adim_indeks != len(p["adimlar"]) - 1:
+                raise ValueError("Ortadaki adım silinemez (zincir bozulur).")
+            p["adimlar"].pop()
+        else:
+            a["bacaklar"].pop(bacak_indeks)
+        _yaz(planlar)
+        return True
+    return False
+
+
 def adim_duzenle(plan_id: int, indeks: int, alanlar: dict) -> bool:
-    """Yalnız 'bekliyor' adımda oran/maç bilgisi değiştirilebilir."""
+    """Yalnız 'bekliyor' bacakta oran/maç bilgisi değiştirilebilir.
+    alanlar["bacak"] hedef bacağı seçer (varsayılan 0)."""
     planlar = _oku()
     for p in planlar:
         if p.get("id") != plan_id:
@@ -109,39 +195,50 @@ def adim_duzenle(plan_id: int, indeks: int, alanlar: dict) -> bool:
         if not (0 <= indeks < len(p["adimlar"])):
             return False
         a = p["adimlar"][indeks]
-        if a["durum"] != "bekliyor" and "oran" in alanlar:
-            raise ValueError("Sonuçlanmış adımın oranı değiştirilemez.")
+        bi = int(alanlar.get("bacak", 0))
+        if not (0 <= bi < len(a["bacaklar"])):
+            return False
+        b = a["bacaklar"][bi]
+        if b["durum"] != "bekliyor" and "oran" in alanlar:
+            raise ValueError("Sonuçlanmış bacağın oranı değiştirilemez.")
         if "oran" in alanlar:
             o = float(alanlar["oran"])
             if not (1.01 <= o <= 1000):
                 raise ValueError("Geçerli bir oran girin.")
-            a["oran"] = o
+            b["oran"] = o
         for k in ("tarih", "ev", "dep", "pazar", "lig", "saat"):
             if k in alanlar:
-                a[k] = str(alanlar[k])[: 60 if k in ("ev", "dep") else 24]
+                b[k] = str(alanlar[k])[: 60 if k in ("ev", "dep") else 24]
         _yaz(planlar)
         return True
     return False
 
 
-def elle_isaretle(plan_id: int, indeks: int, durum: str) -> bool:
+def elle_isaretle(plan_id: int, indeks: int, durum: str, bacak: int = 0) -> bool:
+    """Tek BACAĞI işaretler; adımın durumu bacaklarından türetilir."""
     if durum not in ("tuttu", "yatti", "bekliyor"):
         raise ValueError("Durum tuttu/yatti/bekliyor olmalı.")
     planlar = _oku()
     for p in planlar:
         if p.get("id") == plan_id and 0 <= indeks < len(p["adimlar"]):
-            p["adimlar"][indeks]["durum"] = durum
-            p["adimlar"][indeks]["elle"] = durum != "bekliyor"
+            a = p["adimlar"][indeks]
+            if not (0 <= bacak < len(a["bacaklar"])):
+                return False
+            a["bacaklar"][bacak]["durum"] = durum
+            a["bacaklar"][bacak]["elle"] = durum != "bekliyor"
             _yaz(planlar)
             return True
     return False
 
 
 def adim_sil(plan_id: int, indeks: int) -> bool:
-    """Zincir bozulmasın diye yalnız SON adım silinebilir."""
+    """Zincir bozulmasın diye yalnız SON ve tamamen BEKLEYEN adım silinebilir."""
     planlar = _oku()
     for p in planlar:
         if p.get("id") == plan_id and p["adimlar"] and indeks == len(p["adimlar"]) - 1:
+            if _adim_durumu(p["adimlar"][indeks]) != "bekliyor" or any(
+                    b["durum"] != "bekliyor" for b in p["adimlar"][indeks]["bacaklar"]):
+                raise ValueError("Sonuçlanmış bacağı olan adım silinemez — önce ↺ ile geri alın.")
             p["adimlar"].pop()
             _yaz(planlar)
             return True
@@ -165,26 +262,27 @@ def sonuclandir(df: pd.DataFrame | None) -> list[dict]:
 
     for p in planlar:
         for a in p["adimlar"]:
-            if a["durum"] != "bekliyor" or a.get("elle") or not a.get("ev"):
-                continue
-            try:
-                t = pd.to_datetime(a["tarih"], dayfirst=True)
-            except (ValueError, TypeError):
-                continue
-            if t >= simdi.normalize():
-                continue
-            ev, dep = _coz(a["ev"]), _coz(a["dep"])
-            aday = df[(df["Tarih"] >= t - pd.Timedelta(days=1))
-                      & (df["Tarih"] <= t + pd.Timedelta(days=1))
-                      & (df["HomeTeam"] == ev) & (df["AwayTeam"] == dep)]
-            if aday.empty:
-                continue
-            r = aday.iloc[-1]
-            sonuc = _pazar_sonucu(a["pazar"], r)
-            a["skor"] = f"{int(r['FTHG'])}-{int(r['FTAG'])}"
-            if sonuc != "belirsiz":
-                a["durum"] = sonuc
-            degisti = True
+            for b in a["bacaklar"]:
+                if b["durum"] != "bekliyor" or b.get("elle") or not b.get("ev"):
+                    continue
+                try:
+                    t = pd.to_datetime(b["tarih"], dayfirst=True)
+                except (ValueError, TypeError):
+                    continue
+                if t >= simdi.normalize():
+                    continue
+                ev, dep = _coz(b["ev"]), _coz(b["dep"])
+                aday = df[(df["Tarih"] >= t - pd.Timedelta(days=1))
+                          & (df["Tarih"] <= t + pd.Timedelta(days=1))
+                          & (df["HomeTeam"] == ev) & (df["AwayTeam"] == dep)]
+                if aday.empty:
+                    continue
+                r = aday.iloc[-1]
+                sonuc = _pazar_sonucu(b["pazar"], r)
+                b["skor"] = f"{int(r['FTHG'])}-{int(r['FTAG'])}"
+                if sonuc != "belirsiz":
+                    b["durum"] = sonuc
+                degisti = True
     if degisti:
         _yaz(planlar)
     return planlar
@@ -196,21 +294,24 @@ def hesapla(plan: dict) -> dict:
     adimlar = []
     plan_durum = "aktif"
     for a in plan["adimlar"]:
+        durum = _adim_durumu(a)
+        oran = _adim_orani(a)
         yatirim = round(bakiye, 2)
-        if a["durum"] == "tuttu":
-            bakiye = bakiye * float(a["oran"])
+        if durum == "tuttu":
+            bakiye = bakiye * oran
             sonra = round(bakiye, 2)
-        elif a["durum"] == "yatti":
+        elif durum == "yatti":
             bakiye = 0.0
             sonra = 0.0
             plan_durum = "yatti"
         else:
             sonra = None  # bekliyor: zincir burada duruyor
-        adimlar.append({**a, "yatirim": yatirim, "bakiye": sonra})
+        adimlar.append({"bacaklar": a["bacaklar"], "durum": durum,
+                        "oran": round(oran, 2), "yatirim": yatirim, "bakiye": sonra})
         if plan_durum == "yatti":
             # seri bitti; kalan adımlar (varsa) gösterilir ama yatırım 0
             bakiye = 0.0
-    tamam = sum(1 for a in plan["adimlar"] if a["durum"] == "tuttu")
+    tamam = sum(1 for a in plan["adimlar"] if _adim_durumu(a) == "tuttu")
     if plan_durum != "yatti" and tamam >= plan.get("hedef_gun", 15):
         plan_durum = "tamam"
     return {

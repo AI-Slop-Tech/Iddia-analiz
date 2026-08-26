@@ -1616,6 +1616,8 @@ function saglamBolumu(liste){
         <button class="mini-btn" onclick='oranSec(${arg})'>${iks('ekle')}</button>
         <button class="mini-btn" title="Aktif Rolling planına adım olarak ekle"
           onclick='rollingSaglamEkle(${JSON.stringify(m.ev)},${JSON.stringify(m.dep)},${JSON.stringify(SECIM_AD[g.secim]||g.secim)},${g.oran},${JSON.stringify(AKTIF_GUN)},${JSON.stringify(m.saat||"")},${JSON.stringify(m.lig||"")})'>📈</button>
+        <button class="mini-btn" title="Son adıma BACAK olarak ekle (kombine)"
+          onclick='rollingSaglamEkle(${JSON.stringify(m.ev)},${JSON.stringify(m.dep)},${JSON.stringify(SECIM_AD[g.secim]||g.secim)},${g.oran},${JSON.stringify(AKTIF_GUN)},${JSON.stringify(m.saat||"")},${JSON.stringify(m.lig||"")},"bacak")'>🔗</button>
         ${g.gerekce ? `<span class="gerekce">${iks('gerekce')}<span>${g.gerekce.map(esc).join(' · ')}</span></span>` : ''}
       </div>`;
     }).join('')}
@@ -3175,16 +3177,25 @@ function rollingAktifPlan(){
   return ROLLING_PLANLAR.find(p => p.durum === 'aktif') || null;
 }
 
-async function rollingSaglamEkle(ev, dep, pazar, oran, tarih, saat, lig){
+async function rollingSaglamEkle(ev, dep, pazar, oran, tarih, saat, lig, mod){
   if(!ROLLING_PLANLAR.length){
     try{ ROLLING_PLANLAR = (await api('/api/rolling')).planlar || []; }catch(h){}
   }
   const plan = rollingAktifPlan();
   if(!plan){ bildir('Önce 📈 Rolling sekmesinden bir plan başlat.', true); sekmeAc('rolling'); return; }
+  const secim = {tarih, saat, lig, ev, dep, pazar, oran};
   try{
-    await api('/api/rolling-adim', {id: plan.id,
-      secim: {tarih, saat, lig, ev, dep, pazar, oran}});
-    bildir(`📈 ${ev} – ${dep} plana eklendi (${tl(plan.bakiye)}₺ yatırım).`);
+    if(mod === 'bacak'){
+      const son = plan.adimlar.length ? plan.adimlar.length - 1 : -1;
+      if(son < 0 || plan.adimlar[son].durum !== 'bekliyor'){
+        bildir('Bacak eklenecek bekleyen adım yok — 📈 ile yeni adım aç.', true); return;
+      }
+      await api('/api/rolling-bacak', {id: plan.id, adim: son, secim});
+      bildir(`🔗 ${ev} – ${dep} son adıma bacak olarak eklendi.`);
+    }else{
+      await api('/api/rolling-adim', {id: plan.id, secim});
+      bildir(`📈 ${ev} – ${dep} yeni adım olarak eklendi (${tl(plan.bakiye)}₺ yatırım).`);
+    }
     ROLLING_PLANLAR = [];   // sekme açılınca tazelensin
     if(document.querySelector('#s-rolling.aktif')) rollingYukle();
   }catch(h){ bildir(h.message, true); }
@@ -3206,23 +3217,40 @@ function rollingCiz(){
           aa = String(bugun.getMonth()+1).padStart(2,'0');
     const satirlar = pl.adimlar.map((a, i) => {
       const son = i === pl.adimlar.length - 1;
-      const oranHucre = a.durum === 'bekliyor'
-        ? `<input type="number" step="0.01" min="1.01" value="${a.oran}" style="width:70px;padding:4px"
-             onchange="rollingOranDegis(${pl.id},${i},this.value)">`
-        : `<b>${Number(a.oran).toFixed(2)}</b>`;
-      const sonucHucre = a.durum === 'bekliyor'
-        ? `<button class="mini-btn" onclick="rollingIsaret(${pl.id},${i},'tuttu')">✓</button>
-           <button class="mini-btn" onclick="rollingIsaret(${pl.id},${i},'yatti')">✗</button>
-           ${son ? `<button class="mini-btn" title="son adımı sil" onclick="rollingAdimSil(${pl.id},${i})">🗑</button>` : ''}`
+      const bacaklar = a.bacaklar || [];
+      const coklu = bacaklar.length > 1;
+      // Her bacak kendi satırında: metin · oran (bekliyorsa input) · ✓/✗/↺ · skor.
+      // Adımın kaderi bacaklardan türetilir (kombine kuralı: biri yatarsa adım yatar).
+      const bacakHTML = bacaklar.map((b, j) => {
+        const oranHucre = b.durum === 'bekliyor'
+          ? `<input type="number" step="0.01" min="1.01" value="${b.oran}" style="width:64px;padding:3px"
+               onchange="rollingOranDegis(${pl.id},${i},${j},this.value)">`
+          : `<b>${Number(b.oran).toFixed(2)}</b>`;
+        const isaret = b.durum === 'bekliyor'
+          ? `<button class="mini-btn" onclick="rollingIsaret(${pl.id},${i},'tuttu',${j})">✓</button>
+             <button class="mini-btn" onclick="rollingIsaret(${pl.id},${i},'yatti',${j})">✗</button>
+             <button class="mini-btn" title="bacağı sil" onclick="rollingBacakSil(${pl.id},${i},${j})">🗑</button>`
+          : `<span class="${b.durum === 'tuttu' ? 'ev-poz' : 'ev-neg'}" style="font-weight:800">
+               ${b.durum === 'tuttu' ? '✅' : '❌'}${b.skor ? ' ' + esc(b.skor) : ''}</span>
+             <button class="mini-btn" title="geri al" onclick="rollingIsaret(${pl.id},${i},'bekliyor',${j})">↺</button>`;
+        return `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:2px 0">
+          <span style="min-width:150px">${esc(b.ev)}${b.dep ? ' – ' + esc(b.dep) : ''}
+            <span class="ipucu">${esc(b.pazar || '')}${b.tarih ? ' · ' + esc(b.tarih) : ''}</span></span>
+          ${oranHucre}
+          <span style="white-space:nowrap">${isaret}</span>
+        </div>`;
+      }).join('');
+      const adimDurum = a.durum === 'bekliyor'
+        ? `<span class="ipucu">bekliyor</span>${son && bacaklar.every(b => b.durum === 'bekliyor')
+            ? ` <button class="mini-btn" title="adımı sil" onclick="rollingAdimSil(${pl.id},${i})">🗑</button>` : ''}`
         : `<span class="${a.durum === 'tuttu' ? 'ev-poz' : 'ev-neg'}" style="font-weight:800">
-             ${a.durum === 'tuttu' ? '✅' : '❌'}${a.skor ? ' ' + esc(a.skor) : ''}</span>
-           <button class="mini-btn" title="geri al" onclick="rollingIsaret(${pl.id},${i},'bekliyor')">↺</button>`;
+             ${a.durum === 'tuttu' ? '✅ tuttu' : '❌ yattı'}</span>`;
       return `<tr>
-        <td>${i+1}</td><td class="ipucu">${esc(a.tarih || '')}</td>
-        <td>${esc(a.ev)}${a.dep ? ' – ' + esc(a.dep) : ''}<div class="ipucu">${esc(a.pazar || '')}</div></td>
-        <td>${oranHucre}</td>
+        <td>${i+1}</td>
+        <td>${bacakHTML}${coklu ? `<div class="ipucu" style="margin-top:2px">🔗 ${bacaklar.length} bacaklı kombine</div>` : ''}</td>
+        <td><b>${Number(a.oran).toFixed(2)}</b>${coklu ? '<div class="ipucu">toplam</div>' : ''}</td>
         <td>${tl(a.yatirim)}₺</td>
-        <td style="white-space:nowrap">${sonucHucre}</td>
+        <td style="white-space:nowrap">${adimDurum}</td>
         <td>${a.bakiye === null ? '<span class="ipucu">…</span>'
               : `<b class="${a.bakiye > 0 ? 'ev-poz' : 'ev-neg'}">${tl(a.bakiye)}₺</b>`}</td>
       </tr>`;
@@ -3234,8 +3262,10 @@ function rollingCiz(){
         <input id="ra-d-${pl.id}" placeholder="deplasman" style="flex:1;min-width:110px">
         <input id="ra-p-${pl.id}" list="roll-pazarlar" placeholder="pazar" style="width:100px">
         <input id="ra-o-${pl.id}" type="number" step="0.01" min="1.01" value="${pl.hedef_oran}" style="width:76px" title="oran">
-        <button class="mini-btn" onclick="rollingAdimEkle(${pl.id})">➕ Adım ekle</button>
-        <span class="ipucu">ya da bültendeki 🛡 satırından 📈 ile</span>
+        <button class="mini-btn" onclick="rollingAdimEkle(${pl.id},'adim')">➕ Yeni adım</button>
+        <button class="mini-btn" title="Kombine kuruyorsan: bu seçimi SON adıma bacak olarak ekler"
+          onclick="rollingAdimEkle(${pl.id},'bacak')">🔗 Son adıma bacak</button>
+        <span class="ipucu">🛡 satırından: 📈 yeni adım · 🔗 son adıma bacak</span>
       </div>` : '';
     return `<div class="kart" style="margin-top:10px">
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
@@ -3247,28 +3277,41 @@ function rollingCiz(){
       </div>
       <div style="overflow-x:auto;margin-top:8px">
       <table class="roll-tablo"><thead><tr>
-        <th>#</th><th>tarih</th><th>maç · pazar</th><th>oran</th><th>yatırılan</th><th>sonuç</th><th>bakiye</th>
+        <th>#</th><th>bacaklar (maç · pazar · oran · sonuç)</th><th>oran</th><th>yatırılan</th><th>adım</th><th>bakiye</th>
       </tr></thead><tbody>${satirlar ||
-        '<tr><td colspan="7" class="ipucu" style="text-align:center">henüz adım yok</td></tr>'}</tbody></table></div>
+        '<tr><td colspan="6" class="ipucu" style="text-align:center">henüz adım yok</td></tr>'}</tbody></table></div>
       ${ekleSatiri}
     </div>`;
   }).join('') + `<datalist id="roll-pazarlar">${ROLL_PAZARLAR.map(x => `<option value="${x}">`).join('')}</datalist>`;
 }
 
-async function rollingAdimEkle(id){
+async function rollingAdimEkle(id, mod){
   const g = k => ($('#ra-' + k + '-' + id) || {}).value || '';
+  const secim = {tarih: g('t'), ev: g('e'), dep: g('d'), pazar: g('p'), oran: +g('o')};
   try{
-    await api('/api/rolling-adim', {id, secim: {tarih: g('t'), ev: g('e'), dep: g('d'),
-      pazar: g('p'), oran: +g('o')}});
+    if(mod === 'bacak'){
+      const pl = ROLLING_PLANLAR.find(x => x.id === id);
+      const son = pl && pl.adimlar.length ? pl.adimlar.length - 1 : -1;
+      if(son < 0 || pl.adimlar[son].durum !== 'bekliyor'){
+        bildir('Bacak eklenecek bekleyen adım yok — önce ➕ Yeni adım aç.', true); return;
+      }
+      await api('/api/rolling-bacak', {id, adim: son, secim});
+    }else{
+      await api('/api/rolling-adim', {id, secim});
+    }
     rollingYukle();
   }catch(h){ bildir(h.message, true); }
 }
-async function rollingOranDegis(id, indeks, oran){
-  try{ await api('/api/rolling-duzenle', {id, indeks, alanlar: {oran: +oran}}); rollingYukle(); }
+async function rollingOranDegis(id, indeks, bacak, oran){
+  try{ await api('/api/rolling-duzenle', {id, indeks, alanlar: {bacak, oran: +oran}}); rollingYukle(); }
   catch(h){ bildir(h.message, true); rollingYukle(); }
 }
-async function rollingIsaret(id, indeks, durum){
-  try{ await api('/api/rolling-isaretle', {id, indeks, durum}); rollingYukle(); }
+async function rollingIsaret(id, indeks, durum, bacak){
+  try{ await api('/api/rolling-isaretle', {id, indeks, durum, bacak: bacak || 0}); rollingYukle(); }
+  catch(h){ bildir(h.message, true); }
+}
+async function rollingBacakSil(id, adim, bacak){
+  try{ await api('/api/rolling-bacak-sil', {id, adim, bacak}); rollingYukle(); }
   catch(h){ bildir(h.message, true); }
 }
 async function rollingAdimSil(id, indeks){
