@@ -1616,8 +1616,8 @@ function saglamBolumu(liste){
         <button class="mini-btn" onclick='oranSec(${arg})'>${iks('ekle')}</button>
         <button class="mini-btn" title="Aktif Rolling planına adım olarak ekle"
           onclick='rollingSaglamEkle(${JSON.stringify(m.ev)},${JSON.stringify(m.dep)},${JSON.stringify(SECIM_AD[g.secim]||g.secim)},${g.oran},${JSON.stringify(AKTIF_GUN)},${JSON.stringify(m.saat||"")},${JSON.stringify(m.lig||"")})'>📈</button>
-        <button class="mini-btn" title="Son adıma BACAK olarak ekle (kombine)"
-          onclick='rollingSaglamEkle(${JSON.stringify(m.ev)},${JSON.stringify(m.dep)},${JSON.stringify(SECIM_AD[g.secim]||g.secim)},${g.oran},${JSON.stringify(AKTIF_GUN)},${JSON.stringify(m.saat||"")},${JSON.stringify(m.lig||"")},"bacak")'>🔗</button>
+        <button class="mini-btn" title="Kupona at (kombine kur) — Rolling sekmesinde 📈 Adımı kaydet ile hepsi tek adım olur"
+          onclick='rollingSaglamEkle(${JSON.stringify(m.ev)},${JSON.stringify(m.dep)},${JSON.stringify(SECIM_AD[g.secim]||g.secim)},${g.oran},${JSON.stringify(AKTIF_GUN)},${JSON.stringify(m.saat||"")},${JSON.stringify(m.lig||"")},"sepet")'>🧺</button>
         ${g.gerekce ? `<span class="gerekce">${iks('gerekce')}<span>${g.gerekce.map(esc).join(' · ')}</span></span>` : ''}
       </div>`;
     }).join('')}
@@ -3184,24 +3184,26 @@ async function rollingSaglamEkle(ev, dep, pazar, oran, tarih, saat, lig, mod){
   const plan = rollingAktifPlan();
   if(!plan){ bildir('Önce 📈 Rolling sekmesinden bir plan başlat.', true); sekmeAc('rolling'); return; }
   const secim = {tarih, saat, lig, ev, dep, pazar, oran};
+  if(mod === 'sepet'){
+    // Kombine kurma akışı: seçim taslak kupona atılır, adım henüz açılmaz.
+    const sep = rollingSepet(plan.id);
+    sep.push(secim);
+    const toplam = sep.reduce((x, b) => x * (+b.oran || 1), 1);
+    bildir(`🧺 ${ev} – ${dep} kupona atıldı (${sep.length} bacak · toplam ${toplam.toFixed(2)}) — 📈 Rolling sekmesinde "Adımı kaydet".`);
+    if(document.querySelector('#s-rolling.aktif')) rollingCiz();
+    return;
+  }
   try{
-    if(mod === 'bacak'){
-      const son = plan.adimlar.length ? plan.adimlar.length - 1 : -1;
-      if(son < 0 || plan.adimlar[son].durum !== 'bekliyor'){
-        bildir('Bacak eklenecek bekleyen adım yok — 📈 ile yeni adım aç.', true); return;
-      }
-      await api('/api/rolling-bacak', {id: plan.id, adim: son, secim});
-      bildir(`🔗 ${ev} – ${dep} son adıma bacak olarak eklendi.`);
-    }else{
-      await api('/api/rolling-adim', {id: plan.id, secim});
-      bildir(`📈 ${ev} – ${dep} yeni adım olarak eklendi (${tl(plan.bakiye)}₺ yatırım).`);
-    }
+    await api('/api/rolling-adim', {id: plan.id, secim});
+    bildir(`📈 ${ev} – ${dep} yeni adım olarak eklendi (${tl(plan.bakiye)}₺ yatırım).`);
     ROLLING_PLANLAR = [];   // sekme açılınca tazelensin
     if(document.querySelector('#s-rolling.aktif')) rollingYukle();
   }catch(h){ bildir(h.message, true); }
 }
 
 const ROLL_PAZARLAR = ['MS1','MS0','MS2','ÜST 2.5','ALT 2.5','KG VAR','KG YOK','ÇŞ 1X','ÇŞ 12','ÇŞ X2'];
+const ROLL_SEPET = {};   // plan id → taslak kupon bacakları (kaydedilmemiş kombine)
+function rollingSepet(id){ return ROLL_SEPET[id] || (ROLL_SEPET[id] = []); }
 
 function rollingCiz(){
   const kutu = $('#rolling-liste'); if(!kutu) return;
@@ -3255,17 +3257,36 @@ function rollingCiz(){
               : `<b class="${a.bakiye > 0 ? 'ev-poz' : 'ev-neg'}">${tl(a.bakiye)}₺</b>`}</td>
       </tr>`;
     }).join('');
+    const sep = ROLL_SEPET[pl.id] || [];
+    const sepToplam = sep.reduce((x, b) => x * (+b.oran || 1), 1);
+    // Taslak kupon: kombine burada bacak bacak birikir, "Adımı kaydet" tek adım açar.
+    const sepetHTML = sep.length ? `
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:8px;
+                  padding:8px 10px;border:1px dashed #3a4656;border-radius:10px">
+        <b>🧺 Kupon</b><span class="chip">${sep.length} bacak · toplam <b>${sepToplam.toFixed(2)}</b></span>
+        ${sep.map((b, j) => `<span class="chip">${esc(b.ev)}${b.dep ? ' – ' + esc(b.dep) : ''} ·
+          ${esc(b.pazar || '?')} · ${Number(b.oran).toFixed(2)}
+          <a style="cursor:pointer;font-weight:800;margin-left:4px" title="bacağı çıkar"
+             onclick="rollingSepetCikar(${pl.id},${j})">✕</a></span>`).join('')}
+        <span style="flex:1"></span>
+        <button class="mini-btn" onclick="rollingSepetBosalt(${pl.id})">🗑 boşalt</button>
+      </div>` : '';
     const ekleSatiri = pl.durum === 'aktif' ? `
+      ${sepetHTML}
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;align-items:center">
         <input id="ra-t-${pl.id}" value="${gg}.${aa}.${bugun.getFullYear()}" style="width:96px" title="tarih">
         <input id="ra-e-${pl.id}" placeholder="ev sahibi" style="flex:1;min-width:110px">
         <input id="ra-d-${pl.id}" placeholder="deplasman" style="flex:1;min-width:110px">
         <input id="ra-p-${pl.id}" list="roll-pazarlar" placeholder="pazar" style="width:100px">
         <input id="ra-o-${pl.id}" type="number" step="0.01" min="1.01" value="${pl.hedef_oran}" style="width:76px" title="oran">
-        <button class="mini-btn" onclick="rollingAdimEkle(${pl.id},'adim')">➕ Yeni adım</button>
-        <button class="mini-btn" title="Kombine kuruyorsan: bu seçimi SON adıma bacak olarak ekler"
-          onclick="rollingAdimEkle(${pl.id},'bacak')">🔗 Son adıma bacak</button>
-        <span class="ipucu">🛡 satırından: 📈 yeni adım · 🔗 son adıma bacak</span>
+        <button class="mini-btn" title="Kombine kuruyorsan: her maçı TEK TEK bununla kupona at"
+          onclick="rollingSepeteEkle(${pl.id})">➕ Kupona ekle</button>
+        <button class="mini-btn" style="font-weight:800"
+          title="${sep.length ? 'Kupondaki bacakların hepsini TEK adım (kombine) olarak kaydeder'
+                              : 'Yazdığın maçı tek başına adım olarak kaydeder'}"
+          onclick="rollingAdimKaydet(${pl.id})">📈 Adımı kaydet${sep.length
+            ? ` (${sep.length} bacaklı kombine)` : ''}</button>
+        <span class="ipucu">tekli: maçı yaz → 📈 · kombine: her maçı ➕ ile kupona at → 📈</span>
       </div>` : '';
     return `<div class="kart" style="margin-top:10px">
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
@@ -3285,20 +3306,54 @@ function rollingCiz(){
   }).join('') + `<datalist id="roll-pazarlar">${ROLL_PAZARLAR.map(x => `<option value="${x}">`).join('')}</datalist>`;
 }
 
-async function rollingAdimEkle(id, mod){
+function rollingSatirOku(id){
   const g = k => ($('#ra-' + k + '-' + id) || {}).value || '';
-  const secim = {tarih: g('t'), ev: g('e'), dep: g('d'), pazar: g('p'), oran: +g('o')};
+  const ev = g('e').trim();
+  if(!ev) return null;
+  return {tarih: g('t').trim(), ev, dep: g('d').trim(), pazar: g('p').trim(),
+          oran: +String(g('o')).replace(',', '.')};
+}
+function rollingCokluMacUyari(s){
+  // "Lyon - Fenerbahçe – Real Madrid - Real Sociedad" gibi tek satıra sıkışmış
+  // kuponu yakala: iki+ boşluklu tire = büyük ihtimalle birden çok maç.
+  if(/\s[-–—]\s.*\s[-–—]\s/.test(s.ev + ' ' + (s.dep || '')))
+    return confirm('⚠ Tek bacağa birden çok maç yazılmış görünüyor.\n' +
+      'Kombine için her maçı AYRI yaz: maçı yaz → ➕ Kupona ekle → sonrakini yaz → ➕ → en sonda 📈 Adımı kaydet.\n' +
+      '(Tek satıra sıkışan kuponun sonucu otomatik işlenemez.)\n\nYine de TEK bacak olarak kaydedilsin mi?');
+  return true;
+}
+function rollingSepeteEkle(id){
+  const s = rollingSatirOku(id);
+  if(!s){ bildir('Önce alt satıra maçı yaz (en azından ev sahibi + oran).', true); return; }
+  if(!(s.oran > 1)){ bildir('Oran 1.01 veya üstü olmalı.', true); return; }
+  if(!rollingCokluMacUyari(s)) return;
+  const sep = rollingSepet(id);
+  sep.push(s);
+  const toplam = sep.reduce((x, b) => x * b.oran, 1);
+  bildir(`🧺 ${s.ev}${s.dep ? ' – ' + s.dep : ''} kupona eklendi (${sep.length} bacak · toplam ${toplam.toFixed(2)}). Sıradaki maçı yaz.`);
+  rollingCiz();
+}
+function rollingSepetCikar(id, j){ rollingSepet(id).splice(j, 1); rollingCiz(); }
+function rollingSepetBosalt(id){ ROLL_SEPET[id] = []; rollingCiz(); }
+async function rollingAdimKaydet(id){
+  const bacaklar = rollingSepet(id).slice();
+  const satir = rollingSatirOku(id);   // yazılıp ➕'ya basılmamış son bacağı da al
+  if(satir){
+    if(!(satir.oran > 1)){ bildir('Oran 1.01 veya üstü olmalı.', true); return; }
+    if(!rollingCokluMacUyari(satir)) return;
+    bacaklar.push(satir);
+  }
+  if(!bacaklar.length){
+    bildir('Kaydedilecek seçim yok — maçı yaz; kombine için her maçı ➕ Kupona ekle ile tek tek at.', true);
+    return;
+  }
   try{
-    if(mod === 'bacak'){
-      const pl = ROLLING_PLANLAR.find(x => x.id === id);
-      const son = pl && pl.adimlar.length ? pl.adimlar.length - 1 : -1;
-      if(son < 0 || pl.adimlar[son].durum !== 'bekliyor'){
-        bildir('Bacak eklenecek bekleyen adım yok — önce ➕ Yeni adım aç.', true); return;
-      }
-      await api('/api/rolling-bacak', {id, adim: son, secim});
-    }else{
-      await api('/api/rolling-adim', {id, secim});
-    }
+    await api('/api/rolling-adim', {id, secim: bacaklar.length > 1 ? {bacaklar} : bacaklar[0]});
+    ROLL_SEPET[id] = [];
+    const toplam = bacaklar.reduce((x, b) => x * b.oran, 1);
+    bildir(bacaklar.length > 1
+      ? `📈 ${bacaklar.length} bacaklı kombine TEK adım olarak kaydedildi (toplam ${toplam.toFixed(2)}).`
+      : '📈 Adım kaydedildi.');
     rollingYukle();
   }catch(h){ bildir(h.message, true); }
 }
