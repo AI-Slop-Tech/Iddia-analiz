@@ -9,8 +9,6 @@ from __future__ import annotations
 
 import os
 
-import requests
-
 VARSAYILAN_MODEL = "gemini-2.5-flash"
 URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 
@@ -78,9 +76,11 @@ def yorum_al(rapor_metni: str, zaman_asimi: int = 90) -> str:
         "contents": [{"parts": [{"text": PROMPT.format(rapor=rapor_metni)}]}],
         "generationConfig": {"temperature": 0.55, "maxOutputTokens": 4096},
     }
-    yanit = requests.post(
-        URL.format(model=model), params={"key": anahtar}, json=govde, timeout=zaman_asimi
-    )
+    # anahtarli=True: vekilden GEÇMEZ. Gemini Türkiye'den doğrudan erişilebilir
+    # ve dönen vekil IP'si anahtarı kötüye kullanım şüphesine düşürür.
+    yanit = veri.istek(URL.format(model=model), yontem="post", params={"key": anahtar},
+                       json=govde, zaman_asimi=zaman_asimi, dogrula=veri.json_yanit_mi,
+                       anahtarli=True)
 
     if yanit.status_code in (400, 403):
         raise RuntimeError("Gemini API anahtarı geçersiz görünüyor (HTTP %d)." % yanit.status_code)
@@ -88,9 +88,9 @@ def yorum_al(rapor_metni: str, zaman_asimi: int = 90) -> str:
         raise RuntimeError("Gemini ücretsiz kota sınırına takıldınız, biraz sonra tekrar deneyin.")
     yanit.raise_for_status()
 
-    veri = yanit.json()
+    govde_yanit = yanit.json()
     try:
-        parcalar = veri["candidates"][0]["content"]["parts"]
+        parcalar = govde_yanit["candidates"][0]["content"]["parts"]
         return "\n".join(p.get("text", "") for p in parcalar).strip()
     except (KeyError, IndexError) as h:
-        raise RuntimeError(f"Gemini yanıtı çözümlenemedi: {veri}") from h
+        raise RuntimeError(f"Gemini yanıtı çözümlenemedi: {govde_yanit}") from h

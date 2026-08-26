@@ -31,6 +31,10 @@ services:
       #   IDDAA_KAYNAK_TABAN : kendi ters vekiliniz (ör. Cloudflare Worker)
       #                        https://iddaa-veri.hesabiniz.workers.dev
       - IDDAA_PROXY=${IDDAA_PROXY:-}
+      # Anahtarlı servisler (odds-api.io, API-Football, football-data.org,
+      # Gemini) vekilden GEÇMEZ: dönen vekil IP'si anahtarı askıya aldırabilir.
+      # Sunucunuz onlara da ulaşamıyorsa 1 yapın.
+      - IDDAA_VEKIL_ANAHTARLI=${IDDAA_VEKIL_ANAHTARLI:-}
       - IDDAA_KAYNAK_TABAN=${IDDAA_KAYNAK_TABAN:-}
       # Opsiyonel geniş kapsama: football-data.org ücretsiz anahtarı
       # (https://www.football-data.org/client/register). Tanımlanırsa
@@ -50,6 +54,10 @@ services:
       # anahtar istemez; bülteni haftanın tamamı için doldurur. IDDAA_PROXY
       # tanımlıysa istekleri de vekilden geçer. Kapatmak için: 0
       - IDDAA_ACIK_FIKSTUR=${IDDAA_ACIK_FIKSTUR:-}
+      # Pinnacle'ın açık fiyat ucu: bültendeki maçların oranını anahtarsız
+      # doldurur (tek istekte ~800 maç, 30 dk önbellekli, gzip ~1 MB).
+      # VARSAYILAN AÇIK. Kapatmak için: 0
+      - IDDAA_PINNACLE=${IDDAA_PINNACLE:-}
     volumes:
       - iddaa-veri:/app/data
     healthcheck:

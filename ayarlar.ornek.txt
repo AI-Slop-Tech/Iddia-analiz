@@ -26,3 +26,12 @@
 #IDDAA_ACIK_FIKSTUR=0
 # (Aynı ayar açık dünya ARŞİVİNİ de kapatır: kapatılırsa football-data'nın
 #  kapsamadığı ~150 lig analiz veremez, maçlar yalnız listelenir.)
+
+# Pinnacle açık oranları da VARSAYILAN AÇIKTIR ve anahtar istemez; bültendeki
+# maçların oranını doldurur. Kapatmak isterseniz:
+#IDDAA_PINNACLE=0
+
+# Anahtarlı servisler (odds-api.io, API-Football, football-data.org, Gemini)
+# vekilden GEÇMEZ — dönen vekil IP'si anahtarı askıya aldırabilir. Sunucunuz
+# bu adreslere de ulaşamıyorsa:
+#IDDAA_VEKIL_ANAHTARLI=1

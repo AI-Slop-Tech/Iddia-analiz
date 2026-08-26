@@ -100,15 +100,129 @@ def _oturum() -> requests.Session:
     return oturum
 
 
-def _istek(oturum: requests.Session, url: str, zaman_asimi: int):
-    """Tek istek. Vekil, oturum yerine istek düzeyinde verilir.
+# ── Akıllı taşıma: önce doğrudan, olmazsa vekilden ──────────────────────
+#
+# Uygulamanın dokunduğu sitelerin çoğu (football-data.co.uk, livescore,
+# Pinnacle, odds-api...) Türkiye'den erişime kapalı; ama HEPSİ değil ve
+# sunucu yurt dışındaysa hiçbiri değil. Eskiden bazı çağrılar vekili hiç
+# kullanmıyor (odds-api.io, API-Football, Gemini, football-data.org hasadı),
+# bazıları ise vekil tanımlıysa her zaman vekilden geçiyordu.
+#
+# Artık tek kural: vekil tanımlıysa host başına ÖNCE DOĞRUDAN denenir; hata
+# ya da geçersiz yanıt gelirse vekile düşülür. Hangi yolun çalıştığı host
+# başına hatırlanır ve 30 dakikada bir yeniden yoklanır — hem engel kalkarsa
+# doğrudana dönülür hem vekil düşerse tekrar denenir. Doğrudan deneme kısa
+# zaman aşımıyla yapılır ki engelli host bülteni bekletmesin.
+_DUZ_ZAMAN_ASIMI = 6          # doğrudan yoklama: engelli host hızlı elensin
+_YOL_TAZELE = 30 * 60         # öğrenilen yol bu sürede bir yeniden sınanır
+_HOST_YOLU: dict[str, tuple[str, float]] = {}
+_HOST_KILIT = threading.Lock()
 
-    requests, ortamdaki HTTP_PROXY/HTTPS_PROXY değerlerini oturum ayarının
-    ÜSTÜNE yazar (merge_environment_settings); vekili istek düzeyinde geçmek
-    IDDAA_PROXY'nin ortam değişkenlerini gerçekten ezmesini sağlar. Boş dict
-    verildiğinde requests her zamanki ortam davranışına döner.
+# arayüzde gösterilir: hangi host doğrudan, hangisi vekilden geçiyor
+AG_YOLLARI: dict[str, str] = {}
+
+
+def _host(url: str) -> str:
+    try:
+        return url.split("//", 1)[1].split("/", 1)[0].lower()
+    except IndexError:
+        return url
+
+
+def _yanit_gecerli(yanit) -> bool:
+    """Varsayılan geçerlilik: sunucu hatası değilse tamam.
+
+    5xx'te taşıma değiştirmeye değer (vekil/ISP araya sayfa koymuş olabilir);
+    4xx gerçek bir yanıttır (hatalı anahtar, yok) — taşıma suçlu değildir.
     """
-    return oturum.get(url, timeout=zaman_asimi, proxies=proxy_ayari() or None)
+    return yanit.status_code < 500
+
+
+def json_yanit_mi(yanit) -> bool:
+    """JSON bekleyen uçlar için: ISP engel sayfası HTML döner, JSON dönmez."""
+    if yanit.status_code >= 500:
+        return False
+    if "json" in (yanit.headers.get("Content-Type") or "").lower():
+        return True
+    try:
+        yanit.json()
+        return True
+    except ValueError:
+        return False
+
+
+def vekil_anahtarliya_acik() -> bool:
+    """Anahtarlı servisler de vekilden geçsin mi? VARSAYILAN HAYIR.
+
+    Gerekçe: bu servisler kötüye kullanımı ÇIKIŞ IP'siyle takip ediyor —
+    API-Football'un kendi uyarısı "limit aşılırsa engel yalnız anahtarı değil
+    çıkış IP'sini de hedefler" diyor. Dönen (rotating) bir vekilde her istek
+    başka IP'den çıkar; anahtarlı bir hesap için bu klasik kötüye kullanım
+    işaretidir ve anahtarı askıya aldırabilir. Üstelik bu servisler API ucu,
+    bahis/skor sitesi değil — Türkiye'den doğrudan erişilebiliyorlar.
+
+    Sunucunuz gerçekten bu adreslere de ulaşamıyorsa IDDAA_VEKIL_ANAHTARLI=1
+    ile açabilirsiniz; riski bilerek almış olursunuz.
+    """
+    return (os.environ.get("IDDAA_VEKIL_ANAHTARLI") or "").strip().lower() in (
+        "1", "on", "true", "evet", "acik", "açık", "yes"
+    )
+
+
+def istek(url: str, *, oturum: requests.Session | None = None, yontem: str = "get",
+          dogrula=None, zaman_asimi: int = ZAMAN_ASIMI, anahtarli: bool = False, **kw):
+    """Tek dış istek — doğrudan/vekil seçimini kendisi yapar.
+
+    anahtarli=True: API anahtarıyla kimliklenen servis. Vekil KULLANILMAZ
+    (bkz. vekil_anahtarliya_acik) — anahtar dönen IP yüzünden yanmasın.
+
+    Vekil, oturum yerine İSTEK düzeyinde verilir: requests, ortamdaki
+    HTTP_PROXY/HTTPS_PROXY değerlerini oturum ayarının ÜSTÜNE yazıyor
+    (merge_environment_settings); istek düzeyinde geçmek IDDAA_PROXY'nin
+    ortam değişkenlerini gerçekten ezmesini sağlar.
+    """
+    o = oturum or _oturum()
+    vekil = proxy_ayari()
+    if anahtarli and not vekil_anahtarliya_acik():
+        vekil = {}
+    dogrula = dogrula or _yanit_gecerli
+    cagir = getattr(o, yontem)
+    if not vekil:
+        AG_YOLLARI[_host(url)] = "anahtar" if anahtarli else "duz"
+        return cagir(url, timeout=zaman_asimi, **kw)
+
+    host = _host(url)
+    with _HOST_KILIT:
+        kayit = _HOST_YOLU.get(host)
+        ogrenilen = kayit[0] if kayit and time.time() - kayit[1] < _YOL_TAZELE else None
+    sira = ["vekil", "duz"] if ogrenilen == "vekil" else ["duz", "vekil"]
+
+    son_hata = None
+    for yol in sira:
+        try:
+            yanit = cagir(
+                url,
+                timeout=(_DUZ_ZAMAN_ASIMI if (yol == "duz" and ogrenilen is None)
+                         else zaman_asimi),
+                proxies=None if yol == "duz" else vekil,
+                **kw,
+            )
+            if not dogrula(yanit):
+                raise requests.RequestException(f"geçersiz yanıt (HTTP {yanit.status_code})")
+            with _HOST_KILIT:
+                _HOST_YOLU[host] = (yol, time.time())
+            AG_YOLLARI[host] = yol
+            return yanit
+        except requests.RequestException as hata:
+            son_hata = hata
+    with _HOST_KILIT:
+        _HOST_YOLU.pop(host, None)
+    raise son_hata if son_hata else requests.RequestException("istek başarısız")
+
+
+def _istek(oturum: requests.Session, url: str, zaman_asimi: int):
+    """football-data.co.uk isteği (CSV bekler)."""
+    return istek(url, oturum=oturum, zaman_asimi=zaman_asimi)
 
 
 def _getir(oturum: requests.Session, url: str, zaman_asimi: int = ZAMAN_ASIMI):
@@ -152,6 +266,7 @@ def baglanti_testi(zaman_asimi: int = 15) -> dict:
             )
         else:
             sonuc["tamam"] = True
+            sonuc["yol"] = AG_YOLLARI.get(_host(fikstur_url()))
     except requests.RequestException as hata:
         sonuc["sure_ms"] = round((time.monotonic() - basla) * 1000)
         sonuc["hata"] = str(hata)
@@ -827,9 +942,7 @@ def milli_indir(yenile: bool = False) -> str | None:
     try:
         # GitHub'a doğrudan gidilir: IDDAA_KAYNAK_TABAN yalnız
         # football-data.co.uk engeli içindir, GitHub Türkiye'den erişilir.
-        yanit = requests.get(MILLI_URL, timeout=60,
-                             headers={"User-Agent": KULLANICI_AJANI},
-                             proxies=proxy_ayari() or None)
+        yanit = istek(MILLI_URL, zaman_asimi=60)
         if yanit.status_code != 200 or b"home_team" not in yanit.content[:200]:
             raise ValueError(f"HTTP {yanit.status_code}")
         os.makedirs(VERI_KLASORU, exist_ok=True)
@@ -1125,12 +1238,10 @@ def dis_fikstur(gun_sayisi: int = 8, yenile: bool = False) -> pd.DataFrame | Non
         bas = simdi_tr().date()
         son = (simdi_tr() + pd.Timedelta(days=gun_sayisi)).date()
         try:
-            yanit = requests.get(
-                DIS_KAPSAM_URL,
+            yanit = istek(
+                DIS_KAPSAM_URL, zaman_asimi=30, dogrula=json_yanit_mi, anahtarli=True,
                 params={"dateFrom": str(bas), "dateTo": str(son)},
-                headers={"X-Auth-Token": anahtar, "User-Agent": KULLANICI_AJANI},
-                timeout=30,
-                proxies=proxy_ayari() or None,
+                headers={"X-Auth-Token": anahtar},
             )
             if yanit.status_code != 200:
                 ek = " — anahtar hatalı/eksik olabilir" if yanit.status_code in (400, 403) else ""
@@ -1249,10 +1360,9 @@ def _oddsapi_anahtar() -> str:
 
 def _oddsapi_getir(yol: str, parametreler: dict):
     parametreler = dict(parametreler, apiKey=_oddsapi_anahtar())
-    yanit = requests.get(
-        ODDSAPI_TABAN + yol, params=parametreler,
-        headers={"User-Agent": KULLANICI_AJANI}, timeout=12,  # tarama bütçesini tek istek yemesin
-    )
+    # tarama bütçesini tek istek yemesin diye kısa zaman aşımı
+    yanit = istek(ODDSAPI_TABAN + yol, params=parametreler,
+                  zaman_asimi=12, dogrula=json_yanit_mi, anahtarli=True)
     yanit.raise_for_status()
     govde = yanit.json()
     if isinstance(govde, dict) and govde.get("error"):
@@ -1664,10 +1774,10 @@ def iy_hasadi() -> dict:
                 isaret = f"_bsa_{yil}"
                 if depo.get(isaret) and yil != bu_yil:
                     continue  # geçmiş sezon bir kez çekilir; cari sezon her hasatta tazelenir
-                yanit = requests.get(
-                    f"https://api.football-data.org/v4/competitions/BSA/matches",
+                yanit = istek(
+                    "https://api.football-data.org/v4/competitions/BSA/matches",
                     params={"season": yil}, headers={"X-Auth-Token": anahtar_fd},
-                    timeout=ZAMAN_ASIMI,
+                    dogrula=json_yanit_mi, anahtarli=True,
                 )
                 if yanit.status_code != 200:
                     break  # ücretsiz pakette daha eski sezon yoksa sessizce dur
@@ -1738,10 +1848,10 @@ def kupa_hasadi() -> dict:
                 isaret = f"_{fd_kod}_{yil}"
                 if depo.get(isaret) and yil != cari:
                     continue  # geçmiş sezon zaten depoda
-                yanit = requests.get(
+                yanit = istek(
                     f"https://api.football-data.org/v4/competitions/{fd_kod}/matches",
                     params={"season": yil}, headers={"X-Auth-Token": anahtar},
-                    timeout=ZAMAN_ASIMI,
+                    dogrula=json_yanit_mi, anahtarli=True,
                 )
                 if yanit.status_code in (403, 404):
                     continue  # ücretsiz katman sınırı ya da sezon henüz açılmadı
@@ -1985,11 +2095,9 @@ def _af_getir(yol: str, parametreler: dict, oncelikli: bool = False):
             )
         _AF_SON_ISTEK["zaman"] = time.time()
 
-    yanit = requests.get(
-        APIFOOTBALL_TABAN + yol, params=parametreler,
-        headers={"x-apisports-key": _af_anahtar(), "User-Agent": KULLANICI_AJANI},
-        timeout=12,
-    )
+    yanit = istek(APIFOOTBALL_TABAN + yol, params=parametreler,
+                  headers={"x-apisports-key": _af_anahtar()},
+                  zaman_asimi=12, dogrula=json_yanit_mi, anahtarli=True)
     if yanit.status_code == 429:
         # Sınır yine de yendi: bir sonraki isteği tam bir dakika geri it.
         with _AF_KILIT:
@@ -2022,11 +2130,9 @@ def af_tanilama() -> dict:
         rapor["sonuc"] = "Anahtar kayıtlı değil."
         return rapor
     try:
-        yanit = requests.get(
-            APIFOOTBALL_TABAN + "/status",
-            headers={"x-apisports-key": _af_anahtar(), "User-Agent": KULLANICI_AJANI},
-            timeout=15,
-        )
+        yanit = istek(APIFOOTBALL_TABAN + "/status",
+                      headers={"x-apisports-key": _af_anahtar()},
+                      zaman_asimi=15, dogrula=json_yanit_mi, anahtarli=True)
         rapor["http"] = yanit.status_code
         govde = yanit.json()
         if govde.get("errors"):
@@ -2035,13 +2141,13 @@ def af_tanilama() -> dict:
             return rapor
         c = (govde.get("response") or {})
         abone = c.get("subscription") or {}
-        istek = c.get("requests") or {}
+        kullanim = c.get("requests") or {}   # modül düzeyindeki istek() gölgelenmesin
         rapor["hesap"] = (c.get("account") or {}).get("email")
         rapor["plan"] = abone.get("plan")
         rapor["aktif"] = abone.get("active")
         rapor["biten"] = abone.get("end")
-        rapor["gunluk_kullanim"] = istek.get("current")
-        rapor["gunluk_limit"] = istek.get("limit_day")
+        rapor["gunluk_kullanim"] = kullanim.get("current")
+        rapor["gunluk_limit"] = kullanim.get("limit_day")
     except Exception as h:  # noqa: BLE001
         rapor["hata"] = str(h)[:300]
         rapor["sonuc"] = "Kaynağa ulaşılamadı."
@@ -2449,8 +2555,8 @@ def acik_fiksturu_getir(gunler: list[str], zaman_butcesi: float = 25.0) -> tuple
                 kayitlar.extend((kayit or {}).get("veri") or [])   # bayat > hiç
                 continue
             try:
-                yanit = _oturum().get(_acik_gun_url(gun), timeout=_ACIK_ZAMAN_ASIMI,
-                                      proxies=proxy_ayari() or None)
+                yanit = istek(_acik_gun_url(gun), zaman_asimi=_ACIK_ZAMAN_ASIMI,
+                              dogrula=json_yanit_mi)
                 yanit.raise_for_status()
                 gunun = _acik_govdeyi_coz(yanit.json())
             except Exception as hata:  # noqa: BLE001 — bir gün düşse kalanı gelsin
@@ -2767,8 +2873,8 @@ def acik_arsiv_topla(gun_sayisi: int = ACIK_ARSIV_GUN, yenile: bool = False,
             ozet["butce_doldu"] = True
             break
         try:
-            yanit = oturum.get(_acik_gun_url(gun), timeout=_ACIK_ZAMAN_ASIMI,
-                               proxies=proxy_ayari() or None)
+            yanit = istek(_acik_gun_url(gun), oturum=oturum,
+                          zaman_asimi=_ACIK_ZAMAN_ASIMI, dogrula=json_yanit_mi)
             yanit.raise_for_status()
             govde = yanit.json()
         except Exception as hata:  # noqa: BLE001 — bir gün düşse kalanı gelsin
@@ -3054,3 +3160,187 @@ def _acik_arsiv_oku(ana: dict) -> pd.DataFrame | None:
         if len(grup) >= ACIK_ANALIZ_ESIK:   # sığ turnuvalar analiz vermez
             ACIK_LIG_TAKIMLARI[str(kod)] = set(grup["HomeTeam"]) | set(grup["AwayTeam"])
     return c
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Pinnacle açık oran beslemesi — anahtarsız 1X2 + Alt/Üst 2.5
+# ══════════════════════════════════════════════════════════════════════════
+#
+# NEDEN: Bültende 1.661 maç vardı ama yalnız 4'ünde oran. Oran yalnız
+# football-data'nın fixtures.csv'sinden geliyordu (~22 lig, birkaç gün ileri);
+# odds-api.io ve API-Football ücretsiz planları anahtar istiyor ve maç başına
+# istek harcıyor. Oransız maç listelemek kullanıcı için işe yaramıyor.
+#
+# ÇÖZÜM: Pinnacle'ın kendi sitesinin kullandığı açık "guest" ucu. Anahtar,
+# hesap ve kota yok. Ölçüm (27.08.2026): 941 maç, 819'unda 1X2 — bültenimizin
+# 1.661 maçından 615'i eşleşti. Ağ maliyeti gzip'le ~1 MB (matchups 181 KB +
+# markets 835 KB), 30 dakika önbellekli.
+#
+# NEDEN PINNACLE: piyasanın referans kitapçısı. Marjı düşük (ölçtük: medyan
+# %6.4, en düşük %3.2), limitleri yüksek ve fiyatı "keskin" kabul edilir.
+# Yani buradan gelen oran, bir maçın GERÇEK olasılığına en yakın piyasa
+# tahminidir — model karşılaştırması için en doğru referans.
+#
+# ÖNEMLİ SINIR: tek kitapçı olduğu için "konsensüs sapması" motoru bu
+# maçlarda sinyal ÜRETMEZ (üretemez: sapmayı ölçmek için birden fazla fiyat
+# gerekir). Bu maçlarda değer, MODEL ile fiyatın kıyasından çıkar — maç
+# detayındaki değer/kalıp katmanı çalışır. Bu bilinçli: tek fiyattan sahte
+# "değer" üretmek kasayı yakar.
+#
+# IDDAA_PINNACLE=0 ile kapatılabilir.
+
+PINNACLE_TABAN = "https://guest.api.arcadia.pinnacle.com/0.1/sports/29"
+PINNACLE_DOSYA = os.path.join(VERI_KLASORU, "pinnacle_oranlar.json")
+_PIN_TTL = 30 * 60
+_PIN_ZAMAN_ASIMI = 45
+_PIN_KILIT = threading.Lock()
+
+PINNACLE_SON_DURUM: dict = {"zaman": None, "mac": None, "oranli": None,
+                            "hata": None, "kapali": False}
+
+
+def pinnacle_kapali() -> bool:
+    return (os.environ.get("IDDAA_PINNACLE") or "").strip().lower() in (
+        "0", "off", "false", "hayir", "hayır", "kapali", "kapalı"
+    )
+
+
+def _amerikan_ondalik(fiyat) -> float | None:
+    """Amerikan oranı ondalığa çevirir (-150 -> 1.667, +180 -> 2.80)."""
+    try:
+        f = float(fiyat)
+    except (TypeError, ValueError):
+        return None
+    if f == 0:
+        return None
+    return round(1.0 + (f / 100.0 if f > 0 else 100.0 / abs(f)), 3)
+
+
+def _pin_getir(yol: str) -> list:
+    yanit = istek(PINNACLE_TABAN + yol, zaman_asimi=_PIN_ZAMAN_ASIMI,
+                  dogrula=json_yanit_mi)
+    yanit.raise_for_status()
+    govde = yanit.json()
+    return govde if isinstance(govde, list) else []
+
+
+def _pin_coz(maclar: list, pazarlar: list) -> list:
+    """Pinnacle gövdelerini ince oran kayıtlarına çevirir."""
+    ms, ua = {}, {}
+    for m in pazarlar:
+        if m.get("period") != 0 or m.get("status") not in (None, "open"):
+            continue
+        tur = m.get("type")
+        if tur == "moneyline" and len(m.get("prices") or []) == 3:
+            f = {p.get("designation"): _amerikan_ondalik(p.get("price"))
+                 for p in m["prices"]}
+            if all(f.get(k) for k in ("home", "draw", "away")):
+                ms[m["matchupId"]] = [f["home"], f["draw"], f["away"]]
+        elif tur == "total":
+            fiyat = {p.get("designation"): p for p in (m.get("prices") or [])}
+            ust, alt = fiyat.get("over"), fiyat.get("under")
+            if not (ust and alt) or float(ust.get("points") or 0) != 2.5:
+                continue        # uygulama Alt/Üst'ü 2.5 çizgisinde hesaplıyor
+            u, a = _amerikan_ondalik(ust.get("price")), _amerikan_ondalik(alt.get("price"))
+            if u and a:
+                ua[m["matchupId"]] = [u, a]
+
+    kayitlar = []
+    for m in maclar:
+        mid = m.get("id")
+        if mid not in ms or m.get("isLive"):
+            continue
+        katilim = {p.get("alignment"): p.get("name") for p in (m.get("participants") or [])}
+        ev, dep = katilim.get("home"), katilim.get("away")
+        if not ev or not dep:
+            continue
+        try:
+            t = pd.Timestamp(m["startTime"]).tz_convert("Europe/Istanbul").tz_localize(None)
+        except Exception:  # noqa: BLE001
+            continue
+        kayitlar.append({
+            "ts": t.strftime("%Y%m%d%H%M"),
+            "lig": ((m.get("league") or {}).get("name") or ""),
+            "ev": str(ev), "dep": str(dep),
+            "ms": ms[mid], "ust_alt": ua.get(mid),
+        })
+    return kayitlar
+
+
+def pinnacle_oranlari(yenile: bool = False) -> list:
+    """Pinnacle'ın açık fiyatları — 30 dakika önbellekli, ağ hatasında bayat kopya.
+
+    Dönen: [{"ts","lig","ev","dep","ms":[1,X,2],"ust_alt":[üst,alt]|None}, ...]
+    """
+    PINNACLE_SON_DURUM.update({"zaman": simdi_tr().strftime("%H:%M"),
+                               "kapali": pinnacle_kapali(), "hata": None})
+    if pinnacle_kapali():
+        return []
+    with _PIN_KILIT:
+        eski = _json_oku(PINNACLE_DOSYA)
+        taze = (eski.get("veri") is not None
+                and not yenile
+                and time.time() - eski.get("zaman", 0) < _PIN_TTL)
+        if taze:
+            PINNACLE_SON_DURUM.update({"mac": len(eski["veri"]),
+                                       "oranli": len(eski["veri"])})
+            return eski["veri"]
+        try:
+            maclar = _pin_getir("/matchups?withSpecials=false")
+            pazarlar = _pin_getir("/markets/straight?withSpecials=false")
+            kayitlar = _pin_coz(maclar, pazarlar)
+        except Exception as hata:  # noqa: BLE001 — oran katmanı bülteni düşürmesin
+            PINNACLE_SON_DURUM["hata"] = str(hata)[:160]
+            bayat = eski.get("veri") or []
+            PINNACLE_SON_DURUM.update({"mac": len(bayat), "oranli": len(bayat)})
+            return bayat
+        _json_yaz(PINNACLE_DOSYA, {"zaman": time.time(), "veri": kayitlar})
+        PINNACLE_SON_DURUM.update({"mac": len(maclar), "oranli": len(kayitlar)})
+        return kayitlar
+
+
+# Ülke etiketi ("Rangers (HKG)") eşleştirmede kullanılmaz: Pinnacle sade adı yazar.
+_PIN_ETIKET = re.compile(r"\s*\([A-Z]{3}\)\s*$")
+
+
+def pinnacle_indeksi(kayitlar: list) -> dict:
+    """Kayıtları güne göre indeksler: {date: [(ev_parça, dep_parça, kayıt), ...]}"""
+    indeks: dict = {}
+    for k in kayitlar:
+        try:
+            t = pd.Timestamp(k["ts"])
+        except Exception:  # noqa: BLE001
+            continue
+        indeks.setdefault(t.date(), []).append(
+            (_oddsapi_takim_parcalari(k["ev"]), _oddsapi_takim_parcalari(k["dep"]), t, k)
+        )
+    return indeks
+
+
+def _pin_puan(a: set, b: set) -> float:
+    if not a or not b:
+        return 0.0
+    return len(a & b) / min(len(a), len(b))
+
+
+def pinnacle_esle(indeks: dict, ev: str, dep: str, tarih) -> dict | None:
+    """Bülten satırını Pinnacle kaydına eşler; bulunamazsa None.
+
+    Üç şart birden: aynı gün, başlama saati 3 saatten yakın, İKİ takımın da
+    parça örtüşmesi ≥ %60. Yanlış maça oran yazmak, oransız bırakmaktan
+    kötüdür — eşik bilerek yüksek.
+    """
+    t = pd.Timestamp(tarih)
+    adaylar = indeks.get(t.date()) or []
+    if not adaylar:
+        return None
+    e = _oddsapi_takim_parcalari(_PIN_ETIKET.sub("", str(ev)))
+    d = _oddsapi_takim_parcalari(_PIN_ETIKET.sub("", str(dep)))
+    en_iyi, en_puan = None, 0.0
+    for pe, pd_, pt, kayit in adaylar:
+        if abs((pt - t).total_seconds()) > 3 * 3600:
+            continue
+        puan = min(_pin_puan(e, pe), _pin_puan(d, pd_))
+        if puan > en_puan:
+            en_iyi, en_puan = kayit, puan
+    return en_iyi if en_puan >= 0.6 else None
