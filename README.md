@@ -319,13 +319,18 @@ yazar; arşiv ana veriyle birleşir.
 
 | | önce | sonra |
 |---|---|---|
-| Arşivdeki lig | 38 | **374** |
-| Analiz verebilen lig | 38 | **188** (38 + 150) |
+| Arşivdeki lig | 38 | **188** (38 + 150) |
 | Bültende analiz alan maç | %19 | **%56** |
 
-Ölçüm (26.08.2026, 9 günlük bülten): 1.729 maçın 966'sı tam analiz alıyor.
+Ölçüm (26.08.2026, 9 günlük bülten): 1.661 maçın 934'ü tam analiz alıyor.
 Hasat 365 günü ~60 saniyede iniyor, dosya ~2 MB; artımlıdır, sonraki
 güncellemeler birkaç saniye sürer. Anahtar gerekmez.
+
+**Mevcut analizler değişmez.** Bu katman football-data'nın kapsadığı hiçbir
+şeye dokunmuyor: 38 ligin maç sayıları, takım adı çözümlemesi ve maç
+analizleri (gol beklentisi, olasılıklar, Elo, form, H2H) eski sürümle
+**birebir aynı** — eski ve yeni sürüm aynı veriyle yan yana çalıştırılıp
+karşılaştırıldı.
 
 **Neden bulanık eşleştirme yok.** Bülten ve arşiv aynı beslemeden geliyor,
 takım adları birebir aynı. Bu yüzden bu liglerde isim eşleştirme *tam*
@@ -333,15 +338,26 @@ yapılır — daha önce "Nautico – Ath Bilbao", "Tigers FC – Juventus" gibi
 olmayan maçlar üreten bulanık eşleşme sınıfı burada hiç devreye girmiyor.
 
 **Arşive girmeyenler** (bültende yine listelenirler, yalnız analiz almazlar):
-football-data'nın zaten kapsadığı ligler (çift kayıt olmasın), kapsanan
-ülkelerin kupaları (aynı kulüpler iki farklı adla arşive girip geçmişi
-bölerdi), amatör/bölgesel seviyeler (üst lig kulüpleriyle aynı adı taşıyan
-kulüpler var), hazırlık maçları, kadın/altyapı/rezerv turnuvaları. 40 maçtan
-az veri biriken turnuvalar da analiz vermez — 20 maçlık havuzdan form/Poisson
-çıkarmak sayı üretmek olur, bilgi değil.
 
-Aynı adı taşıyan farklı kulüpler ülke etiketiyle ayrılır ("Rangers (HKG)",
-"Nacional (URU)") — etiket yalnız gerçekten çakışan adlara eklenir.
+- football-data'nın zaten kapsadığı ligler — çift kayıt olmasın.
+- Kapsanan ülkelerin kupaları — kupada aynı kulüpler oynar; iki farklı adla
+  ("Cardiff" / "Cardiff City") arşive girerse takımın geçmişi ikiye bölünür.
+- Amatör/bölgesel seviyeler — orada üst lig kulübüyle aynı adı taşıyan
+  kulüpler var ("Hamburg", "Hearts").
+- Hazırlık maçları, kadın/altyapı/rezerv turnuvaları (Hollanda'nın "Jong"
+  takımları dahil).
+- **Bir yılda 40 maçtan az biriken turnuvalar** — analiz veremezler, üstelik
+  alınırlarsa başka kaynaktan gelen geçmişi oynatırlar: tek maçlık süper
+  kupalar yüzünden PSG'nin Elo'su 8 puan kaymıştı.
+
+**Kimlik yönetimi.** Aynı kulübün iki adı varsa birleştirilir ("Paris
+Saint-Germain" → "Paris SG", "FC Volendam" → "Volendam"); birleştirme yalnız
+küratörlü takma ad tablosu ya da tek farkı genel kulüp eki olan adlar için
+yapılır ve ülke şartı aranır. Serbest benzerlik kabul edilmez: "Jong Ajax"
+Ajax'a, "Canberra Juventus" Juventus'a, "Barcelona SC" (Ekvador) Barcelona'ya
+bağlanmaz. Ters yönde, aynı adı taşıyan FARKLI kulüpler ülke etiketiyle
+ayrılır ("Rangers (HKG)", "Al Ahly (EGY)") — etiket yalnız gerçekten çakışan
+adlara eklenir.
 
 ### Oranlar: ücretsiz çözüm
 

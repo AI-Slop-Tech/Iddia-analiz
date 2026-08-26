@@ -561,7 +561,8 @@ def _ek_arsiv_oku(yol: str, kod: str) -> pd.DataFrame | None:
 def veriyi_yukle(ligler: list[str] | None = None) -> pd.DataFrame:
     """Önbellekteki tüm CSV'leri tek bir normalize DataFrame'de birleştirir."""
     dosyalar = sorted(glob.glob(os.path.join(VERI_KLASORU, "*_*.csv")))
-    dosyalar = [d for d in dosyalar if not os.path.basename(d).startswith("EK_")]
+    dosyalar = [d for d in dosyalar
+                if not os.path.basename(d).startswith(("EK_", "acik_"))]
     if ligler:
         dosyalar = [d for d in dosyalar if os.path.basename(d).split("_", 1)[1][:-4] in ligler]
     if not dosyalar:
@@ -650,9 +651,7 @@ def veriyi_yukle(ligler: list[str] | None = None) -> pd.DataFrame:
 
     # açık dünya arşivi (anahtarsız): football-data'nın kapsamadığı ligler
     try:
-        ana_takimlar = {_normalize(a) for a in
-                        pd.unique(pd.concat([df["HomeTeam"], df["AwayTeam"]]))}
-        acik = _acik_arsiv_oku(ana_takimlar)
+        acik = _acik_arsiv_oku(ana_takim_ulkeleri(df))
         if acik is not None and not acik.empty:
             if not ligler or set(acik["Div"]) & set(ligler):
                 if ligler:
@@ -1316,6 +1315,10 @@ def _oddsapi_maclar(slug: str, sadece_onbellek: bool = False) -> list:
 _TAKIM_GENEL_EK = {
     "cf", "fc", "cd", "ca", "ac", "afc", "cfc", "sc", "club", "clube", "cp",
     "de", "the", "fk", "if", "bk", "sk", "ff", "aif", "calcio", "deportivo",
+    # kulüp adlarının başına/sonuna gelen ülke kısaltmaları — "FC Volendam"
+    # ile "Volendam" aynı kulüp sayılabilsin diye
+    "sv", "vv", "va", "rc", "as", "ss", "us", "tsv", "nk", "ud", "kv", "cs",
+    "ec", "sd", "ad", "sv", "sk", "ks", "fk",
 }
 
 
@@ -2281,7 +2284,7 @@ _ACIK_ONCELIKLI = {
 # A takımının istatistikleriyle analiz edilebiliyordu.
 _ACIK_TAKIM_DISLA = re.compile(
     r"(\bu ?1[4-9]\b|\bu ?2[0-3]\b|\bsub ?2[0-3]\b"
-    r"|\b(?:reserves?|academy|akademi|youth)\b"
+    r"|\b(?:reserves?|academy|akademi|youth|jong)\b"
     r"|\s(?:ii|iii|ll|lll|b|c|w)$)",
     re.IGNORECASE,
 )
@@ -2867,16 +2870,78 @@ def acik_arsiv_ozeti() -> dict:
             "var": os.path.exists(ACIK_ARSIV_CSV)}
 
 
-def _acik_arsiv_oku(ana_takimlar: set[str]) -> pd.DataFrame | None:
-    """acik_arsiv.csv'yi ana şemaya çevirir ve ad çakışmalarını çözer.
+def ana_takim_ulkeleri(df: pd.DataFrame) -> dict[str, tuple[str, str | None]]:
+    """football-data takımı (normalize ad) -> (resmî ad, ülke).
 
-    ana_takimlar: football-data arşivindeki takım adlarının normalize hâli.
-    Aynı ada iki farklı kulüp sahip olabiliyor ("Rangers" İskoçya/Hong Kong/
-    Kenya/Nijerya, "Nacional" Portekiz/Uruguay/Kolombiya, "Juventus" İtalya/
-    Avustralya). İsimle birleştirince iki kulübün geçmişi tek takım sanılıyor
-    ve analiz saçmalıyordu. Çözüm: ad birden fazla ülkede geçiyorsa ya da ana
-    arşivde zaten varsa, ülke etiketiyle ayrılır — "Rangers (HKG)".
-    Etiket yalnız GEREKTİĞİNDE eklenir; çakışmayan adlar sade kalır.
+    Ülke, takımın arşivdeki EN SON liginden türetilir. Açık arşivle
+    birleştirirken "aynı kulüp mü" sorusunu ülke düzeyinde yanıtlamak için.
+    """
+    kod_ulke = {}
+    for ulke, kodlar in _ACIK_ULKE_KODLARI.items():
+        for k in kodlar:
+            kod_ulke.setdefault(k, ulke)
+    son = (pd.concat([
+        df[["HomeTeam", "Div", "Tarih"]].rename(columns={"HomeTeam": "Takim"}),
+        df[["AwayTeam", "Div", "Tarih"]].rename(columns={"AwayTeam": "Takim"}),
+    ]).sort_values("Tarih").drop_duplicates("Takim", keep="last"))
+    return {_normalize(r.Takim): (r.Takim, kod_ulke.get(str(r.Div)))
+            for r in son.itertuples()}
+
+
+def _acik_ayni_kulup(acik_ad: str, acik_ulke: str, ana: dict) -> str | None:
+    """Açık arşivdeki takım, football-data'daki bir kulübün AYNISI mı?
+
+    Kaynak uzun adı kullanıyor ("Paris Saint-Germain", "FC Volendam"),
+    football-data kısa adı ("Paris SG", "Volendam"). Birleştirilmezse aynı
+    kulüp takım listesinde İKİ KEZ duruyor ve kullanıcı 3 maçlık kopyayı
+    seçerse analiz saçmalıyor.
+
+    Birleştirme SIKI: yalnız iki yol kabul edilir —
+      1) küratörlü takma ad tablosu (TAKMA_ADLAR),
+      2) aradaki tek farkın genel kulüp eki olması ("FC" Volendam).
+    Serbest alt-dize eşleşmesi KABUL EDİLMEZ: "Jong Ajax" (Ajax'ın rezerv
+    takımı) Ajax'a, "Jahn Regensburg" Regensburg'a bu yolla bağlanıyor ve
+    iki farklı takımın geçmişi tek havuzda toplanıyordu. Ölçüldü: Jong Ajax
+    birleşince Ajax–PSV analizinde gol beklentisi 1.42–1.89'dan 2.00–4.00'a
+    fırlamıştı.
+
+    Ayrıca ÜLKE ŞARTI: "Barcelona SC" (Ekvador) Barcelona değildir.
+    """
+    n = _normalize(acik_ad)
+    if n in ana:
+        return None            # ad zaten birebir aynı: çakışma çözücüsü halleder
+    ulke = _acik_duz(acik_ulke)
+
+    def _kabul(anahtar: str) -> str | None:
+        kayit = ana.get(anahtar)
+        if not kayit:
+            return None
+        orj, u = kayit
+        return orj if u and _acik_duz(u) == ulke else None
+
+    takma = TAKMA_ADLAR.get(n)
+    if takma:
+        return _kabul(_normalize(takma))
+    parcalar = [x for x in _normalize_bosluklu(acik_ad).split()
+                if x not in _TAKIM_GENEL_EK]
+    cekirdek = _normalize("".join(parcalar))
+    return _kabul(cekirdek) if cekirdek and cekirdek != n else None
+
+
+def _acik_arsiv_oku(ana: dict) -> pd.DataFrame | None:
+    """acik_arsiv.csv'yi ana şemaya çevirir; kimlik sorunlarını çözer.
+
+    ana: ana_takim_ulkeleri() çıktısı (normalize ad -> (resmî ad, ülke)).
+
+    Üç adım:
+      1) AYNI KULÜP BİRLEŞTİRME — "Paris Saint-Germain" -> "Paris SG".
+      2) AD ÇAKIŞMASI AYIRMA — aynı adı taşıyan FARKLI kulüpler ülke
+         etiketiyle ayrılır ("Rangers (HKG)"). Etiket yalnız gerektiğinde ve
+         yalnız ülke turnuvalarında eklenir.
+      3) İNCE KİMLİK TEMİZLİĞİ — analiz eşiğini geçmeyen turnuvalardan gelen
+         ve başka hiçbir yerde görünmeyen takımlar atılır. Bunlar analiz
+         veremiyor, yalnız takım listesini şişiriyordu (tek maçlık süper
+         kupalar, hazırlık turnuvaları).
     """
     if not os.path.exists(ACIK_ARSIV_CSV):
         return None
@@ -2889,14 +2954,42 @@ def _acik_arsiv_oku(ana_takimlar: set[str]) -> pd.DataFrame | None:
     if p.empty:
         return None
 
-    # ── ad çakışması çözümü ──────────────────────────────────────────────
+    # ── 1) aynı kulübün iki adı: football-data adına birleştir ───────────
+    birlestir: dict[str, str] = {}
+    for ulke, ad in {(u, a) for u, a in zip(p["Ulke"], p["Ev"])} | \
+                    {(u, a) for u, a in zip(p["Ulke"], p["Dep"])}:
+        if not acik_ulke_mu(ulke):
+            continue
+        esi = _acik_ayni_kulup(ad, ulke, ana)
+        if esi:
+            birlestir[_normalize(ad)] = esi
+    if birlestir:
+        p = p.copy()
+        for kol in ("Ev", "Dep"):
+            p[kol] = [birlestir.get(_normalize(a), a) for a in p[kol]]
+
+    # ── 2) ad çakışması: aynı adı taşıyan FARKLI kulüpleri ayır ──────────
     ulkeler: dict[str, set] = {}
     for ulke, ev, dep in zip(p["Ulke"], p["Ev"], p["Dep"]):
         if not acik_ulke_mu(ulke):
             continue        # konfederasyon turnuvası: takımın gerçek ülkesi değil
         for ad in (ev, dep):
             ulkeler.setdefault(_normalize(ad), set()).add(_acik_duz(ulke))
-    cakisan = {n for n, u in ulkeler.items() if len(u) > 1 or n in ana_takimlar}
+    # Etiket, YALNIZ farklı kulüpler için. Aynı ülkede aynı adı taşıyan kayıt
+    # aynı kulüptür (ör. Athens Kallithea üst ligde football-data'da, 2. ligde
+    # açık arşivde) — etiketlenirse kulübün geçmişi ikiye bölünür.
+    birlesen_norm = {_normalize(x) for x in birlestir.values()}
+    cakisan = set()
+    for n, u in ulkeler.items():
+        if n in birlesen_norm:
+            continue
+        if len(u) > 1:
+            cakisan.add(n)               # aynı ad, birden çok ülke
+            continue
+        if n in ana:
+            ana_ulke = _acik_duz(ana[n][1] or "")
+            if not ana_ulke or ana_ulke not in u:
+                cakisan.add(n)           # football-data'daki aynı adlı BAŞKA kulüp
 
     ACIK_TAKIM_ADI.clear()
     ACIK_LIG_TAKIMLARI.clear()
@@ -2939,11 +3032,25 @@ def _acik_arsiv_oku(ana_takimlar: set[str]) -> pd.DataFrame | None:
               "oran_ust25_kapanis", "oran_alt25_kapanis"):
         c[k] = float("nan")   # açık arşivde oran yok
 
+    # ── 3) sığ turnuvaları hiç alma ──────────────────────────────────────
+    # Bir yılda ACIK_ANALIZ_ESIK'ten az maç biriken turnuva zaten analiz
+    # veremiyor. Satırlarını yine de almak iki zarar veriyordu:
+    #   • takım listesini tek maçlık kimliklerle şişiriyordu,
+    #   • BAŞKA kaynaktan gelen geçmişi oynatıyordu — tek maçlık süper kupalar
+    #     yüzünden PSG'nin Elo'su 8 puan, son-10 form puanı 3 puan kayıyordu.
+    #     football-data'nın kapsadığı kulüplerin geçmişi bu sürümde OLDUĞU
+    #     GİBİ kalmalı; kullanıcı "önceki maçlar aynı mı" diye soruyor.
+    # Bu turnuvalar bültende yine listelenir, yalnız analiz almazlar.
+    derin = {str(k) for k, n in c["Div"].value_counts().items() if n >= ACIK_ANALIZ_ESIK}
+    c = c[c["Div"].isin(derin)]
+    if c.empty:
+        return None
+
     # lig adları ve lig-takım kümeleri: bülten katmanı bunları kullanır
     kayit = _json_oku(ACIK_LIG_KAYIT)
     for v in kayit.values():
         ACIK_LIG_ADLARI[v["kod"]] = v.get("ad") or v.get("lig") or v["kod"]
-    for kod, grup in c.groupby("Div"):
+    for kod, grup in c.groupby("Div", observed=True):
         if len(grup) >= ACIK_ANALIZ_ESIK:   # sığ turnuvalar analiz vermez
             ACIK_LIG_TAKIMLARI[str(kod)] = set(grup["HomeTeam"]) | set(grup["AwayTeam"])
     return c
