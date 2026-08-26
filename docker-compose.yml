@@ -50,6 +50,10 @@ services:
       # anahtar istemez; bülteni haftanın tamamı için doldurur. IDDAA_PROXY
       # tanımlıysa istekleri de vekilden geçer. Kapatmak için: 0
       - IDDAA_ACIK_FIKSTUR=${IDDAA_ACIK_FIKSTUR:-}
+      # Pinnacle'ın açık fiyat ucu: bültendeki maçların oranını anahtarsız
+      # doldurur (tek istekte ~800 maç, 30 dk önbellekli, gzip ~1 MB).
+      # VARSAYILAN AÇIK. Kapatmak için: 0
+      - IDDAA_PINNACLE=${IDDAA_PINNACLE:-}
     volumes:
       - iddaa-veri:/app/data
     healthcheck:

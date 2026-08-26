@@ -26,3 +26,7 @@
 #IDDAA_ACIK_FIKSTUR=0
 # (Aynı ayar açık dünya ARŞİVİNİ de kapatır: kapatılırsa football-data'nın
 #  kapsamadığı ~150 lig analiz veremez, maçlar yalnız listelenir.)
+
+# Pinnacle açık oranları da VARSAYILAN AÇIKTIR ve anahtar istemez; bültendeki
+# maçların oranını doldurur. Kapatmak isterseniz:
+#IDDAA_PINNACLE=0

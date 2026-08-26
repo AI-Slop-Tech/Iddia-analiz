@@ -349,6 +349,17 @@ def uygulama_olustur():
         except Exception as hata:  # noqa: BLE001
             ekle("Veri kaynağı erişimi (football-data.co.uk)", False, str(hata)[:160])
 
+        yollar = dict(veri.AG_YOLLARI)
+        if yollar:
+            vekilli = [h for h, y in yollar.items() if y == "vekil"]
+            duz = [h for h, y in yollar.items() if y == "duz"]
+            ekle("Ağ yolu (doğrudan / vekil)", True,
+                 (f"vekilden geçen {len(vekilli)} adres: {', '.join(sorted(vekilli)[:4])}"
+                  if vekilli else "hepsi doğrudan erişilebiliyor")
+                 + f" · doğrudan: {len(duz)}"
+                 + (" · IDDAA_PROXY tanımlı değil" if not veri.proxy_ayari()
+                    else " · engellenen adres kendiliğinden vekile düşer"))
+
         fd_var = bool(veri.gizli_anahtar("FOOTBALL_DATA_ORG_KEY", "football_data_org_key"))
         d = veri.DIS_SON_DURUM
         if not fd_var:
@@ -358,6 +369,18 @@ def uygulama_olustur():
             ekle("football-data.org (ŞL + büyük ligler)", not d.get("hata"),
                  f"hata: {d['hata']}" if d.get("hata")
                  else f"son çekim {d.get('zaman') or '—'} · {d.get('mac') if d.get('mac') is not None else '?'} maç geldi")
+
+        d_pin = veri.PINNACLE_SON_DURUM
+        if d_pin.get("kapali"):
+            ekle("Pinnacle açık oranları", False,
+                 "IDDAA_PINNACLE=0 ile kapatılmış — bültenin büyük kısmı oransız kalır")
+        else:
+            ekle("Pinnacle açık oranları", bool(d_pin.get("oranli")),
+                 (f"son bakış {d_pin.get('zaman') or '—'} · kaynakta {d_pin.get('mac') or 0} maç, "
+                  f"{d_pin.get('oranli') or 0} tanesinde 1X2"
+                  + (f" · son hata: {d_pin['hata']}" if d_pin.get("hata") else ""))
+                 if d_pin.get("zaman")
+                 else "henüz denenmedi — bülten kurulunca dolar (anahtar gerekmez)")
 
         oa_var = bool(veri.gizli_anahtar("ODDS_API_IO_KEY", "odds_api_io_key"))
         if not oa_var:
@@ -446,6 +469,7 @@ def uygulama_olustur():
                 "kapsam": _DURUM.get("kapsam"),
                 "af_durum": dict(veri.AF_SON_DURUM),
                 "acik_durum": dict(veri.ACIK_SON_DURUM),
+                "pinnacle_durum": dict(veri.PINNACLE_SON_DURUM),
                 "oddsapi": bool(veri.gizli_anahtar("ODDS_API_IO_KEY", "odds_api_io_key")),
                 "veri_zamani": time.strftime("%d.%m %H:%M", time.localtime(_DURUM["arsiv_zaman"])),
                 "ligler": [
@@ -1004,6 +1028,44 @@ def uygulama_olustur():
         birlesik = pd.concat([fik, pd.DataFrame(satirlar)], ignore_index=True)
         return birlesik.sort_values("Tarih").reset_index(drop=True)
 
+    def _pinnacle_fuzyonu(fik: pd.DataFrame) -> int:
+        """Oransız satırlara Pinnacle'ın açık fiyatlarını işler.
+
+        Anahtar gerektirmez, tek istekle bütün takvimi fiyatlandırır. Yalnız
+        ORANSIZ satırlara dokunur: fixtures.csv'de oran varsa o kalır, çünkü
+        orada 7 kitapçı var ve konsensüs motoru fiyat farkından beslenir.
+        Pinnacle tek kitapçı olduğu için konsensüs = en iyi fiyat; sapma
+        sinyali üretmez (üretemez), ama model-fiyat kıyası ve oran kalıbı
+        katmanı bu maçlarda da çalışır.
+        """
+        if "OranKaynak" not in fik.columns:
+            fik["OranKaynak"] = None
+        try:
+            kayitlar = veri.pinnacle_oranlari()
+        except Exception as h:  # noqa: BLE001
+            veri.PINNACLE_SON_DURUM["hata"] = str(h)[:160]
+            return 0
+        if not kayitlar:
+            return 0
+        indeks = veri.pinnacle_indeksi(kayitlar)
+        oransiz = fik["oran_ev"].isna() if "oran_ev" in fik.columns else None
+        if oransiz is None or not oransiz.any():
+            return 0
+        dolan = 0
+        for idx in fik.index[oransiz]:
+            r = fik.loc[idx]
+            k = veri.pinnacle_esle(indeks, r["HomeTeam"], r["AwayTeam"], r["Tarih"])
+            if not k:
+                continue
+            fik.loc[idx, ["oran_ev", "oran_berabere", "oran_dep"]] = k["ms"]
+            fik.loc[idx, ["oran_max_ev", "oran_max_berabere", "oran_max_dep"]] = k["ms"]
+            if k.get("ust_alt"):
+                fik.loc[idx, ["oran_ust25", "oran_alt25"]] = k["ust_alt"]
+                fik.loc[idx, ["oran_ust25_maks", "oran_alt25_maks"]] = k["ust_alt"]
+            fik.loc[idx, "OranKaynak"] = "pinnacle"
+            dolan += 1
+        return dolan
+
     def _piyasa_fuzyonu_uygula(fik: pd.DataFrame) -> int:
         """Önbellekteki piyasa 1X2'lerini oransız fikstür satırlarına işler.
 
@@ -1184,9 +1246,6 @@ def uygulama_olustur():
                 # kendisinden (fixtures.csv) gelir; AF/fd.org katmanları maçı
                 # listeler ama fiyat getirmez. Bu ikisini ayırmak şart.
                 try:
-                    oran_kol = ["oran_ev", "oran_berabere", "oran_dep"]
-                    if all(k in fik.columns for k in oran_kol):
-                        kapsam["oranli"] = int(fik[oran_kol].notna().all(axis=1).sum())
                     yol = os.path.join(veri.VERI_KLASORU, "fixtures.csv")
                     if os.path.exists(yol):
                         yas = (time.time() - os.path.getmtime(yol)) / 3600.0
@@ -1198,8 +1257,21 @@ def uygulama_olustur():
                     pass
                 _DURUM["kapsam"] = kapsam
                 try:
+                    kapsam["pinnacle"] = _pinnacle_fuzyonu(fik)   # anahtarsız oran
+                except Exception as h:  # noqa: BLE001
+                    kapsam["pinnacle"] = 0
+                    kapsam["pinnacle_hata"] = str(h)[:200]
+                try:
                     _piyasa_fuzyonu_uygula(fik)      # önbellekte ne varsa satırlara işle
                     _piyasa_isit_baslat(fik)         # eksikleri arka planda çek
+                except Exception:  # noqa: BLE001
+                    pass
+                # "oranlı" sayımı EN SON: bütün oran katmanları işlendikten sonra
+                try:
+                    oran_kol = ["oran_ev", "oran_berabere", "oran_dep"]
+                    if all(k in fik.columns for k in oran_kol):
+                        kapsam["oranli"] = int(fik[oran_kol].notna().all(axis=1).sum())
+                    _DURUM["kapsam"] = kapsam
                 except Exception:  # noqa: BLE001
                     pass
                 _DURUM["fikstur"], _DURUM["kitapcilar"] = fik, kitapcilar
@@ -1298,6 +1370,8 @@ def uygulama_olustur():
             "ust_alt": ust_alt,
             "kitapcilar": kitapci,
             "analiz_yok": bool(r.get("analiz_yok", False) is True),
+            "oran_kaynak": (r.get("OranKaynak") if isinstance(r.get("OranKaynak"), str)
+                            else None),
         }
 
     @app.get("/api/bulten")

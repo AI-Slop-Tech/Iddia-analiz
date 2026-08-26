@@ -361,6 +361,42 @@ adlara eklenir.
 
 ### Oranlar: ücretsiz çözüm
 
+Bültende 1.661 maç vardı ama yalnız 4'ünde oran — oran sadece `fixtures.csv`'den
+geliyordu (~22 lig, birkaç gün ileri). Oransız maç listelemek işe yaramıyor.
+
+**Pinnacle'ın açık fiyat ucu** bunu anahtarsız çözüyor: tek istekte bütün
+takvimin 1X2 ve Alt/Üst 2.5 fiyatları geliyor.
+
+| | önce | sonra |
+|---|---|---|
+| Oranlı maç | 4 | **541** |
+
+Ölçüm (27.08.2026): kaynakta 941 maç, 819'unda 1X2; bültenimizin 537'siyle
+eşleşti. Ağ maliyeti gzip'le ~1 MB, 30 dakika önbellekli, anahtar/kota yok.
+`IDDAA_PINNACLE=0` ile kapatılır.
+
+**Neden Pinnacle:** piyasanın referans kitapçısı. Marjı düşük (ölçüldü: medyan
+%6.4, en düşük %3.2), limitleri yüksek, fiyatı "keskin" kabul edilir — yani
+bir maçın gerçek olasılığına en yakın piyasa tahmini.
+
+> **Önemli sınır.** Tek kitapçı olduğu için **konsensüs sapması** motoru bu
+> maçlarda sinyal üretmez — üretemez, sapmayı ölçmek için birden fazla fiyat
+> gerekir. Bu maçlarda değer, **model ile fiyatın kıyasından** çıkar (maç
+> detayındaki değer ve oran kalıbı katmanı çalışır). Bu bilinçli bir karar:
+> tek fiyattan sahte "değer" üretmek kasayı yakar. Kartlarda `Pinnacle`
+> rozeti oranın nereden geldiğini gösterir.
+
+**Eşleştirme güvenliği:** bir bülten satırı Pinnacle kaydına ancak aynı gün,
+başlama saati 3 saatten yakın ve İKİ takımın da ad örtüşmesi ≥%60 ise
+bağlanır. Yanlış maça oran yazmak, oransız bırakmaktan kötüdür. 537
+eşleşmenin en düşük güvenli 18'i elle denetlendi, yanlış eşleşme çıkmadı.
+
+**Oransız maçlar varsayılan gizli.** Bülten üstündeki *"Oransız maçları da
+göster"* kutusu açılırsa hepsi listelenir; tercih tarayıcıda hatırlanır. Gün
+sekmelerindeki sayılar da ekranda görünen maç sayısını gösterir.
+
+### Anahtarla gelen ek oran kaynakları
+
 Anahtarsız kaynakların hiçbiri oran vermiyor; oran ya `fixtures.csv`'den gelir
 (~22 lig, birkaç gün ileri) ya da bir oran API'sinden. İkisi de ücretsiz,
 ikisi de karta gerek duymuyor:
@@ -424,6 +460,25 @@ Yalnızca veri kaynağına giden istekler bu vekilden geçer. Değişken boşsa
 sistemin standart `HTTP_PROXY` / `HTTPS_PROXY` değişkenleri geçerli olmaya
 devam eder; `IDDAA_PROXY` tanımlıysa onları ezer. Adresteki parola log ve
 API çıktılarında `***` ile maskelenir.
+
+### Vekil nasıl çalışıyor: önce doğrudan, olmazsa vekil
+
+`IDDAA_PROXY` tanımlıysa uygulama her adres için **önce doğrudan** dener;
+bağlantı düşerse ya da yanıt geçersizse (ISP engel sayfası HTML döner, JSON
+dönmez) aynı isteği **vekilden** tekrarlar. Hangi yolun çalıştığı adres
+başına hatırlanır ve 30 dakikada bir yeniden yoklanır — engel kalkarsa
+doğrudana döner, vekil düşerse doğrudan denenir. Doğrudan yoklama kısa zaman
+aşımıyla (6 sn) yapılır ki engelli bir adres bülteni bekletmesin.
+
+Böylece aynı kurulum hem yurt dışı sunucuda (vekil hiç kullanılmaz, bant
+genişliği harcanmaz) hem Türkiye'de (engelli adresler kendiliğinden vekile
+düşer) çalışır.
+
+> Önceden bazı çağrılar vekili **hiç** kullanmıyordu (odds-api.io,
+> API-Football, football-data.org hasadı, Gemini): Türkiye'deki bir sunucuda
+> bu kaynaklar sessizce çalışmıyordu. Artık uygulamanın yaptığı **her** dış
+> istek bu katmandan geçiyor. **Ayarlar → Teşhis** ekranındaki *"Ağ yolu"*
+> satırı hangi adresin doğrudan, hangisinin vekilden geçtiğini gösterir.
 
 ### 3. `IDDAA_KAYNAK_TABAN` — kendi ters vekiliniz (ücretsiz)
 

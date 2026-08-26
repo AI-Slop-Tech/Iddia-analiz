@@ -188,6 +188,21 @@
   input[type=range]{padding:0;background:none;border:0;accent-color:var(--vurgu)}
   input.oran{width:92px;text-align:center;font-weight:700;font-size:15px}
   input.takim{width:210px}
+  .chip-kaynak{
+    font-size:10.5px;font-weight:650;letter-spacing:.2px;padding:2px 6px;border-radius:999px;
+    background:var(--kart-ust);color:var(--cok-soluk);border:1px solid var(--cizgi);
+    white-space:nowrap;cursor:help;
+  }
+  .oransiz-anahtar{
+    display:flex;align-items:center;gap:9px;margin-top:10px;padding:9px 11px;
+    border:1px solid var(--cizgi);border-radius:var(--r-sm);background:var(--kart-ic);
+    cursor:pointer;font-size:13px;color:var(--soluk);user-select:none;
+  }
+  .oransiz-anahtar:hover{border-color:var(--cizgi-2)}
+  .oransiz-anahtar input{width:16px;height:16px;flex:0 0 auto;accent-color:var(--vurgu);
+                         padding:0;margin:0;cursor:pointer}
+  .oransiz-anahtar b{margin-left:auto;font-weight:600;white-space:nowrap}
+
   /* ---------------- aramalı seçici (combobox) ---------------- */
   /* Takım ve lig alanları elle yazılıyordu; datalist mobilde arama yapmıyor
      ve ligi/maç sayısını göstermiyor. Panel body'ye position:fixed olarak
@@ -836,6 +851,13 @@
         <button class="btn ikincil" id="btn-tara" onclick="gunTara()"><svg class="ic ic-sm "><use href="#i-tara"/></svg><span>Tara</span></button>
         <button class="btn ikincil" onclick="haftaYukle(true)"><svg class="ic ic-sm "><use href="#i-yenile"/></svg><span>Yenile</span></button>
       </div>
+      <!-- Oransız maçlar VARSAYILAN GİZLİ: oran olmadan ne değer taraması ne
+           oran kalıbı çalışıyor, liste sadece uzuyordu. -->
+      <label class="oransiz-anahtar" id="oransiz-satir">
+        <input type="checkbox" id="h-oransiz" onchange="oransizDegisti()">
+        <span>Oransız maçları da göster</span>
+        <b id="oransiz-sayi" class="ipucu"></b>
+      </label>
       <details class="katlanir" id="bulten-bilgi">
         <summary><svg class="ic ic-sm ok"><use href="#i-ok-sag"/></svg>Bu liste nasıl oluşuyor?</summary>
         <div class="katlanir-ic">
@@ -1699,17 +1721,48 @@ async function bosFiksturAciklamasi(){
 }
 
 function pilCiz(){
+  // Gün pilindeki sayı, ekranda GERÇEKTEN görünecek maç sayısı olmalı:
+  // "9 maç" yazıp 2 maç göstermek kafa karıştırıyordu.
   $('#gun-pilleri').innerHTML = HAFTA.gunler.map(g =>
     `<button class="gun-pil ${g.tarih === AKTIF_GUN ? 'aktif' : ''}" onclick="gunSec('${g.tarih}')">
-      ${gunEtiket(g)} <small>${g.tarih.slice(0,5)} · ${g.maclar.length} maç</small></button>`).join('');
+      ${gunEtiket(g)} <small>${g.tarih.slice(0,5)} · ${gunMaclari(g, ORANSIZ_GOSTER).length} maç</small></button>`).join('');
 }
 function gunSec(t){ AKTIF_GUN = t; pilCiz(); gunCiz(); }
 
-function aktifGunMaclari(){
-  const g = HAFTA.gunler.find(x => x.tarih === AKTIF_GUN);
+// Oransız maçlar varsayılan gizli. Tercih tarayıcıda hatırlanır.
+let ORANSIZ_GOSTER = (() => {
+  try { return localStorage.getItem('iddaa_oransiz') === '1'; } catch(e){ return false; }
+})();
+
+function oransizDegisti(){
+  ORANSIZ_GOSTER = !!$('#h-oransiz').checked;
+  try { localStorage.setItem('iddaa_oransiz', ORANSIZ_GOSTER ? '1' : '0'); } catch(e){}
+  pilCiz(); gunCiz();
+}
+
+/* Ligi seçilmiş günün maçları; oransızlar isteğe bağlı. */
+function gunMaclari(g, oransizDahil){
   if(!g) return [];
-  const lig = $('#h-lig').value;
-  return g.maclar.filter(m => !lig || m.lig === lig);
+  const lig = $('#h-lig') ? $('#h-lig').value : '';
+  return g.maclar.filter(m => (!lig || m.lig === lig)
+                           && (oransizDahil || (m.oranlar && m.oranlar.length === 3)));
+}
+
+function aktifGunMaclari(){
+  return gunMaclari(HAFTA.gunler.find(x => x.tarih === AKTIF_GUN), ORANSIZ_GOSTER);
+}
+
+/* Anahtarın yanındaki "N maç gizli" sayacı ve kutunun ilk hâli. */
+function oransizSayacCiz(){
+  const kutu = $('#h-oransiz'); if(!kutu || !HAFTA) return;
+  kutu.checked = ORANSIZ_GOSTER;
+  const g = HAFTA.gunler.find(x => x.tarih === AKTIF_GUN);
+  const hepsi = gunMaclari(g, true).length, oranli = gunMaclari(g, false).length;
+  const gizli = hepsi - oranli;
+  const et = $('#oransiz-sayi');
+  if(et) et.textContent = ORANSIZ_GOSTER
+    ? `${hepsi} maç · ${oranli} tanesi oranlı`
+    : (gizli ? `${gizli} oransız maç gizli` : 'gizlenen yok');
 }
 
 let OTOTARA = {};
@@ -1717,9 +1770,16 @@ function gunCiz(){
   if(!HAFTA) return;
   if(typeof fisRozet === 'function') fisRozet();
   const maclar = aktifGunMaclari();
+  oransizSayacCiz();
   oneCikanCiz();
   if(!maclar.length){
-    $('#hafta-liste').innerHTML = `<div class="kart bos-durum"><div class="dev">${ik('bos','ic-xl')}</div><p>Bu gün için (seçili ligde) maç yok.</p></div>`;
+    const g = HAFTA.gunler.find(x => x.tarih === AKTIF_GUN);
+    const gizli = gunMaclari(g, true).length;
+    $('#hafta-liste').innerHTML = `<div class="kart bos-durum"><div class="dev">${ik('bos','ic-xl')}</div>
+      <p>${gizli && !ORANSIZ_GOSTER
+        ? `Bu günde oranlı maç yok — <b>${gizli} maç</b> oransız olduğu için gizli.
+           Yukarıdaki <b>“Oransız maçları da göster”</b> kutusunu işaretleyerek görebilirsiniz.`
+        : 'Bu gün için (seçili ligde) maç yok.'}</p></div>`;
     return;
   }
   // profesyonel analist modu: gün ilk kez görüntülendiğinde tarama kendiliğinden başlar
@@ -1736,6 +1796,9 @@ function gunCiz(){
       </span>
       <span class="takimlar">${esc(m.ev)} – ${esc(m.dep)}</span>
       ${m.oranlar ? oranDugmeleri(m) : '<span class="ipucu">oran yok</span>'}
+      ${m.oran_kaynak === 'pinnacle'
+        ? '<span class="chip-kaynak" title="Oran Pinnacle\'ın açık fiyatından — piyasanın referans kitapçısı, düşük marj. Tek kitapçı olduğu için konsensüs sapması taraması bu maçta çalışmaz; değer, model–fiyat kıyasından çıkar (Detay).">Pinnacle</span>'
+        : (m.oran_kaynak === 'canli' ? '<span class="chip-kaynak" title="Oran canlı piyasa API\'sinden">canlı</span>' : '')}
       ${m.analiz_yok
         ? '<span class="ipucu" title="Takımlar istatistik arşivinin kapsamı dışında">yalnız listeleme</span>'
         : `<button class="mini-btn detay-btn" onclick="detayToggle(${m.id})" title="Tam analiz">${iks('detay')}<span class="btn-metin">Detay</span></button>`}
@@ -3387,6 +3450,7 @@ function kapsamCiz(d){
         ? 'ücretsiz plan penceresi: yalnız bugün ve yarın'
         : `bugün ${af.bugun_istek || 0} istek harcandı (tavan 90; 72 üstü yalnız gün fikstürüne ayrılır)`));
   const acik = d.acik_durum || {};
+  const pin = d.pinnacle_durum || {};
   const acikNot = k.acik_kapali
     ? 'IDDAA_ACIK_FIKSTUR=0 ile kapatılmış'
     : (acik.zaman
@@ -3399,6 +3463,10 @@ function kapsamCiz(d){
     ${satir(iks('gecmis') + ' dünkü arşiv', k.dun, k.dun_hata, 'sonuç denetimi için')}
     ${satir(iks('futbol') + ' API-Football (dünya)', k.af, k.af_hata || af.hata, afNot)}
     ${satir(iks('dunya') + ' açık dünya fikstürü (kupa/eleme)', k.acik, k.acik_hata || acik.hata, acikNot)}
+    ${satir(iks('para') + ' Pinnacle açık oranları', k.pinnacle, k.pinnacle_hata || pin.hata,
+      pin.kapali ? 'IDDAA_PINNACLE=0 ile kapatılmış'
+                 : `kaynakta ${pin.oranli || 0} maçta 1X2 · anahtar gerekmez ·
+                    tek kitapçı olduğu için konsensüs sapması taraması bu maçlarda çalışmaz`)}
     ${k.acik_arsiv ? `<div class="capraz-satir">
       <span style="flex:1;min-width:140px">${iks('gecmis')} açık dünya arşivi</span>
       <b class="${k.acik_arsiv.mac > 0 ? 'ev-poz' : 'ev-neg'}">${(k.acik_arsiv.mac||0).toLocaleString('tr-TR')} maç</b>
