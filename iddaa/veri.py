@@ -310,7 +310,55 @@ TAKMA_ADLAR = {
     "brestois": "Brest",
     "sportingclubedebraga": "Sp Braga",
     "sportingbraga": "Sp Braga",
+    # kaynakların kullandığı uzun resmi adlar (alt-dize sınırı bunları elediği
+    # için açıkça yazıldı)
+    "realbetisbalompie": "Betis",
+    "realbetis": "Betis",
+    "intermilan": "Inter",
+    "internazionale": "Inter",
+    "acfiorentina": "Fiorentina",
+    "sslazio": "Lazio",
+    "asroma": "Roma",
+    "sscnapoli": "Napoli",
+    "rcdespanyol": "Espanol",
+    "rcdmallorca": "Mallorca",
+    "realvalladolid": "Valladolid",
+    "realsporting": "Sp Gijon",
+    "vflwolfsburg": "Wolfsburg",
+    "borussiamgladbach": "M'gladbach",
+    "borussiamonchengladbach": "M'gladbach",
+    "nottinghamforest": "Nott'm Forest",
+    "sheffieldwednesday": "Sheffield Weds",
+    "westhamunited": "West Ham",
+    "leedsunited": "Leeds",
+    "leicestercity": "Leicester",
+    "norwichcity": "Norwich",
+    "stokecity": "Stoke",
+    "swanseacity": "Swansea",
+    "cardiffcity": "Cardiff",
+    "hullcity": "Hull",
+    "afcbournemouth": "Bournemouth",
+    "crystalpalacefc": "Crystal Palace",
 }
+
+
+_TAKMA_TERS: dict[str, list[str]] | None = None
+
+
+def takma_ad_haritasi() -> dict[str, list[str]]:
+    """Resmî takım adı → kullanıcının yazabileceği diğer adlar.
+
+    TAKMA_ADLAR'ın tersi. Arayüzdeki aramalı seçici bunu kullanır: arşivde
+    "Buyuksehyr" yazıyor ama kullanıcı "başakşehir" arar.
+    """
+    global _TAKMA_TERS
+    if _TAKMA_TERS is None:
+        ters: dict[str, list[str]] = {}
+        for takma, resmi in TAKMA_ADLAR.items():
+            if _normalize(takma) != _normalize(resmi):
+                ters.setdefault(resmi, []).append(takma)
+        _TAKMA_TERS = ters
+    return _TAKMA_TERS
 
 
 def guncel_sezon_baslangic_yili() -> int:
@@ -642,7 +690,9 @@ def _kapsama_uygun(hedef: str, aday: str) -> bool:
     Leone" içinde "leon" geçtiği için Leon'a oturuyor; bülten "Nautico –
     Ath Bilbao" gibi var olmayan maçlar gösteriyordu. Üç koşul aranır:
       • kısa ad en az 4 harf (le, ny gibi parçalar eşleşmesin),
-      • uzun ad kısa adın en fazla iki katı ("angers" 22 harflik ada girmesin),
+      • uzun ad kısa adın en fazla iki katı ("angers" 22 harflik ada girmesin);
+        amatör lig takımlarının ("Plymouth Parkway") üst lig kulüplerine
+        oturmasını ayrıca kapsama katmanındaki ÜLKE/KUPA kapısı engeller,
       • kısa ad uzun adın BAŞINDA ya da SONUNDA geçsin — ortada geçen dizi
         neredeyse her zaman başka bir kelimenin parçasıdır.
     """
@@ -1150,6 +1200,8 @@ _ODDSAPI_LIG_IPUCU = {
     "SWZ": "Switzerland - Super League", "USA": "USA - MLS",
     "ŞL": "International Clubs - UEFA Champions League",
     "EL": "International Clubs - UEFA Europa League",
+    "KL": "International Clubs - UEFA Europa Conference League",
+    "TK": "Turkiye - Turkish Cup",
     "CLI": "International Clubs - CONMEBOL Libertadores",
     "CSA": "International Clubs - CONMEBOL Sudamericana",
 }
@@ -1361,13 +1413,74 @@ def _oddsapi_iyms_cek(mac_id: int, sadece_onbellek: bool = False) -> dict | None
     return sonuc
 
 
+def _lig_parcalari(ad: str) -> set[str]:
+    """Turnuva adının anlamlı kelimeleri, ASCII'ye katlanmış.
+
+    Katlama şart: bizim "Türkiye Kupası" ile kaynağın "Turkiye - Turkish Cup"
+    adı ancak ı/i ve ü/u eşitlendikten sonra ortak kelime paylaşır.
+    """
+    duz = _normalize_bosluklu(ad)
+    return {p for p in duz.split() if len(p) > 1 and p not in ("the", "of", "and", "de")}
+
+
+def _normalize_bosluklu(ad: str) -> str:
+    """_normalize ile aynı katlama, ama kelimeler ayrı kalır."""
+    return " ".join(_normalize(p) for p in re.split(r"[^0-9A-Za-zÇĞİÖŞÜçğıöşü]+", str(ad or "")) if p)
+
+
+def _oddsapi_lig_adaylari(lig_kodu: str, lig_adi: str | None) -> list:
+    """Bir bülten satırı için odds-api.io'da aranacak ligler (en fazla 3).
+
+    Eskiden yalnız _ODDSAPI_LIG_IPUCU'ndaki ~40 Div kodu aranıyordu; açık
+    dünya fikstürüyle gelen maçların Div'i "DÜNYA" olduğu için oran katmanı
+    onlara HİÇ bakmıyordu — bültenin büyük kısmı fiyatsız kalıyordu. Artık
+    kod eşleşmezse turnuvanın gerçek adı ("England EFL Cup") kaynağın kendi
+    adlandırmasıyla ("England - League Cup") parça örtüşmesine göre eşlenir.
+
+    Yanlış lig seçmek tehlikeli değil: maç yine takım adı benzerliği + tarih
+    yakınlığıyla aranıyor, tutmazsa oran gelmiyor. Aday sayısı 3'te tutuluyor
+    çünkü her aday lig bir ağ isteği (12 saat önbellekli) demek.
+    """
+    try:
+        ligler = [l for l in _oddsapi_ligler()
+                  if l.get("name") and l.get("slug")
+                  and not any(d in str(l["name"]).lower() for d in _ODDSAPI_DISLA)]
+    except Exception:  # noqa: BLE001 — lig listesi çekilemezse oran katmanı sussun
+        return []
+
+    ipucu = _ODDSAPI_LIG_IPUCU.get(str(lig_kodu))
+    if ipucu:
+        duz = re.sub(r"[^a-z0-9]", "", ipucu.lower())
+        adaylar = sorted((l for l in ligler
+                          if re.sub(r"[^a-z0-9]", "", l["name"].lower()).startswith(duz)),
+                         key=lambda l: len(l["name"]))   # en kısa (en birebir) ad önce
+        if adaylar:
+            return adaylar[:3]
+
+    if not isinstance(lig_adi, str) or not lig_adi.strip():
+        return []   # pandas NaN de buraya düşer (LigAdi olmayan satırlar)
+    hedef = _lig_parcalari(lig_adi)
+    if not hedef:
+        return []
+    puanli = []
+    for l in ligler:
+        parca = _lig_parcalari(l["name"])
+        ortak = hedef & parca
+        if len(ortak) < 2:      # tek ortak kelime (çoğunlukla "cup"/ülke) yetmez
+            continue
+        puanli.append((len(ortak) / len(hedef | parca), len(l["name"]), l))
+    puanli.sort(key=lambda x: (-x[0], x[1]))
+    return [l for _p, _n, l in puanli[:3]]
+
+
 def iyms_piyasa(ev: str, dep: str, lig_kodu: str, tarih: pd.Timestamp,
-                sadece_onbellek: bool = False) -> dict | None:
+                sadece_onbellek: bool = False, lig_adi: str | None = None) -> dict | None:
     """Bir bülten maçı için Bet365'in gerçek İY/MS oranları (odds-api.io).
 
-    Anahtar yoksa None döner (özellik uykuda). Lig, ada göre eşlenir; maç,
-    takım adı benzerliği + tarih yakınlığıyla bulunur. Tüm ağ sonuçları
-    diskte önbelleklenir — günlük ücretsiz istek bütçesi (500) rahat yeter.
+    Anahtar yoksa None döner (özellik uykuda). Lig, önce Div kodundan sonra
+    turnuvanın gerçek adından (lig_adi) eşlenir; maç, takım adı benzerliği +
+    tarih yakınlığıyla bulunur. Tüm ağ sonuçları diskte önbelleklenir —
+    günlük ücretsiz istek bütçesi (500) rahat yeter.
     """
     oa_var, af_var = bool(_oddsapi_anahtar()), bool(_af_anahtar())
     IYMS_SON_DURUM.update(
@@ -1375,25 +1488,16 @@ def iyms_piyasa(ev: str, dep: str, lig_kodu: str, tarih: pd.Timestamp,
     )
     if not (oa_var or af_var):
         return None
-    ipucu = _ODDSAPI_LIG_IPUCU.get(str(lig_kodu))
     try:
         def _duz(s: str) -> str:
             return re.sub(r"[^a-z0-9]", "", str(s).lower())
 
         sonuc = None
-        if oa_var and ipucu:
-            ipucu_duz = _duz(ipucu)
-            adaylar = sorted(
-                (
-                    l for l in _oddsapi_ligler()
-                    if _duz(l.get("name", "")).startswith(ipucu_duz)
-                    and not any(d in str(l.get("name", "")).lower() for d in _ODDSAPI_DISLA)
-                ),
-                key=lambda l: len(str(l.get("name", ""))),  # en kısa (en birebir) ad önce
-            )
+        adaylar = _oddsapi_lig_adaylari(lig_kodu, lig_adi) if oa_var else []
+        if adaylar:
             hedef_utc = pd.Timestamp(tarih) - pd.Timedelta(hours=3)  # TR → UTC
             en_mac, en_puan = None, 0.0
-            for lig in adaylar[:5]:
+            for lig in adaylar:
                 for m in _oddsapi_maclar(lig["slug"], sadece_onbellek=sadece_onbellek):
                     if m.get("status") == "settled":
                         continue
@@ -2244,31 +2348,79 @@ def _acik_lig_adi(ulke: str, lig: str, asama: str) -> str:
     return " ".join(parcalar) or l or u
 
 
-def acik_gun_fiksturu(gun: str, sadece_onbellek: bool = False) -> list:
-    """Bir TÜRKİYE gününün dünya fikstürü — tek istek, 3 saat önbellek.
+_ACIK_KILIT = threading.Lock()
 
-    gun: 'YYYY-MM-DD'. Ağ/format hatasında istisna fırlatır; çağıran katman
-    her günü ayrı korur, bir gün düşse de kalan günler gelir.
+
+def _acik_onbellek_taze(kayit: dict | None) -> bool:
+    """Kayıt hem güncel biçimde hem de TTL içinde mi?
+
+    Biçim denetimi şart: süzgeçler değiştiğinde eski kayıtlar diskte 3 saat
+    daha durur ve yeni sürüm eski listeyi servis ederdi.
     """
-    onbellek = _oddsapi_onbellek("acik_fikstur.json")
-    kayit = onbellek.get(gun)
-    # süzgeç/alan değişince eski önbellek kayıtları kullanılmaz (yoksa yeni
-    # sürüm günlerce eski biçimi servis eder)
-    eski_bicim = bool(kayit and kayit.get("veri") and "lig_ad" not in kayit["veri"][0])
-    if kayit and not eski_bicim and time.time() - kayit.get("zaman", 0) < _ACIK_TTL:
-        return kayit["veri"]
-    if sadece_onbellek or acik_fikstur_kapali():
-        return [] if eski_bicim else (kayit or {}).get("veri", [])
-    yanit = _oturum().get(
-        _acik_gun_url(gun), timeout=_ACIK_ZAMAN_ASIMI, proxies=proxy_ayari() or None
-    )
-    yanit.raise_for_status()
-    kayitlar = _acik_govdeyi_coz(yanit.json())
-    onbellek[gun] = {"zaman": time.time(), "veri": kayitlar}
-    for eski in [k for k, v in onbellek.items() if time.time() - v.get("zaman", 0) > 3 * 86400]:
-        onbellek.pop(eski, None)
-    _oddsapi_onbellek_yaz("acik_fikstur.json", onbellek)
-    return kayitlar
+    if not kayit or not isinstance(kayit.get("veri"), list):
+        return False
+    if kayit["veri"] and "lig_ad" not in kayit["veri"][0]:
+        return False
+    return time.time() - kayit.get("zaman", 0) < _ACIK_TTL
+
+
+def acik_fiksturu_getir(gunler: list[str], zaman_butcesi: float = 25.0) -> tuple[list, dict]:
+    """Verilen TR günlerinin dünya fikstürü. Dönen: (kayıtlar, durum).
+
+    Tasarım notları — hepsi üretimde takılmamak için:
+      • Önbellek dosyası BİR KEZ okunur, BİR KEZ yazılır. Gün başına oku/yaz
+        yapılınca 1 MB'lık JSON sekiz kez ayrıştırılıp sekiz kez diske
+        yazılıyordu.
+      • zaman_butcesi: kaynak yavaşladığında bülten kurulumu 8 × 20 sn
+        boyunca kilitlenmesin. Bütçe dolunca kalan günler ÖNBELLEKTEN gelir;
+        eksik gün bir sonraki kurulumda tamamlanır.
+      • Bir günün hatası diğerlerini düşürmez; durum sözlüğünde raporlanır.
+      • Geçmiş günler dosyadan atılır: dosya süresiz büyümesin.
+    """
+    # gun  : veri gelen gün sayısı (ağ + önbellek birlikte)
+    # yeni : bu turda ağdan çekilen gün sayısı
+    durum = {"gun": 0, "yeni": 0, "onbellek": 0, "mac": 0, "hata": None, "butce_doldu": False}
+    if acik_fikstur_kapali():
+        return [], durum
+
+    bitis = time.monotonic() + max(zaman_butcesi, 5.0)
+    with _ACIK_KILIT:                       # iki istek aynı anda çekmesin
+        onbellek = _oddsapi_onbellek("acik_fikstur.json")
+        kayitlar, yazilacak = [], False
+        for gun in gunler:
+            kayit = onbellek.get(gun)
+            if _acik_onbellek_taze(kayit):
+                kayitlar.extend(kayit["veri"])
+                durum["onbellek"] += 1
+                durum["gun"] += 1
+                continue
+            if time.monotonic() >= bitis:
+                durum["butce_doldu"] = True
+                kayitlar.extend((kayit or {}).get("veri") or [])   # bayat > hiç
+                continue
+            try:
+                yanit = _oturum().get(_acik_gun_url(gun), timeout=_ACIK_ZAMAN_ASIMI,
+                                      proxies=proxy_ayari() or None)
+                yanit.raise_for_status()
+                gunun = _acik_govdeyi_coz(yanit.json())
+            except Exception as hata:  # noqa: BLE001 — bir gün düşse kalanı gelsin
+                durum["hata"] = f"{gun}: {str(hata)[:120]}"
+                kayitlar.extend((kayit or {}).get("veri") or [])
+                continue
+            onbellek[gun] = {"zaman": time.time(), "veri": gunun}
+            yazilacak = True
+            kayitlar.extend(gunun)
+            durum["gun"] += 1
+            durum["yeni"] += 1
+
+        if yazilacak:
+            en_eski = min(gunler) if gunler else ""
+            for eski in [g for g in onbellek if g < en_eski]:
+                onbellek.pop(eski, None)   # geçmiş günler: dosya şişmesin
+            _oddsapi_onbellek_yaz("acik_fikstur.json", onbellek)
+
+    durum["mac"] = len(kayitlar)
+    return kayitlar, durum
 
 
 def acik_oncelikli(ulke: str) -> bool:
@@ -2280,6 +2432,30 @@ def acik_oncelikli(ulke: str) -> bool:
 # ("Spain - LaLiga" → SP1). Aynı harita burada da kullanılır: beslemedeki
 # "Spain / LaLiga" bu sayede SP1 rozetini ve gerçek lig analizini alır.
 _ACIK_AD_KOD = {_normalize(ad): kod for kod, ad in _ODDSAPI_LIG_IPUCU.items()}
+
+# Beslemenin adlandırması odds-api'ninkiyle tutmayan ÜST LİGLER. Eşleşmezse maç
+# "analiz edilemez" sayılıyor; liste 26-30.08.2026 fikstürü taranarak çıkarıldı.
+# ALT ligler bilerek dışarıda: arşivde o takımlar yok, eşleşirlerse yanlış
+# kulübe oturuyorlar ("Plymouth Parkway" → League One'ın Plymouth'u).
+_ACIK_AD_KOD.update({
+    _normalize(ad): kod for ad, kod in {
+        "England League 1": "E2", "England League 2": "E3",
+        "Scotland Scottish Championship": "SC1",
+        "Scotland League 1": "SC2", "Scotland League 2": "SC3",
+        "Japan J1 League": "JPN",
+        "Belgium Belgian Pro League": "B1",
+        "Argentina Liga Profesional": "ARG",
+        "Brazil Serie A": "BRA",
+        "China Super League": "CHN",
+        "Portugal Primeira Liga": "P1",
+        "Romania Liga 1": "ROU",
+        "Denmark Superliga": "DNK",
+        "Ireland League of Ireland Premier Division": "IRL",
+        "Ireland Premier Division": "IRL",
+        "Russia Premier Liga": "RUS",
+        "USA Major League Soccer": "USA",
+    }.items()
+})
 
 
 # Ülke → o ülkenin arşivdeki lig kodları. Bulanık isim eşleşmesini ÜLKE
@@ -2299,6 +2475,33 @@ _ACIK_ULKE_KODLARI: dict[str, set[str]] = {
 for _kod, (_ulke, _ad) in EK_LIGLER.items():
     _ACIK_ULKE_KODLARI.setdefault(_ulke.lower(), set()).add(_kod)
 _ACIK_ULKE_KODLARI.setdefault("united states", set()).update(_ACIK_ULKE_KODLARI.get("usa", set()))
+
+
+# Konfederasyon / ülkeler-arası etiketleri: bunlarda takım her ülkeden olabilir,
+# ülke denetimi uygulanmaz.
+_ACIK_ULKE_DISI = {"uefa", "conmebol", "concacaf", "caf", "afc", "ofc", "fifa",
+                   "aiff", "international", "world", "europe", "africa", "asia",
+                   "north america", "south america", "clubs", ""}
+
+# Kupa/eleme turnuvası kalıpları: bu turnuvalarda ÜST LİG takımları da oynar,
+# dolayısıyla arşiv eşleşmesine izin verilir.
+_ACIK_KUPA = re.compile(
+    r"\b(cup|cupen|cupa|kupa|kup|pokal|pokalen|copa|coppa|beker|taca|taça|coupe"
+    r"|trophy|shield|supercup|super cup|playoff|play-off|qualification|qualifying"
+    r"|champions league|europa league|conference league)\b",
+    re.IGNORECASE,
+)
+
+
+def acik_ulke_mu(ulke: str) -> bool:
+    """Turnuvanın etiketi gerçek bir ÜLKE mi (konfederasyon/uluslararası değil)?"""
+    duz = _acik_duz(ulke)
+    return bool(duz) and duz not in _ACIK_ULKE_DISI and not duz.isdigit()
+
+
+def acik_kupa_mi(*adlar) -> bool:
+    """Turnuva adı kupa/eleme turnuvasına mı benziyor?"""
+    return any(_ACIK_KUPA.search(str(a or "")) for a in adlar)
 
 
 def acik_ulke_kodlari(ulke: str) -> set[str] | None:
@@ -2321,4 +2524,10 @@ def acik_lig_kodu(ulke: str, lig: str) -> str | None:
         for anahtar, kod in _ACIK_TR_KOD:
             if anahtar in l:
                 return kod
-    return _ACIK_AD_KOD.get(_normalize(f"{ulke} {lig}"))
+    # Aşama eki olan adlar da denenir: kaynak ligi "Liga Profesional: Clausura"
+    # diye veriyor, bizim tablomuzda "Liga Profesional" yazıyor.
+    for ad in (lig, str(lig or "").split(":")[0]):
+        kod = _ACIK_AD_KOD.get(_normalize(f"{ulke} {ad}"))
+        if kod:
+            return kod
+    return None

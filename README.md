@@ -295,6 +295,38 @@ Katmanı kapatmak isterseniz:
 export IDDAA_ACIK_FIKSTUR=0      # kupa/eleme maçları bültene girmez
 ```
 
+**Rozetler.** `ŞL/EL/KL` Avrupa kupaları, `KUPA` ulusal kupalar (EFL Cup,
+Coppa Italia, DFB Pokal, Türkiye Kupası...), `DÜNYA` ise arşivimizdeki bir lige
+oturmayan turnuvalar. Bülten üstündeki lig seçicisinden bunlara göre süzebilirsiniz.
+
+**Yanlış eşleşmeye karşı iki kapı.** Dünya fikstüründeki binlerce yabancı ismi
+arşive bağlarken isim benzerliği yanılabiliyor; bülten bir ara "Nautico – Ath
+Bilbao", "Tigers FC – Juventus" gibi var olmayan maçlar gösterdi. Bir maçın
+analiz alması için (a) turnuvanın ülkesi arşivimizde takip ettiğimiz bir lige
+ya da o ülkenin kupasına ait olmalı, (b) takımın arşivdeki ligi de o ülkenin
+olmalı. Uluslararası turnuvalarda ikisi de uygulanmaz — orada takım her
+ülkeden gelebilir. Geçemeyen maç yine listelenir, yalnız analiz almaz.
+
+### Oranlar: ücretsiz çözüm
+
+Anahtarsız kaynakların hiçbiri oran vermiyor; oran ya `fixtures.csv`'den gelir
+(~22 lig, birkaç gün ileri) ya da bir oran API'sinden. İkisi de ücretsiz,
+ikisi de karta gerek duymuyor:
+
+| Kaynak | Ücretsiz kota | Ne verir |
+|---|---|---|
+| [odds-api.io](https://odds-api.io) | **günde 500 istek** | 1X2, Alt/Üst, İY/MS, korner — bültenin tamamını fiyatlandırmaya yeter |
+| [API-Football](https://dashboard.api-football.com) | günde 100 istek | 14+ kitapçı, İY/MS; bugün ±1 gün penceresi |
+
+Anahtarı panelden (⚙ Ayarlar) yapıştırmak yeterli — Coolify ortam değişkeni
+şart değil, `data/ayarlar.json`'a kalıcı yazılır. Oranlar maç başına çekilip
+diskte önbelleklenir; arka plan ısıtıcısı bugün+yarının maçlarını kendiliğinden
+fiyatlandırır ve günlük kotayı tüketmemek için hem süre hem istek tavanına uyar.
+
+> Bir maçın turnuvası odds-api'de farklı adlandırılmış olabilir ("England EFL
+> Cup" ↔ "England - League Cup"); eşleme ada göre parça örtüşmesiyle yapılır,
+> tutmazsa o maç oransız kalır ama bülten bozulmaz.
+
 ## Erişim sorunu (Türkiye)
 
 `football-data.co.uk` bahis oranı yayınladığı için **Türkiye'den erişime

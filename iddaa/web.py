@@ -28,6 +28,9 @@ _DURUM: dict = {
     "fikstur_zaman": 0.0, "arsiv_zaman": 0.0,
 }
 _BAKIM = {"basladi": False}
+# Bülten yeniden kurulumu tek seferde: kurulum artık dört kaynağı çekiyor,
+# eşzamanlı istekler aynı işi tekrarlamasın.
+_FIKSTUR_KILIT = threading.Lock()
 
 GUN_ADLARI = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"]
 
@@ -372,7 +375,8 @@ def uygulama_olustur():
         else:
             ekle("Açık dünya fikstürü (kupa + eleme maçları)",
                  bool(d_acik.get("mac")),
-                 (f"son çekim {d_acik.get('zaman') or '—'} · {d_acik.get('gun') or 0}/8 gün · "
+                 (f"son bakış {d_acik.get('zaman') or '—'} · {d_acik.get('gun') or 0}/8 gün hazır "
+                  f"({d_acik.get('yeni') or 0} gün yeni çekildi) · "
                   f"{d_acik.get('mac') if d_acik.get('mac') is not None else '?'} maç görüldü"
                   + (f" · son hata: {d_acik['hata']}" if d_acik.get("hata") else ""))
                  if d_acik.get("zaman")
@@ -458,6 +462,7 @@ def uygulama_olustur():
             return jsonify({"hata": "Önce veriyi güncelleyin."}), 503
         aktif_sinir = df["Tarih"].max() - pd.Timedelta(days=365)
         liste = veri.takim_listesi(df)
+        takma = veri.takma_ad_haritasi()
         return jsonify(
             [
                 {
@@ -465,6 +470,9 @@ def uygulama_olustur():
                     "lig": s.lig,
                     "mac": int(s.mac),
                     "aktif": bool(s.son_mac >= aktif_sinir),
+                    # arayüzdeki aramalı seçici bunları da tarar: kullanıcı
+                    # "başakşehir" yazınca arşivdeki "Buyuksehyr" bulunsun
+                    "ara": takma.get(s.Takim, []),
                 }
                 for s in liste.itertuples()
             ]
@@ -749,7 +757,7 @@ def uygulama_olustur():
 
         # dünya fikstüründeki yüzlerce yabancı isim için difflib'siz hızlı çözücü
         hafiza.clear()
-        cozucu = veri.takim_cozucu(df, hizli=True)
+        cozucu = veri.takim_cozucu_onbellekli(df, hizli=True)   # harita istek boyu paylaşılır
 
         satirlar = []
         for m in kayitlar:
@@ -800,17 +808,24 @@ def uygulama_olustur():
 
     # Açık kapsam penceresi ve süzgeçleri.
     #
-    # Kaynak cumartesileri 800+ maç görüyor ve bunların büyük kısmı bölgesel
-    # amatör lig — hepsini dökmek bülteni okunmaz yapar. Ayıklama beslemenin
+    # LİSTELEME geniştir, ANALİZ dardır — ikisi ayrı kapıdan geçer.
+    #
+    # Listeleme: kaynak cumartesileri 800+ maç görüyor, büyük kısmı bölgesel
+    # amatör lig; hepsini dökmek bülteni okunmaz yapar. Ayıklama beslemenin
     # KENDİ önem sırasına dayanır (29.08.2026 ölçümü: 0=Premier League,
     # 1=LaLiga, 2=Bundesliga, 3=Serie A, 4=Ligue 1 ... 9=Süper Lig, ardından
-    # alfabetik ülke bloğu). Bir maç şu üç koşuldan biriyle bültene girer:
+    # alfabetik ülke bloğu). Bir maç şu üç koşuldan biriyle listelenir:
     #   1) turnuva Türkiye'nin ya da bir konfederasyonun (UEFA/CONMEBOL...) —
     #      Türkiye Kupası alfabetik blokta "T"de kalıp tavana takılmasın diye,
-    #   2) takımlardan en az biri istatistik arşivinde var — analiz edebildiğimiz
-    #      ya da kullanıcının takip ettiği kulüpler,
+    #   2) takımlardan en az biri istatistik arşivinde var,
     #   3) turnuva günün ilk ACIK_ASAMA_SINIRI turnuvası arasında.
+    # Analiz: aşağıdaki "eşleşme güveni" bölümü karar verir; geçemeyen maç
+    # yine listelenir, yalnız "analiz yok" etiketiyle.
     ACIK_GUN_SAYISI = 8       # bugün + 7 gün
+    # Kaynak yavaşladığında bülten kurulumu 8 × 20 sn kilitlenmesin: bütçe
+    # dolunca kalan günler önbellekten gelir, eksik gün sonraki kurulumda
+    # tamamlanır.
+    ACIK_ZAMAN_BUTCESI = 25.0
     ACIK_ASAMA_SINIRI = 45    # "ciddi" turnuva sayılan besleme sırası
     ACIK_GUN_SINIRI = 180     # gün başına sert tavan (emniyet freni)
     # ertelenen/iptal maçlar bültene girmez
@@ -833,20 +848,10 @@ def uygulama_olustur():
             return fik
 
         simdi = veri.simdi_tr()
-        kayitlar = []
-        for i in range(ACIK_GUN_SAYISI):
-            gun = (simdi.normalize() + pd.Timedelta(days=i)).strftime("%Y-%m-%d")
-            try:
-                gunun = veri.acik_gun_fiksturu(gun)
-                durum["gun"] += 1
-            except Exception as h:  # noqa: BLE001 — bir gün düşerse kalanı yine gelsin
-                durum["hata"] = f"{gun}: {str(h)[:120]}"
-                try:
-                    gunun = veri.acik_gun_fiksturu(gun, sadece_onbellek=True)
-                except Exception:  # noqa: BLE001
-                    continue
-            kayitlar.extend(gunun)
-        durum["mac"] = len(kayitlar)
+        gunler = [(simdi.normalize() + pd.Timedelta(days=i)).strftime("%Y-%m-%d")
+                  for i in range(ACIK_GUN_SAYISI)]
+        kayitlar, cekim = veri.acik_fiksturu_getir(gunler, zaman_butcesi=ACIK_ZAMAN_BUTCESI)
+        durum.update(cekim)
         if not kayitlar:
             return fik
 
@@ -856,7 +861,7 @@ def uygulama_olustur():
 
         son_lig = _son_lig_haritasi(df)
         _ayni_takim = _takim_esitleyici()
-        cozucu = veri.takim_cozucu(df, hizli=True)
+        cozucu = veri.takim_cozucu_onbellekli(df, hizli=True)   # harita istek boyu paylaşılır
         hafiza: dict = {}
 
         def _esle(ad: str):
@@ -891,19 +896,37 @@ def uygulama_olustur():
             if not (onemli or ev or dep):
                 continue   # ne ciddi turnuva ne de arşivde tanıdığımız takım
 
-            # ÜLKE denetimi: bulanık/takma-ad eşleşmesi takımı başka bir ülkenin
-            # kulübüne bağlamış olabilir ("Brazil Serie B / Athletic Club" →
-            # İspanya'nın Ath Bilbao'su). Ülkesi bilinen turnuvalarda takımın
-            # arşivdeki ligi o ülkeye ait değilse eşleşme düşürülür — maç yine
-            # listelenir, yalnız analiz almaz.
-            ulke_kodlari = veri.acik_ulke_kodlari(m.get("ulke"))
-            if ulke_kodlari is not None:
-                if ev and son_lig.get(ev) not in ulke_kodlari:
-                    ev = None
-                if dep and son_lig.get(dep) not in ulke_kodlari:
-                    dep = None
+            # --- eşleşme güveni ---------------------------------------------
+            # İsim eşleştirme, dünya fikstüründeki binlerce yabancı ismi arşive
+            # bağlarken yanılabiliyor: bültende "Nautico – Ath Bilbao",
+            # "Tigers FC – Juventus", "Peterboro – Anstey Nomads" gibi var
+            # olmayan maçlar çıkıyordu. İki kapı konuldu.
+            #
+            # 1) Turnuva ülkeye aitse, arşivimizde o ülkenin TAKİP ETTİĞİMİZ bir
+            #    ligi ya da bir KUPASI olmalı. Avustralya NorZone ligi, Çek
+            #    kupası ya da Almanya Oberliga'sında oynayan takımlar arşivde
+            #    yok; oradaki "Hearts"/"Hamburg" İskoçya'nın/Almanya'nın üst lig
+            #    kulübü DEĞİLDİR.
+            # 2) Ülke turnuvasıysa takımın arşivdeki ligi de o ülkenin olmalı.
+            # Uluslararası turnuvalarda (UEFA/CONMEBOL...) ikisi de uygulanmaz:
+            # orada takım her ülkeden gelebilir.
+            kod_lig = veri.acik_lig_kodu(m.get("ulke"), m.get("lig"))
+            kupa = veri.acik_kupa_mi(m.get("lig"), m.get("lig_ad"))
+            if veri.acik_ulke_mu(m.get("ulke")):
+                ulke_kodlari = veri.acik_ulke_kodlari(m.get("ulke"))
+                guvenli = bool(ulke_kodlari) and (kupa or kod_lig in (ulke_kodlari or ()))
+                if not guvenli:
+                    ev = dep = None
+                else:
+                    if ev and son_lig.get(ev) not in ulke_kodlari:
+                        ev = None
+                    if dep and son_lig.get(dep) not in ulke_kodlari:
+                        dep = None
 
-            kod = veri.acik_lig_kodu(m.get("ulke"), m.get("lig"))
+            kod = kod_lig
+            if kod is None and kupa:
+                kod = "KUPA"   # kupada iki takım farklı liglerden gelir: lig
+                               # kodu iddiasında bulunma, rozet "KUPA" olsun
             if kod is None and ev and dep and son_lig.get(ev) == son_lig.get(dep):
                 kod = son_lig.get(ev) or "DÜNYA"
             kod = kod or "DÜNYA"
@@ -954,6 +977,7 @@ def uygulama_olustur():
             r = fik.loc[idx]
             try:
                 pk = veri.iyms_piyasa(r["HomeTeam"], r["AwayTeam"], r["Div"], r["Tarih"],
+                                      lig_adi=r.get("LigAdi"),
                                       sadece_onbellek=True)
             except Exception:  # noqa: BLE001
                 continue
@@ -967,6 +991,13 @@ def uygulama_olustur():
             fik.loc[idx, "OranKaynak"] = "canli"
             dolan += 1
         return dolan
+
+    # Arka plan oran ısıtması: süre VE istek tavanı birlikte. Ücretsiz oran
+    # planları günde 500 (odds-api) / 100 (API-Football) istek veriyor; bülten
+    # 15 dakikada bir yeniden kurulduğu için tavansız bir ısıtma günlük kotayı
+    # öğleden önce bitirebilir.
+    PIYASA_ISITMA_SANIYE = 150
+    PIYASA_ISITMA_TAVANI = 90
 
     def _piyasa_isit_baslat(fik: pd.DataFrame) -> None:
         """Bugün+yarının oransız maçları için piyasa oranlarını ARKA PLANDA çeker.
@@ -982,24 +1013,30 @@ def uygulama_olustur():
         simdi = veri.simdi_tr()
         pencere = (fik["Tarih"] >= simdi.normalize()) & \
                   (fik["Tarih"] < simdi.normalize() + pd.Timedelta(days=2))
+        if "LigAdi" not in fik.columns:
+            fik["LigAdi"] = None
         oransiz = fik.loc[pencere & fik["oran_ev"].isna(),
-                          ["HomeTeam", "AwayTeam", "Div", "Tarih"]]
+                          ["HomeTeam", "AwayTeam", "Div", "Tarih", "LigAdi"]]
         if oransiz.empty:
             return
         hedefler = [tuple(x) for x in oransiz.itertuples(index=False)]
-        # kota önce en kıymetli maçlara: Avrupa kupaları + Süper Lig başa
+        # kota önce en kıymetli maçlara: Avrupa kupaları + Süper Lig başa.
+        # Açık dünya fikstürü bültene yüzlerce maç ekledi; ücretsiz oran
+        # planları (odds-api 500/gün, AF 100/gün) hepsine yetmez, o yüzden
+        # sıralama ve ISTEK_TAVANI birlikte çalışır.
         oncelik = ("ŞL", "EL", "KL", "T1", "TK")
         hedefler.sort(key=lambda h: (h[2] not in oncelik, h[3]))
         _DURUM["piyasa_isitma"] = True
 
         def _isit():
             try:
-                son = time.time() + 120  # üst sınır: 2 dk
-                for ev, dep, lig, tarih in hedefler:
-                    if time.time() > son:
+                son = time.time() + PIYASA_ISITMA_SANIYE
+                for i, (ev, dep, lig, tarih, lig_adi) in enumerate(hedefler):
+                    if time.time() > son or i >= PIYASA_ISITMA_TAVANI:
                         break
                     try:
-                        veri.iyms_piyasa(ev, dep, lig, tarih)  # ağ; önbelleğe yazar
+                        # ağ; önbelleğe yazar
+                        veri.iyms_piyasa(ev, dep, lig, tarih, lig_adi=lig_adi)
                     except Exception:  # noqa: BLE001
                         continue
                 _DURUM["fikstur_zaman"] = 0.0  # sıradaki bülten oranları işlesin
@@ -1046,69 +1083,77 @@ def uygulama_olustur():
         Detay/tarama çağrıları mevcut kopyayı kullanır ki satır id'leri kaymasın."""
         df = _df()
         bayat = bellek_ttl and time.time() - _DURUM["fikstur_zaman"] > FIKSTUR_BELLEK_TTL
-        if _DURUM["fikstur"] is None or yenile or bayat:
-            fik, kitapcilar = veri.fikstur_yukle(
-                ligler=sorted(set(df["Div"].unique()) | set(veri.EK_LIGLER)), yenile=yenile
-            )
-            # Katman katman kaç maç eklendiği ve hata varsa nedeni kaydedilir:
-            # eskiden bu hatalar sessizce yutuluyordu, "neden az maç var"
-            # sorusu ancak sunucu günlüğüne bakarak yanıtlanabiliyordu.
-            kapsam = {"csv": int(len(fik))}
-            n = len(fik)
-            try:
-                fik = _dis_kapsami_ekle(df, fik, yenile)
-                kapsam["fdorg"] = int(len(fik) - n)
-            except Exception as h:  # noqa: BLE001
-                kapsam["fdorg"] = 0
-                kapsam["fdorg_hata"] = str(h)[:200]
-            n = len(fik)
-            try:
-                fik = _dun_arsivden_ekle(df, fik)   # dünkü oynanmışlar denetim için
-                kapsam["dun"] = int(len(fik) - n)
-            except Exception as h:  # noqa: BLE001
-                kapsam["dun"] = 0
-                kapsam["dun_hata"] = str(h)[:200]
-            n = len(fik)
-            try:
-                fik = _af_kapsami_ekle(df, fik)
-                kapsam["af"] = int(len(fik) - n)
-            except Exception as h:  # noqa: BLE001 — kapsama katmanı bülteni düşürmesin
-                kapsam["af"] = 0
-                kapsam["af_hata"] = str(h)[:200]
-            n = len(fik)
-            try:
-                fik = _acik_kapsami_ekle(df, fik)
-                kapsam["acik"] = int(len(fik) - n)
-            except Exception as h:  # noqa: BLE001
-                kapsam["acik"] = 0
-                kapsam["acik_hata"] = str(h)[:200]
-            kapsam["acik_kapali"] = bool(veri.acik_fikstur_kapali())
-            kapsam["toplam"] = int(len(fik))
-            kapsam["af_anahtar"] = bool(veri.gizli_anahtar("APIFOOTBALL_KEY", "apifootball_key"))
-            # "Oran neden yok" sorusu ekrandan okunabilsin: oran bültenin
-            # kendisinden (fixtures.csv) gelir; AF/fd.org katmanları maçı
-            # listeler ama fiyat getirmez. Bu ikisini ayırmak şart.
-            try:
-                oran_kol = ["oran_ev", "oran_berabere", "oran_dep"]
-                if all(k in fik.columns for k in oran_kol):
-                    kapsam["oranli"] = int(fik[oran_kol].notna().all(axis=1).sum())
-                yol = os.path.join(veri.VERI_KLASORU, "fixtures.csv")
-                if os.path.exists(yol):
-                    yas = (time.time() - os.path.getmtime(yol)) / 3600.0
-                    kapsam["fikstur_saat"] = round(yas, 1)
-                    kapsam["fikstur_kb"] = int(os.path.getsize(yol) / 1024)
-                else:
-                    kapsam["fikstur_yok"] = True
-            except Exception:  # noqa: BLE001 — teşhis asla bülteni düşürmesin
-                pass
-            _DURUM["kapsam"] = kapsam
-            try:
-                _piyasa_fuzyonu_uygula(fik)      # önbellekte ne varsa satırlara işle
-                _piyasa_isit_baslat(fik)         # eksikleri arka planda çek
-            except Exception:  # noqa: BLE001
-                pass
-            _DURUM["fikstur"], _DURUM["kitapcilar"] = fik, kitapcilar
-            _DURUM["fikstur_zaman"] = time.time()
+        if not (_DURUM["fikstur"] is None or yenile or bayat):
+            return _DURUM["fikstur"], _DURUM["kitapcilar"]
+        # Sunucu 8 iş parçacığıyla çalışıyor: kilit olmadan aynı anda gelen
+        # sekiz istek bülteni sekiz kez kuruyor, her biri dört kaynağı ayrı
+        # ayrı çekiyordu. Kilidi bekleyen istek, kurulum bitmişse hazır
+        # kopyayı alır.
+        with _FIKSTUR_KILIT:
+            bayat = bellek_ttl and time.time() - _DURUM["fikstur_zaman"] > FIKSTUR_BELLEK_TTL
+            if _DURUM["fikstur"] is None or yenile or bayat:
+                fik, kitapcilar = veri.fikstur_yukle(
+                    ligler=sorted(set(df["Div"].unique()) | set(veri.EK_LIGLER)), yenile=yenile
+                )
+                # Katman katman kaç maç eklendiği ve hata varsa nedeni kaydedilir:
+                # eskiden bu hatalar sessizce yutuluyordu, "neden az maç var"
+                # sorusu ancak sunucu günlüğüne bakarak yanıtlanabiliyordu.
+                kapsam = {"csv": int(len(fik))}
+                n = len(fik)
+                try:
+                    fik = _dis_kapsami_ekle(df, fik, yenile)
+                    kapsam["fdorg"] = int(len(fik) - n)
+                except Exception as h:  # noqa: BLE001
+                    kapsam["fdorg"] = 0
+                    kapsam["fdorg_hata"] = str(h)[:200]
+                n = len(fik)
+                try:
+                    fik = _dun_arsivden_ekle(df, fik)   # dünkü oynanmışlar denetim için
+                    kapsam["dun"] = int(len(fik) - n)
+                except Exception as h:  # noqa: BLE001
+                    kapsam["dun"] = 0
+                    kapsam["dun_hata"] = str(h)[:200]
+                n = len(fik)
+                try:
+                    fik = _af_kapsami_ekle(df, fik)
+                    kapsam["af"] = int(len(fik) - n)
+                except Exception as h:  # noqa: BLE001 — kapsama katmanı bülteni düşürmesin
+                    kapsam["af"] = 0
+                    kapsam["af_hata"] = str(h)[:200]
+                n = len(fik)
+                try:
+                    fik = _acik_kapsami_ekle(df, fik)
+                    kapsam["acik"] = int(len(fik) - n)
+                except Exception as h:  # noqa: BLE001
+                    kapsam["acik"] = 0
+                    kapsam["acik_hata"] = str(h)[:200]
+                kapsam["acik_kapali"] = bool(veri.acik_fikstur_kapali())
+                kapsam["toplam"] = int(len(fik))
+                kapsam["af_anahtar"] = bool(veri.gizli_anahtar("APIFOOTBALL_KEY", "apifootball_key"))
+                # "Oran neden yok" sorusu ekrandan okunabilsin: oran bültenin
+                # kendisinden (fixtures.csv) gelir; AF/fd.org katmanları maçı
+                # listeler ama fiyat getirmez. Bu ikisini ayırmak şart.
+                try:
+                    oran_kol = ["oran_ev", "oran_berabere", "oran_dep"]
+                    if all(k in fik.columns for k in oran_kol):
+                        kapsam["oranli"] = int(fik[oran_kol].notna().all(axis=1).sum())
+                    yol = os.path.join(veri.VERI_KLASORU, "fixtures.csv")
+                    if os.path.exists(yol):
+                        yas = (time.time() - os.path.getmtime(yol)) / 3600.0
+                        kapsam["fikstur_saat"] = round(yas, 1)
+                        kapsam["fikstur_kb"] = int(os.path.getsize(yol) / 1024)
+                    else:
+                        kapsam["fikstur_yok"] = True
+                except Exception:  # noqa: BLE001 — teşhis asla bülteni düşürmesin
+                    pass
+                _DURUM["kapsam"] = kapsam
+                try:
+                    _piyasa_fuzyonu_uygula(fik)      # önbellekte ne varsa satırlara işle
+                    _piyasa_isit_baslat(fik)         # eksikleri arka planda çek
+                except Exception:  # noqa: BLE001
+                    pass
+                _DURUM["fikstur"], _DURUM["kitapcilar"] = fik, kitapcilar
+                _DURUM["fikstur_zaman"] = time.time()
         return _DURUM["fikstur"], _DURUM["kitapcilar"]
 
 
@@ -1281,6 +1326,7 @@ def uygulama_olustur():
                 # (yalnız önbellekten — ağ gecikmesi taramayı yavaşlatmasın;
                 # önbelleği Sürpriz Radarı taraması doldurur)
                 pk = veri.iyms_piyasa(r["HomeTeam"], r["AwayTeam"], r["Div"], r["Tarih"],
+                                      lig_adi=r.get("LigAdi"),
                                       sadece_onbellek=True)
                 if pk and pk.get("ms"):
                     oranlar = pk["ms"]
@@ -1389,6 +1435,7 @@ def uygulama_olustur():
             oranlar, _maks, _ust_alt = _fikstur_oranlari(r)
             if not oranlar:
                 pk = veri.iyms_piyasa(r["HomeTeam"], r["AwayTeam"], r["Div"], r["Tarih"],
+                                      lig_adi=r.get("LigAdi"),
                                       sadece_onbellek=True)
                 if pk and pk.get("ms"):
                     oranlar = pk["ms"]  # API füzyonu: canlı piyasa 1X2'si (önbellekten)
@@ -1467,7 +1514,8 @@ def uygulama_olustur():
             # böylece maç kalıp eşleşmesi ve tam analiz alabilir.
             piyasa = None
             if time.time() < piyasa_butce_bitis:
-                piyasa = veri.iyms_piyasa(r["HomeTeam"], r["AwayTeam"], r["Div"], r["Tarih"])
+                piyasa = veri.iyms_piyasa(r["HomeTeam"], r["AwayTeam"], r["Div"], r["Tarih"],
+                                          lig_adi=r.get("LigAdi"))
             satir_kaynagi = r.get("OranKaynak")
             oran_kaynak = (satir_kaynagi if isinstance(satir_kaynagi, str) and satir_kaynagi
                            else ("bulten" if oranlar else None))
@@ -1623,6 +1671,7 @@ def uygulama_olustur():
             # piyasa İY/MS fiyatları. (Beşiktaş–Kauno Žalgiris tipi kupa maçları.)
             oranlar, maks, ust_alt = _fikstur_oranlari(r)
             piyasa_k = veri.iyms_piyasa(r["HomeTeam"], r["AwayTeam"], r["Div"], r["Tarih"],
+                                        lig_adi=r.get("LigAdi"),
                                         sadece_onbellek=True)
             if not oranlar and piyasa_k and piyasa_k.get("ms"):
                 oranlar = piyasa_k["ms"]
@@ -1684,6 +1733,7 @@ def uygulama_olustur():
         # API füzyonu: aynı pakette İY/MS + korner + canlı 1X2 gelir; bülten
         # oranı yayınlanmamışsa canlı 1X2 ile tam analiz yapılır.
         piyasa_k = veri.iyms_piyasa(r["HomeTeam"], r["AwayTeam"], r["Div"], r["Tarih"],
+                                    lig_adi=r.get("LigAdi"),
                                     sadece_onbellek=True)
         satir_kaynagi = r.get("OranKaynak")
         oran_kaynak = (satir_kaynagi if isinstance(satir_kaynagi, str) and satir_kaynagi

@@ -188,6 +188,44 @@
   input[type=range]{padding:0;background:none;border:0;accent-color:var(--vurgu)}
   input.oran{width:92px;text-align:center;font-weight:700;font-size:15px}
   input.takim{width:210px}
+  /* ---------------- aramalı seçici (combobox) ---------------- */
+  /* Takım ve lig alanları elle yazılıyordu; datalist mobilde arama yapmıyor
+     ve ligi/maç sayısını göstermiyor. Panel body'ye position:fixed olarak
+     asılır — kart içindeki overflow'lar kırpmasın. */
+  .ara-btn{
+    background:var(--kart-ic);border:1px solid var(--cizgi);color:var(--metin);
+    border-radius:var(--r-sm);padding:9px 30px 9px 11px;font-size:14px;text-align:left;
+    min-width:0;max-width:100%;position:relative;display:inline-flex;align-items:center;gap:6px;
+    transition:border-color var(--hiz) var(--egri),box-shadow var(--hiz) var(--egri);
+  }
+  .ara-btn:hover{border-color:var(--cizgi-2)}
+  .ara-btn[aria-expanded="true"]{border-color:var(--vurgu);box-shadow:0 0 0 3px var(--vurgu-sis)}
+  .ara-btn .ara-etiket{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .ara-btn::after{
+    content:'';position:absolute;right:11px;top:50%;width:7px;height:7px;margin-top:-5px;
+    border-right:2px solid var(--cok-soluk);border-bottom:2px solid var(--cok-soluk);
+    transform:rotate(45deg);border-radius:1px;
+  }
+  .ara-panel{
+    position:fixed;z-index:120;background:var(--kart);border:1px solid var(--cizgi-2);
+    border-radius:var(--radius);box-shadow:var(--golge-yuksek);overflow:hidden;
+    display:none;flex-direction:column;max-height:min(360px,60vh);
+  }
+  .ara-panel.acik{display:flex}
+  .ara-panel-ara{padding:8px;border-bottom:1px solid var(--cizgi)}
+  .ara-panel-ara input{width:100%}
+  .ara-liste{overflow-y:auto;overscroll-behavior:contain;padding:4px}
+  .ara-oge{
+    display:flex;flex-direction:column;gap:2px;padding:9px 11px;border-radius:var(--r-sm);
+    cursor:pointer;line-height:1.25;
+  }
+  .ara-oge[aria-selected="true"]{background:var(--kart-ust)}
+  .ara-oge.imlec{background:var(--vurgu-sis);outline:1px solid var(--vurgu-cizgi)}
+  .ara-oge b{font-size:14px;font-weight:600}
+  .ara-oge span{font-size:11.5px;color:var(--cok-soluk)}
+  .ara-bos{padding:14px 12px;color:var(--soluk);font-size:13px;text-align:center}
+  @media (max-width:560px){ .ara-oge{padding:11px} }
+
   .form-satir{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
   .alan{display:flex;flex-direction:column;gap:5px;min-width:0}
   .alan label{font-size:12px;color:var(--soluk);font-weight:600}
@@ -989,8 +1027,8 @@
       <h2><svg class="ic "><use href="#i-hedef"/></svg>Takım Analizi</h2>
       <div class="alt-baslik">Form + aralarındaki maçlar + Elo + Poisson gol modeli. Oranları da girerseniz oran kalıbı, değer analizi ve öneri eklenir.</div>
       <div class="form-satir">
-        <div class="alan"><label>Ev sahibi</label><input class="takim" id="t-ev" list="takim-listesi" placeholder="ör. Galatasaray"></div>
-        <div class="alan"><label>Deplasman</label><input class="takim" id="t-dep" list="takim-listesi" placeholder="ör. Fenerbahçe"></div>
+        <div class="alan"><label>Ev sahibi</label><input class="takim" id="t-ev" placeholder="ör. Galatasaray"></div>
+        <div class="alan"><label>Deplasman</label><input class="takim" id="t-dep" placeholder="ör. Fenerbahçe"></div>
         <div class="alan"><label>MS 1 <span class="ipucu">(ops.)</span></label><input class="oran" id="to1" type="number" step="0.01" min="1.01" placeholder="oto"></div>
         <div class="alan"><label>MS 0</label><input class="oran" id="to0" type="number" step="0.01" min="1.01" placeholder="oto"></div>
         <div class="alan"><label>MS 2</label><input class="oran" id="to2" type="number" step="0.01" min="1.01" placeholder="oto"></div>
@@ -1007,7 +1045,6 @@
         </div>
       </details>
     </div>
-    <datalist id="takim-listesi"></datalist>
     <div id="takim-sonuc"></div>
   </section>
 
@@ -1019,7 +1056,7 @@
         <b>bu oranı analiz et</b> düğmesi o maçın oranını Oran Analizi'ne taşır — “bu oranla açılan maçlar
         tarihte ne yaptı?” sorusuna tek tıkla dönersiniz.</div>
       <div class="form-satir">
-        <div class="alan"><label>Takım <span class="ipucu">(ops.)</span></label><input class="takim" id="g-takim" list="takim-listesi" placeholder="tümü"></div>
+        <div class="alan"><label>Takım <span class="ipucu">(ops.)</span></label><input class="takim" id="g-takim" placeholder="tümü"></div>
         <div class="alan"><label>Lig</label><select id="g-lig"><option value="">Tümü</option></select></div>
         <div class="alan"><label>Adet</label><select id="g-limit"><option>25</option><option selected>50</option><option>100</option><option>200</option></select></div>
         <button class="btn" id="btn-gecmis" onclick="gecmisYukle()">Listele</button>
@@ -1107,6 +1144,206 @@ function btnHazir(el, ikon, metin){
   el.innerHTML = (ikon ? iks(ikon) : '') + `<span>${metin}</span>`;
 }
 const esc = t => String(t).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+/* ════════════════════════════════════════════════════════════════
+   Aramalı seçici (combobox)
+   ────────────────────────────────────────────────────────────────
+   Takım adları elle yazılıyordu (datalist mobilde arama yapmıyor, ligi ve
+   maç sayısını göstermiyor), lig alanları da 40+ seçenekli düz select'ti.
+   Bu bileşen ikisini de arama kutulu tek bir listeye çevirir.
+
+   İki bağlanma biçimi:
+     araSecKur(input, ogeFn)     → serbest metin alanı (takım adı)
+     aramaliSelect(select)       → yerli <select>: DOM'da KALIR, gizlenir ve
+                                   değeri/change olayı aynen çalışır. Böylece
+                                   ".value okuyan" onlarca çağrı yeri ve
+                                   sonradan <option> ekleyen kodlar bozulmaz.
+   Panel body'ye position:fixed asılır: kart/tablo overflow'ları kırpmasın.
+   ════════════════════════════════════════════════════════════════ */
+const araDuz = t => String(t == null ? '' : t).toLocaleLowerCase('tr')
+  .replace(/ı/g,'i').replace(/ş/g,'s').replace(/ğ/g,'g')
+  .replace(/ü/g,'u').replace(/ö/g,'o').replace(/ç/g,'c')
+  .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+  .replace(/[^a-z0-9 ]/g,' ').replace(/\s+/g,' ').trim();
+
+const ARA = {panel:null, liste:null, kutu:null, aktif:null, ogeler:[], imlec:-1};
+
+function araPanel(){
+  if(ARA.panel) return ARA.panel;
+  const p = document.createElement('div');
+  p.className = 'ara-panel';
+  p.setAttribute('role','listbox');
+  p.innerHTML = `<div class="ara-panel-ara" style="display:none">
+      <input type="text" autocomplete="off" spellcheck="false" placeholder="ara…">
+    </div><div class="ara-liste"></div>`;
+  document.body.appendChild(p);
+  ARA.panel = p;
+  ARA.liste = p.querySelector('.ara-liste');
+  ARA.kutu  = p.querySelector('.ara-panel-ara input');
+  ARA.kutu.addEventListener('input', () => araCiz());
+  ARA.kutu.addEventListener('keydown', araTus);
+  // mousedown: tetikleyicinin blur'undan ÖNCE çalışsın ki panel kapanmasın
+  p.addEventListener('mousedown', e => e.preventDefault());
+  p.addEventListener('click', e => {
+    const oge = e.target.closest('.ara-oge');
+    if(oge) araUygula(ARA.ogeler[+oge.dataset.i]);
+  });
+  addEventListener('resize', araKapat);
+  addEventListener('scroll', () => { if(ARA.aktif) araKonumla(); }, true);
+  addEventListener('mousedown', e => {
+    if(ARA.aktif && !ARA.panel.contains(e.target) && e.target !== ARA.aktif.tetik) araKapat();
+  });
+  return p;
+}
+
+function araKonumla(){
+  if(!ARA.aktif) return;
+  const r = ARA.aktif.tetik.getBoundingClientRect();
+  const p = ARA.panel;
+  const en = Math.max(r.width, 240);
+  p.style.width = Math.min(en, innerWidth - 16) + 'px';
+  p.style.left  = Math.round(Math.max(8, Math.min(r.left, innerWidth - en - 8))) + 'px';
+  const yer = innerHeight - r.bottom;
+  const yuk = p.offsetHeight || 260;
+  if(yer < yuk + 12 && r.top > yer){          // altta yer yoksa yukarı aç
+    p.style.top = Math.max(8, Math.round(r.top - yuk - 6)) + 'px';
+  }else{
+    p.style.top = Math.round(r.bottom + 6) + 'px';
+  }
+}
+
+function araCiz(){
+  if(!ARA.aktif) return;
+  const a = ARA.aktif;
+  const q = araDuz(a.tur === 'select' ? ARA.kutu.value : a.tetik.value);
+  const hepsi = a.ogeFn() || [];
+  const puan = o => {
+    if(!q) return 0;
+    const ad = araDuz(o.ad);
+    if(ad === q) return -3;
+    if(ad.startsWith(q)) return -2;
+    if(ad.split(' ').some(w => w.startsWith(q))) return -1;
+    if(ad.includes(q)) return 0;
+    // takma adlar: arşivde "Buyuksehyr" yazar, kullanıcı "başakşehir" arar
+    if((o.ara || []).some(x => araDuz(x).includes(q))) return 1;
+    if(araDuz(o.alt || '').includes(q)) return 2;
+    return null;
+  };
+  ARA.ogeler = (q ? hepsi.map(o => [puan(o), o]).filter(x => x[0] !== null)
+                        .sort((x, y) => x[0] - y[0]).map(x => x[1])
+                  : hepsi).slice(0, 300);
+  ARA.imlec = ARA.ogeler.length ? 0 : -1;
+  ARA.liste.innerHTML = ARA.ogeler.length
+    ? ARA.ogeler.map((o, i) => `<div class="ara-oge${i === ARA.imlec ? ' imlec' : ''}"
+        role="option" data-i="${i}" aria-selected="${o.deger === a.mevcut()}">
+        <b>${esc(o.ad)}</b>${o.alt ? `<span>${esc(o.alt)}</span>` : ''}</div>`).join('')
+    : '<div class="ara-bos">eşleşme yok</div>';
+  araKonumla();
+}
+
+function araAc(a){
+  araPanel();
+  if(ARA.aktif && ARA.aktif.tetik === a.tetik && ARA.panel.classList.contains('acik')) return;
+  ARA.aktif = a;
+  ARA.panel.querySelector('.ara-panel-ara').style.display = a.tur === 'select' ? '' : 'none';
+  if(a.tur === 'select') ARA.kutu.value = '';
+  ARA.panel.classList.add('acik');
+  a.tetik.setAttribute('aria-expanded','true');
+  araCiz();
+  if(a.tur === 'select') setTimeout(() => ARA.kutu.focus(), 0);
+}
+
+function araKapat(){
+  if(!ARA.panel) return;
+  ARA.panel.classList.remove('acik');
+  if(ARA.aktif) ARA.aktif.tetik.setAttribute('aria-expanded','false');
+  ARA.aktif = null;
+}
+
+function araUygula(oge){
+  const a = ARA.aktif;
+  if(!a || !oge) return;
+  a.sec(oge);
+  araKapat();
+}
+
+function araImlec(delta){
+  if(!ARA.ogeler.length) return;
+  ARA.imlec = (ARA.imlec + delta + ARA.ogeler.length) % ARA.ogeler.length;
+  [...ARA.liste.children].forEach((el, i) => el.classList.toggle('imlec', i === ARA.imlec));
+  const el = ARA.liste.children[ARA.imlec];
+  if(el && el.scrollIntoView) el.scrollIntoView({block:'nearest'});
+}
+
+function araTus(e){
+  if(!ARA.aktif) return;
+  if(e.key === 'ArrowDown'){ e.preventDefault(); araImlec(1); }
+  else if(e.key === 'ArrowUp'){ e.preventDefault(); araImlec(-1); }
+  else if(e.key === 'Enter'){
+    if(ARA.imlec >= 0 && ARA.panel.classList.contains('acik')){
+      e.preventDefault(); araUygula(ARA.ogeler[ARA.imlec]);
+    }
+  }
+  else if(e.key === 'Escape' || e.key === 'Tab'){ araKapat(); }
+}
+
+/* Serbest metin alanı (takım adı): yazdıkça süzer, seçince alana yazar. */
+function araSecKur(input, ogeFn){
+  if(!input || input.dataset.araKuruldu) return;
+  input.dataset.araKuruldu = '1';
+  input.setAttribute('autocomplete','off');
+  input.removeAttribute('list');           // datalist ile çift liste çıkmasın
+  const a = {
+    tur:'input', tetik:input, ogeFn,
+    mevcut: () => input.value,
+    sec: o => {
+      input.value = o.deger;
+      input.dispatchEvent(new Event('input', {bubbles:true}));
+      input.dispatchEvent(new Event('change', {bubbles:true}));
+    },
+  };
+  input.addEventListener('focus', () => araAc(a));
+  input.addEventListener('click', () => araAc(a));
+  input.addEventListener('input', () => { araAc(a); araCiz(); });
+  input.addEventListener('keydown', araTus);
+  input.addEventListener('blur', () => setTimeout(() => {
+    if(ARA.aktif && ARA.aktif.tetik === input) araKapat();
+  }, 120));
+}
+
+/* Yerli <select>: DOM'da kalır ama gizlenir; yanına arama düğmesi konur. */
+function aramaliSelect(sel){
+  if(!sel || sel.dataset.araKuruldu) return;
+  sel.dataset.araKuruldu = '1';
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'ara-btn';
+  btn.setAttribute('aria-haspopup','listbox');
+  btn.setAttribute('aria-expanded','false');
+  btn.style.cssText = sel.style.cssText;    // genişlik gibi satır içi stiller korunur
+  btn.innerHTML = '<span class="ara-etiket"></span>';
+  sel.after(btn);
+  sel.style.display = 'none';
+  const etiket = () => {
+    const o = sel.options[sel.selectedIndex];
+    btn.querySelector('.ara-etiket').textContent = o ? o.textContent : '';
+  };
+  const a = {
+    tur:'select', tetik:btn,
+    ogeFn: () => [...sel.options].map(o => ({deger:o.value, ad:o.textContent,
+                                             alt:'', ara:[o.value]})),
+    mevcut: () => sel.value,
+    sec: o => { sel.value = o.deger; etiket(); sel.dispatchEvent(new Event('change', {bubbles:true})); },
+  };
+  btn.addEventListener('click', () => (ARA.aktif && ARA.aktif.tetik === btn) ? araKapat() : araAc(a));
+  btn.addEventListener('keydown', araTus);
+  sel.addEventListener('change', etiket);   // koddan değer atanırsa etiket takip etsin
+  sel._araEtiket = etiket;
+  etiket();
+}
+/* Sonradan <option> eklendiğinde düğme etiketini tazeler. */
+function aramaliSelectTazele(sel){ if(sel && sel._araEtiket) sel._araEtiket(); }
+
 const pct = p => '%' + Math.round(p * 100);
 const pct1 = p => '%' + (p * 100).toFixed(1);
 const SECIM_AD = {
@@ -1201,6 +1438,10 @@ function yildizHTML(n){
 
 /* ---------- başlangıç ---------- */
 let TAKIMLAR = [], HAFTA = null, AKTIF_GUN = null, TARAMALAR = {};
+const LIG_AD = {};   // lig kodu → görünen ad (aramalı seçicilerin alt satırı)
+const LIG_SECICILER = ['#h-lig', '#g-lig', '#tablo-lig', '#bt-lig', '#snc-lig'];
+// Tek lig değil, turnuva kovası olan kodlar (bülten katmanları üretir)
+const TOPLU_LIG_AD = {'KUPA': 'Kupa maçları', 'DÜNYA': 'Diğer (dünya fikstürü)'};
 let GEMINI_VAR = false, GEMINI_BAGLAMLAR = {}, GEMINI_SAYAC = 0;
 async function baslat(){
   try{
@@ -1222,6 +1463,7 @@ async function baslat(){
     $('#surum-notu').textContent =
       `İddaa Analiz v${d.surum} · veri yüklemesi: ${d.veri_zamani} · fikstür ve arşiv otomatik tazelenir` +
       (GEMINI_VAR ? ' · Gemini bağlı' : '') + (d.dis_kapsam ? ' · geniş kapsam' : '');
+    d.ligler.forEach(l => { LIG_AD[l.kod] = l.ad; });
     d.ligler.forEach(l => {
       $('#g-lig').insertAdjacentHTML('beforeend', `<option value="${esc(l.kod)}">${esc(l.ad)}</option>`);
       $('#h-lig').insertAdjacentHTML('beforeend', `<option value="${esc(l.kod)}">${esc(l.ad)}</option>`);
@@ -1229,15 +1471,37 @@ async function baslat(){
       $('#bt-lig').insertAdjacentHTML('beforeend', `<option value="${esc(l.kod)}">${esc(l.ad)}</option>`);
       $('#snc-lig').insertAdjacentHTML('beforeend', `<option value="${esc(l.kod)}">${esc(l.ad)}</option>`);
     });
+    ligSecicileriKur();
     sonuclarYukle(true);
     haftaYukle(false);
     TAKIMLAR = await api('/api/takimlar');
-    const dl = $('#takim-listesi');
-    dl.innerHTML = TAKIMLAR.filter(t => t.aktif).map(t => `<option value="${esc(t.ad)}">`).join('') +
-                   TAKIMLAR.filter(t => !t.aktif).map(t => `<option value="${esc(t.ad)}">`).join('');
+    takimSecicileriKur();
   }catch(h){ bildir(h.message, true); }
 }
 baslat();
+
+/* ---- aramalı seçicilerin bağlanması ---- */
+function ligSecicileriKur(){
+  LIG_SECICILER.forEach(id => { const sel = $(id); aramaliSelect(sel); aramaliSelectTazele(sel); });
+}
+
+/* Takım seçeneği: adın altında ligi ve maç sayısı görünür; kadrodan düşmüş
+   (son bir yılda maçı olmayan) takımlar listenin sonuna iner. */
+function takimOgeleri(){
+  // Sıra: önce aktif kulüpler (maç sayısına göre), sonra milli takımlar,
+  // en sonda arşive düşmüş takımlar. Milli takımlar arşivde en çok maçı olan
+  // kayıtlar olduğu için sıralamada başa geçiyor, oysa bülten kulüp maçı.
+  const kat = t => (t.aktif ? 0 : 2) + (t.lig === 'INT' ? 1 : 0);
+  return TAKIMLAR.map(t => ({
+    deger: t.ad, ad: t.ad, ara: t.ara || [],
+    alt: [LIG_AD[t.lig] || t.lig, `${t.mac} maç`, t.aktif ? '' : 'arşiv'].filter(Boolean).join(' · '),
+    _s: kat(t) * 1e9 - t.mac,
+  })).sort((a, b) => a._s - b._s);
+}
+
+function takimSecicileriKur(){
+  ['#t-ev', '#t-dep', '#g-takim'].forEach(id => araSecKur($(id), takimOgeleri));
+}
 
 async function teshisAc(){
   $('#teshis-kaplama').classList.add('acik');
@@ -1291,13 +1555,16 @@ function ligSeciciyiTazele(){
   const adlar = new Map();
   HAFTA.gunler.forEach(g => g.maclar.forEach(m => {
     if(!m.lig || varolan.has(m.lig) || adlar.has(m.lig)) return;
-    // DÜNYA tek bir lig değil, "eşleştirilemeyen turnuvalar" kovası —
-    // altındaki ilk maçın lig adını etiket yapmak yanıltıcı olurdu.
-    adlar.set(m.lig, m.lig === 'DÜNYA' ? 'Diğer (dünya fikstürü)' : (m.lig_adi || m.lig));
+    // KUPA ve DÜNYA tek bir lig değil, kova: altındaki ilk maçın lig adını
+    // (ör. "England EFL Cup") etiket yapmak yanıltıcı olur, üstelik seçici
+    // aramasında "kupa" yazınca bulunmazlardı.
+    adlar.set(m.lig, TOPLU_LIG_AD[m.lig] || m.lig_adi || m.lig);
   }));
   [...adlar.entries()].sort((a,b) => a[1].localeCompare(b[1], 'tr')).forEach(([kod, ad]) => {
     sec.insertAdjacentHTML('beforeend', `<option value="${esc(kod)}">${esc(ad)}</option>`);
   });
+  aramaliSelect(sec);            // ilk bülten /api/durum'dan önce gelebilir
+  aramaliSelectTazele(sec);
 }
 
 async function haftaYukle(yenile, sessiz){
@@ -3083,7 +3350,8 @@ function kapsamCiz(d){
   const acikNot = k.acik_kapali
     ? 'IDDAA_ACIK_FIKSTUR=0 ile kapatılmış'
     : (acik.zaman
-        ? `${acik.gun || 0}/8 gün alındı · kaynakta ${acik.mac || 0} maç görüldü · anahtar gerekmez`
+        ? `${acik.gun || 0}/8 gün hazır (${acik.yeni || 0} yeni çekim) · kaynakta ${acik.mac || 0}
+           maç görüldü · anahtar gerekmez`.replace(/\s+/g,' ')
         : 'bülten kurulunca dolar — anahtar, kota ve vekil gerektirmez');
   kutu.innerHTML = surumSatiri + `
     ${satir(iks('dosya') + ' football-data.co.uk (oranlı)', k.csv, null, 'ana kaynak, anahtar gerekmez')}
@@ -3097,9 +3365,12 @@ function kapsamCiz(d){
       <span style="flex:1"><b>bunlardan ORANLI</b></span>
       <b class="${k.oranli > 0 ? 'ev-poz' : 'ev-neg'}">${k.oranli} maç</b>
       <span class="ipucu" style="flex-basis:100%">
-        Oran yalnız <b>fixtures.csv</b>'den gelir (ana ~22 lig, birkaç gün ileri).
-        API-Football ve football-data.org katmanları maçı <b>listeler ama fiyat getirmez</b> —
-        onların oranı maç başına ayrı istek gerektirir ve ücretsiz planda günde 100 istekle sınırlıdır.
+        Anahtarsız kaynaklar maçı <b>listeler ama fiyat getirmez</b>: oran yalnız
+        <b>fixtures.csv</b>'den gelir (ana ~22 lig, birkaç gün ileri).
+        ${k.oranli !== undefined && k.toplam - k.oranli > 20 && !d.oddsapi ? `<b class="ev-poz">
+          Kalan maçları da fiyatlandırmak ücretsiz:</b> odds-api.io anahtarı ekleyin
+          (günde 500 istek, karta gerek yok) — bülten oranları maç başına oradan çekilir.
+          API-Football ücretsiz planı da çalışır ama günde 100 istekle sınırlıdır.` : ''}
         ${k.fikstur_yok ? '<b class="ev-neg">' + iks('dikkat') + ' fixtures.csv indirilmemiş — oran kaynağı yok.</b>'
           : (k.fikstur_saat !== undefined
              ? `fixtures.csv: ${k.fikstur_kb} KB · ${k.fikstur_saat} saat önce indi`
@@ -3306,7 +3577,7 @@ function rollingCiz(){
         <input id="ra-t-${pl.id}" value="${gg}.${aa}.${bugun.getFullYear()}" style="width:96px" title="tarih">
         <input id="ra-e-${pl.id}" placeholder="ev sahibi" style="flex:1;min-width:110px">
         <input id="ra-d-${pl.id}" placeholder="deplasman" style="flex:1;min-width:110px">
-        <input id="ra-p-${pl.id}" list="roll-pazarlar" placeholder="pazar" style="width:100px">
+        <input id="ra-p-${pl.id}" placeholder="pazar" style="width:100px">
         <input id="ra-o-${pl.id}" type="number" step="0.01" min="1.01" value="${pl.hedef_oran}" style="width:76px" title="oran">
         <button class="mini-btn" title="Kombine kuruyorsan: her maçı TEK TEK bununla kupona at"
           onclick="rollingSepeteEkle(${pl.id})">➕ Kupona ekle</button>
@@ -3332,7 +3603,12 @@ function rollingCiz(){
         '<tr><td colspan="6" class="ipucu" style="text-align:center">henüz adım yok</td></tr>'}</tbody></table></div>
       ${ekleSatiri}
     </div>`;
-  }).join('') + `<datalist id="roll-pazarlar">${ROLL_PAZARLAR.map(x => `<option value="${x}">`).join('')}</datalist>`;
+  }).join('');
+  // Adım satırındaki takım/pazar alanları da aramalı olsun: rolling adımı
+  // eskiden tamamen elle yazılıyordu (ne datalist ne de arama vardı).
+  kutu.querySelectorAll('[id^="ra-e-"],[id^="ra-d-"]').forEach(el => araSecKur(el, takimOgeleri));
+  kutu.querySelectorAll('[id^="ra-p-"]').forEach(el =>
+    araSecKur(el, () => ROLL_PAZARLAR.map(x => ({deger:x, ad:x, alt:''}))));
 }
 
 function rollingSatirOku(id){
