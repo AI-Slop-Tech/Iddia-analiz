@@ -3243,7 +3243,9 @@ function rollingCiz(){
         </div>`;
       }).join('');
       const adimDurum = a.durum === 'bekliyor'
-        ? `<span class="ipucu">bekliyor</span>${son && bacaklar.every(b => b.durum === 'bekliyor')
+        ? `<span class="ipucu">bekliyor</span>${pl.durum === 'aktif'
+            ? ` <button class="mini-btn" title="Alt satırda yazılı maçı BU kupona bacak olarak ekler (kombine büyür)"
+                  onclick="rollingBacakEkle(${pl.id},${i})">➕ bacak</button>` : ''}${son && bacaklar.every(b => b.durum === 'bekliyor')
             ? ` <button class="mini-btn" title="adımı sil" onclick="rollingAdimSil(${pl.id},${i})">🗑</button>` : ''}`
         : `<span class="${a.durum === 'tuttu' ? 'ev-poz' : 'ev-neg'}" style="font-weight:800">
              ${a.durum === 'tuttu' ? '✅ tuttu' : '❌ yattı'}</span>`;
@@ -3286,7 +3288,7 @@ function rollingCiz(){
                               : 'Yazdığın maçı tek başına adım olarak kaydeder'}"
           onclick="rollingAdimKaydet(${pl.id})">📈 Adımı kaydet${sep.length
             ? ` (${sep.length} bacaklı kombine)` : ''}</button>
-        <span class="ipucu">tekli: maçı yaz → 📈 · kombine: her maçı ➕ ile kupona at → 📈</span>
+        <span class="ipucu">tekli: maçı yaz → 📈 · kombine: her maçı ➕ ile kupona at → 📈 · kayıtlı kupona: maçı yaz → adımdaki ➕ bacak</span>
       </div>` : '';
     return `<div class="kart" style="margin-top:10px">
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
@@ -3334,6 +3336,18 @@ function rollingSepeteEkle(id){
   rollingCiz();
 }
 function rollingSepetCikar(id, j){ rollingSepet(id).splice(j, 1); rollingCiz(); }
+async function rollingBacakEkle(id, adim){
+  // Kaydedilmiş BEKLEYEN adıma sonradan bacak ekleme: alt satırdaki maçı alır.
+  const s = rollingSatirOku(id);
+  if(!s){ bildir('Önce alt satıra eklenecek maçı yaz, sonra ➕ bacak.', true); return; }
+  if(!(s.oran > 1)){ bildir('Oran 1.01 veya üstü olmalı.', true); return; }
+  if(!rollingCokluMacUyari(s)) return;
+  try{
+    await api('/api/rolling-bacak', {id, adim, secim: s});
+    bildir(`🔗 ${s.ev}${s.dep ? ' – ' + s.dep : ''} ${adim + 1}. adıma bacak olarak eklendi — toplam oranı sistem çarptı.`);
+    rollingYukle();
+  }catch(h){ bildir(h.message, true); }
+}
 function rollingSepetBosalt(id){ ROLL_SEPET[id] = []; rollingCiz(); }
 async function rollingAdimKaydet(id){
   const bacaklar = rollingSepet(id).slice();
