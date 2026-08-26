@@ -1866,8 +1866,12 @@ def uygulama_olustur():
     @app.post("/api/rolling-adim-sil")
     def rolling_adim_sil():
         govde = request.get_json(silent=True) or {}
-        return jsonify({"tamam": rolling.adim_sil(int(govde.get("id", 0)),
-                                                  int(govde.get("indeks", -1)))})
+        try:
+            tamam = rolling.adim_sil(int(govde.get("id", 0)),
+                                     int(govde.get("indeks", -1)))
+        except (ValueError, TypeError) as hata:
+            return jsonify({"hata": str(hata)}), 400
+        return jsonify({"tamam": tamam})
 
     @app.post("/api/rolling-duzenle")
     def rolling_duzenle():
@@ -1886,7 +1890,31 @@ def uygulama_olustur():
         try:
             tamam = rolling.elle_isaretle(int(govde.get("id", 0)),
                                           int(govde.get("indeks", -1)),
-                                          str(govde.get("durum", "")))
+                                          str(govde.get("durum", "")),
+                                          int(govde.get("bacak", 0)))
+        except (ValueError, TypeError) as hata:
+            return jsonify({"hata": str(hata)}), 400
+        return jsonify({"tamam": tamam})
+
+    @app.post("/api/rolling-bacak")
+    def rolling_bacak():
+        """Bekleyen adıma bacak ekler — kombineyi tek tek yazma akışı."""
+        govde = request.get_json(silent=True) or {}
+        try:
+            plan = rolling.bacak_ekle(int(govde.get("id", 0)),
+                                      int(govde.get("adim", -1)),
+                                      govde.get("secim") or {})
+        except (ValueError, TypeError) as hata:
+            return jsonify({"hata": str(hata)}), 400
+        return jsonify({"tamam": True, "plan": rolling.hesapla(plan)})
+
+    @app.post("/api/rolling-bacak-sil")
+    def rolling_bacak_sil():
+        govde = request.get_json(silent=True) or {}
+        try:
+            tamam = rolling.bacak_sil(int(govde.get("id", 0)),
+                                      int(govde.get("adim", -1)),
+                                      int(govde.get("bacak", -1)))
         except (ValueError, TypeError) as hata:
             return jsonify({"hata": str(hata)}), 400
         return jsonify({"tamam": tamam})
