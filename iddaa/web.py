@@ -351,14 +351,17 @@ def uygulama_olustur():
 
         yollar = dict(veri.AG_YOLLARI)
         if yollar:
-            vekilli = [h for h, y in yollar.items() if y == "vekil"]
+            vekilli = sorted(h for h, y in yollar.items() if y == "vekil")
             duz = [h for h, y in yollar.items() if y == "duz"]
+            anahtarli = [h for h, y in yollar.items() if y == "anahtar"]
             ekle("Ağ yolu (doğrudan / vekil)", True,
-                 (f"vekilden geçen {len(vekilli)} adres: {', '.join(sorted(vekilli)[:4])}"
-                  if vekilli else "hepsi doğrudan erişilebiliyor")
-                 + f" · doğrudan: {len(duz)}"
-                 + (" · IDDAA_PROXY tanımlı değil" if not veri.proxy_ayari()
-                    else " · engellenen adres kendiliğinden vekile düşer"))
+                 ((f"vekilden geçen {len(vekilli)}: {', '.join(vekilli[:4])}"
+                   if vekilli else "engellenen adres yok, hepsi doğrudan")
+                  + f" · doğrudan: {len(duz)}"
+                  + (f" · anahtarlı servis (vekil KULLANILMAZ): {len(anahtarli)}"
+                     if anahtarli else "")
+                  + (" · IDDAA_PROXY tanımlı değil" if not veri.proxy_ayari()
+                     else " · engellenen adres kendiliğinden vekile düşer")))
 
         fd_var = bool(veri.gizli_anahtar("FOOTBALL_DATA_ORG_KEY", "football_data_org_key"))
         d = veri.DIS_SON_DURUM

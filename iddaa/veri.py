@@ -151,9 +151,30 @@ def json_yanit_mi(yanit) -> bool:
         return False
 
 
+def vekil_anahtarliya_acik() -> bool:
+    """Anahtarlı servisler de vekilden geçsin mi? VARSAYILAN HAYIR.
+
+    Gerekçe: bu servisler kötüye kullanımı ÇIKIŞ IP'siyle takip ediyor —
+    API-Football'un kendi uyarısı "limit aşılırsa engel yalnız anahtarı değil
+    çıkış IP'sini de hedefler" diyor. Dönen (rotating) bir vekilde her istek
+    başka IP'den çıkar; anahtarlı bir hesap için bu klasik kötüye kullanım
+    işaretidir ve anahtarı askıya aldırabilir. Üstelik bu servisler API ucu,
+    bahis/skor sitesi değil — Türkiye'den doğrudan erişilebiliyorlar.
+
+    Sunucunuz gerçekten bu adreslere de ulaşamıyorsa IDDAA_VEKIL_ANAHTARLI=1
+    ile açabilirsiniz; riski bilerek almış olursunuz.
+    """
+    return (os.environ.get("IDDAA_VEKIL_ANAHTARLI") or "").strip().lower() in (
+        "1", "on", "true", "evet", "acik", "açık", "yes"
+    )
+
+
 def istek(url: str, *, oturum: requests.Session | None = None, yontem: str = "get",
-          dogrula=None, zaman_asimi: int = ZAMAN_ASIMI, **kw):
+          dogrula=None, zaman_asimi: int = ZAMAN_ASIMI, anahtarli: bool = False, **kw):
     """Tek dış istek — doğrudan/vekil seçimini kendisi yapar.
+
+    anahtarli=True: API anahtarıyla kimliklenen servis. Vekil KULLANILMAZ
+    (bkz. vekil_anahtarliya_acik) — anahtar dönen IP yüzünden yanmasın.
 
     Vekil, oturum yerine İSTEK düzeyinde verilir: requests, ortamdaki
     HTTP_PROXY/HTTPS_PROXY değerlerini oturum ayarının ÜSTÜNE yazıyor
@@ -162,10 +183,12 @@ def istek(url: str, *, oturum: requests.Session | None = None, yontem: str = "ge
     """
     o = oturum or _oturum()
     vekil = proxy_ayari()
+    if anahtarli and not vekil_anahtarliya_acik():
+        vekil = {}
     dogrula = dogrula or _yanit_gecerli
     cagir = getattr(o, yontem)
     if not vekil:
-        AG_YOLLARI[_host(url)] = "duz"
+        AG_YOLLARI[_host(url)] = "anahtar" if anahtarli else "duz"
         return cagir(url, timeout=zaman_asimi, **kw)
 
     host = _host(url)
@@ -1216,7 +1239,7 @@ def dis_fikstur(gun_sayisi: int = 8, yenile: bool = False) -> pd.DataFrame | Non
         son = (simdi_tr() + pd.Timedelta(days=gun_sayisi)).date()
         try:
             yanit = istek(
-                DIS_KAPSAM_URL, zaman_asimi=30, dogrula=json_yanit_mi,
+                DIS_KAPSAM_URL, zaman_asimi=30, dogrula=json_yanit_mi, anahtarli=True,
                 params={"dateFrom": str(bas), "dateTo": str(son)},
                 headers={"X-Auth-Token": anahtar},
             )
@@ -1339,7 +1362,7 @@ def _oddsapi_getir(yol: str, parametreler: dict):
     parametreler = dict(parametreler, apiKey=_oddsapi_anahtar())
     # tarama bütçesini tek istek yemesin diye kısa zaman aşımı
     yanit = istek(ODDSAPI_TABAN + yol, params=parametreler,
-                  zaman_asimi=12, dogrula=json_yanit_mi)
+                  zaman_asimi=12, dogrula=json_yanit_mi, anahtarli=True)
     yanit.raise_for_status()
     govde = yanit.json()
     if isinstance(govde, dict) and govde.get("error"):
@@ -1754,7 +1777,7 @@ def iy_hasadi() -> dict:
                 yanit = istek(
                     "https://api.football-data.org/v4/competitions/BSA/matches",
                     params={"season": yil}, headers={"X-Auth-Token": anahtar_fd},
-                    dogrula=json_yanit_mi,
+                    dogrula=json_yanit_mi, anahtarli=True,
                 )
                 if yanit.status_code != 200:
                     break  # ücretsiz pakette daha eski sezon yoksa sessizce dur
@@ -1828,7 +1851,7 @@ def kupa_hasadi() -> dict:
                 yanit = istek(
                     f"https://api.football-data.org/v4/competitions/{fd_kod}/matches",
                     params={"season": yil}, headers={"X-Auth-Token": anahtar},
-                    dogrula=json_yanit_mi,
+                    dogrula=json_yanit_mi, anahtarli=True,
                 )
                 if yanit.status_code in (403, 404):
                     continue  # ücretsiz katman sınırı ya da sezon henüz açılmadı
@@ -2074,7 +2097,7 @@ def _af_getir(yol: str, parametreler: dict, oncelikli: bool = False):
 
     yanit = istek(APIFOOTBALL_TABAN + yol, params=parametreler,
                   headers={"x-apisports-key": _af_anahtar()},
-                  zaman_asimi=12, dogrula=json_yanit_mi)
+                  zaman_asimi=12, dogrula=json_yanit_mi, anahtarli=True)
     if yanit.status_code == 429:
         # Sınır yine de yendi: bir sonraki isteği tam bir dakika geri it.
         with _AF_KILIT:
@@ -2109,7 +2132,7 @@ def af_tanilama() -> dict:
     try:
         yanit = istek(APIFOOTBALL_TABAN + "/status",
                       headers={"x-apisports-key": _af_anahtar()},
-                      zaman_asimi=15, dogrula=json_yanit_mi)
+                      zaman_asimi=15, dogrula=json_yanit_mi, anahtarli=True)
         rapor["http"] = yanit.status_code
         govde = yanit.json()
         if govde.get("errors"):

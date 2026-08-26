@@ -76,10 +76,11 @@ def yorum_al(rapor_metni: str, zaman_asimi: int = 90) -> str:
         "contents": [{"parts": [{"text": PROMPT.format(rapor=rapor_metni)}]}],
         "generationConfig": {"temperature": 0.55, "maxOutputTokens": 4096},
     }
-    # Vekil katmanından geçer: Gemini Türkiye'den erişilebilir, o yüzden
-    # doğrudan yol kazanır — ama engellenirse IDDAA_PROXY devreye girer.
+    # anahtarli=True: vekilden GEÇMEZ. Gemini Türkiye'den doğrudan erişilebilir
+    # ve dönen vekil IP'si anahtarı kötüye kullanım şüphesine düşürür.
     yanit = veri.istek(URL.format(model=model), yontem="post", params={"key": anahtar},
-                       json=govde, zaman_asimi=zaman_asimi, dogrula=veri.json_yanit_mi)
+                       json=govde, zaman_asimi=zaman_asimi, dogrula=veri.json_yanit_mi,
+                       anahtarli=True)
 
     if yanit.status_code in (400, 403):
         raise RuntimeError("Gemini API anahtarı geçersiz görünüyor (HTTP %d)." % yanit.status_code)

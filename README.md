@@ -474,11 +474,26 @@ Böylece aynı kurulum hem yurt dışı sunucuda (vekil hiç kullanılmaz, bant
 genişliği harcanmaz) hem Türkiye'de (engelli adresler kendiliğinden vekile
 düşer) çalışır.
 
-> Önceden bazı çağrılar vekili **hiç** kullanmıyordu (odds-api.io,
-> API-Football, football-data.org hasadı, Gemini): Türkiye'deki bir sunucuda
-> bu kaynaklar sessizce çalışmıyordu. Artık uygulamanın yaptığı **her** dış
-> istek bu katmandan geçiyor. **Ayarlar → Teşhis** ekranındaki *"Ağ yolu"*
-> satırı hangi adresin doğrudan, hangisinin vekilden geçtiğini gösterir.
+**API anahtarıyla çalışan servisler vekilden GEÇMEZ.** odds-api.io,
+API-Football, football-data.org ve Gemini her zaman doğrudan gider. Gerekçe:
+bu servisler kötüye kullanımı **çıkış IP'siyle** takip ediyor — API-Football'un
+kendi uyarısı *"limit aşılırsa engel yalnız anahtarı değil çıkış IP'sini de
+hedefler"* diyor. Dönen (rotating) bir vekilde her istek başka IP'den çıkar;
+anahtarlı bir hesap için bu klasik kötüye kullanım işaretidir ve anahtarı
+askıya aldırabilir. Üstelik bunlar API ucu, bahis/skor sitesi değil — Türkiye'den
+doğrudan erişilebiliyorlar.
+
+Sunucunuz gerçekten bu adreslere de ulaşamıyorsa:
+
+```bash
+export IDDAA_VEKIL_ANAHTARLI=1   # anahtarlı servisler de vekilden geçsin (riski var)
+```
+
+Vekil–geri düşme yalnız **anahtarsız** kaynaklarda çalışır: football-data.co.uk,
+açık dünya fikstürü/arşivi ve Pinnacle. Türkiye'den engelli olanlar bunlar zaten.
+
+**Ayarlar → Teşhis** ekranındaki *"Ağ yolu"* satırı hangi adresin doğrudan,
+hangisinin vekilden, hangisinin anahtarlı olduğu için vekilsiz gittiğini gösterir.
 
 ### 3. `IDDAA_KAYNAK_TABAN` — kendi ters vekiliniz (ücretsiz)
 
