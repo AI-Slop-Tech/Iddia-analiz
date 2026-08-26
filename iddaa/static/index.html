@@ -1231,7 +1231,7 @@ function araCiz(){
   };
   ARA.ogeler = (q ? hepsi.map(o => [puan(o), o]).filter(x => x[0] !== null)
                         .sort((x, y) => x[0] - y[0]).map(x => x[1])
-                  : hepsi).slice(0, 300);
+                  : hepsi).slice(0, 500);   // arşiv 374 lig + binlerce takım
   ARA.imlec = ARA.ogeler.length ? 0 : -1;
   ARA.liste.innerHTML = ARA.ogeler.length
     ? ARA.ogeler.map((o, i) => `<div class="ara-oge${i === ARA.imlec ? ' imlec' : ''}"
@@ -1330,8 +1330,10 @@ function aramaliSelect(sel){
   };
   const a = {
     tur:'select', tetik:btn,
-    ogeFn: () => [...sel.options].map(o => ({deger:o.value, ad:o.textContent,
-                                             alt:'', ara:[o.value]})),
+    ogeFn: () => [...sel.options].map(o => ({
+      deger:o.value, ad:o.textContent, alt:'',
+      ara:[o.value, ...(typeof ligAramaEkleri === 'function' ? ligAramaEkleri(o.textContent) : [])],
+    })),
     mevcut: () => sel.value,
     sec: o => { sel.value = o.deger; etiket(); sel.dispatchEvent(new Event('change', {bubbles:true})); },
   };
@@ -1442,6 +1444,44 @@ const LIG_AD = {};   // lig kodu → görünen ad (aramalı seçicilerin alt sat
 const LIG_SECICILER = ['#h-lig', '#g-lig', '#tablo-lig', '#bt-lig', '#snc-lig'];
 // Tek lig değil, turnuva kovası olan kodlar (bülten katmanları üretir)
 const TOPLU_LIG_AD = {'KUPA': 'Kupa maçları', 'DÜNYA': 'Diğer (dünya fikstürü)'};
+// Açık arşivin lig adları kaynaktan İngilizce geliyor ("Ecuador Serie A").
+// Türk kullanıcı "ekvador" yazınca bulunsun diye arama takma adları.
+// Ad DEĞİŞMEZ, yalnız arama bunları da tarar.
+const ULKE_TR = {
+  'Albania':'Arnavutluk','Algeria':'Cezayir','Andorra':'Andorra','Argentina':'Arjantin',
+  'Armenia':'Ermenistan','Australia':'Avustralya','Austria':'Avusturya','Azerbaijan':'Azerbaycan',
+  'Bahrain':'Bahreyn','Bangladesh':'Bangladeş','Belarus':'Belarus','Belgium':'Belçika',
+  'Bolivia':'Bolivya','Bosnia and Herzegovina':'Bosna Hersek','Brazil':'Brezilya',
+  'Bulgaria':'Bulgaristan','Cameroon':'Kamerun','Canada':'Kanada','Chile':'Şili','China':'Çin',
+  'Colombia':'Kolombiya','Costa Rica':'Kosta Rika','Croatia':'Hırvatistan','Cyprus':'Kıbrıs',
+  'Czech Republic':'Çekya Çek Cumhuriyeti','Denmark':'Danimarka','Ecuador':'Ekvador','Egypt':'Mısır',
+  'El Salvador':'El Salvador','England':'İngiltere','Estonia':'Estonya','Faroe Islands':'Faroe Adaları',
+  'Finland':'Finlandiya','France':'Fransa','Georgia':'Gürcistan','Germany':'Almanya',
+  'Gibraltar':'Cebelitarık','Greece':'Yunanistan','Guatemala':'Guatemala','Honduras':'Honduras',
+  'Hong Kong':'Hong Kong','Hungary':'Macaristan','Iceland':'İzlanda','India':'Hindistan',
+  'Iran':'İran','Iraq':'Irak','Ireland':'İrlanda','Israel':'İsrail','Italy':'İtalya',
+  'Jamaica':'Jamaika','Japan':'Japonya','Jordan':'Ürdün','Kazakhstan':'Kazakistan',
+  'Kosovo':'Kosova','Kuwait':'Kuveyt','Latvia':'Letonya','Lebanon':'Lübnan','Libya':'Libya',
+  'Lithuania':'Litvanya','Luxembourg':'Lüksemburg','Malaysia':'Malezya','Malta':'Malta',
+  'Mexico':'Meksika','Moldova':'Moldova','Montenegro':'Karadağ','Morocco':'Fas',
+  'Netherlands':'Hollanda','New Zealand':'Yeni Zelanda','Nicaragua':'Nikaragua',
+  'North Macedonia':'Kuzey Makedonya','Northern Ireland':'Kuzey İrlanda','Norway':'Norveç',
+  'Panama':'Panama','Paraguay':'Paraguay','Peru':'Peru','Philippines':'Filipinler',
+  'Poland':'Polonya','Portugal':'Portekiz','Qatar':'Katar','Republic of Korea':'Güney Kore',
+  'Romania':'Romanya','San Marino':'San Marino','Saudi Arabia':'Suudi Arabistan','Serbia':'Sırbistan',
+  'Singapore':'Singapur','Slovakia':'Slovakya','Slovenia':'Slovenya','South Africa':'Güney Afrika',
+  'Sweden':'İsveç','Switzerland':'İsviçre','Taiwan':'Tayvan','Tanzania':'Tanzanya',
+  'Tunisia':'Tunus','Turkiye':'Türkiye','USA':'ABD Amerika','Ukraine':'Ukrayna',
+  'United Arab Emirates':'Birleşik Arap Emirlikleri','Uruguay':'Uruguay','Uzbekistan':'Özbekistan',
+  'Venezuela':'Venezuela','Vietnam':'Vietnam','Wales':'Galler','Zambia':'Zambiya',
+  'Zimbabwe':'Zimbabve','Scotland':'İskoçya','Spain':'İspanya',
+};
+// arama için: "Ecuador Serie A" -> ["Ekvador"] gibi ek anahtarlar
+function ligAramaEkleri(ad){
+  const ek = [];
+  for(const [en, tr] of Object.entries(ULKE_TR)) if(ad.startsWith(en)) ek.push(tr);
+  return ek;
+}
 let GEMINI_VAR = false, GEMINI_BAGLAMLAR = {}, GEMINI_SAYAC = 0;
 async function baslat(){
   try{
@@ -3359,6 +3399,15 @@ function kapsamCiz(d){
     ${satir(iks('gecmis') + ' dünkü arşiv', k.dun, k.dun_hata, 'sonuç denetimi için')}
     ${satir(iks('futbol') + ' API-Football (dünya)', k.af, k.af_hata || af.hata, afNot)}
     ${satir(iks('dunya') + ' açık dünya fikstürü (kupa/eleme)', k.acik, k.acik_hata || acik.hata, acikNot)}
+    ${k.acik_arsiv ? `<div class="capraz-satir">
+      <span style="flex:1;min-width:140px">${iks('gecmis')} açık dünya arşivi</span>
+      <b class="${k.acik_arsiv.mac > 0 ? 'ev-poz' : 'ev-neg'}">${(k.acik_arsiv.mac||0).toLocaleString('tr-TR')} maç</b>
+      <span class="ipucu" style="flex-basis:100%">${k.acik_arsiv.mac
+        ? `${k.acik_arsiv.lig} turnuva · ${k.acik_arsiv.gun}/${k.acik_arsiv.hedef_gun} gün ·
+           <b>${k.acik_arsiv.analiz_lig} lig analiz verecek derinlikte</b> — bu ligler
+           football-data'nın kapsamadığı yerler (Ekvador, Peru, Sırbistan, Mısır, Kore…)`
+        : 'henüz toplanmadı — <b>🔄 Veriyi Güncelle</b> bir yıllık dünya sonuçlarını indirir (anahtar gerekmez)'}</span>
+    </div>` : ''}
     <div class="capraz-satir" style="border-top:2px solid var(--cizgi)">
       <span style="flex:1"><b>TOPLAM BÜLTEN</b></span><b>${k.toplam} maç</b></div>
     ${k.oranli !== undefined ? `<div class="capraz-satir">

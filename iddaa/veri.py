@@ -361,6 +361,11 @@ def takma_ad_haritasi() -> dict[str, list[str]]:
     return _TAKMA_TERS
 
 
+def lig_adi(kod: str) -> str:
+    """Lig kodunun görünen adı — football-data ligleri + açık arşiv ligleri."""
+    return LIGLER.get(kod) or ACIK_LIG_ADLARI.get(kod) or kod
+
+
 def guncel_sezon_baslangic_yili() -> int:
     """İçinde bulunulan Avrupa sezonunun başlangıç yılı (Temmuz'da yeni sezon)."""
     bugun = pd.Timestamp.today()
@@ -433,6 +438,17 @@ def indir(ligler: list[str] | None = None, sezon_sayisi: int = 33, yenile: bool 
                         open(hedef + ".yok", "w").close()
                     except OSError:
                         pass
+
+    # açık dünya arşivi: football-data'nın kapsamadığı ~300 turnuvanın son bir
+    # yılı. Artımlıdır — ilk çağrı ~1-2 dk, sonrakiler birkaç saniye.
+    try:
+        a = acik_arsiv_topla()
+        if a["gun"]:
+            ozet["indirilen"] += 1
+            print(f"  ✓ Açık dünya arşivi: {a['gun']} yeni gün · {a['mac']} maç"
+                  + ("  (bütçe doldu, kalanı sonraki güncellemede)" if a["butce_doldu"] else ""))
+    except Exception as h:  # noqa: BLE001 — ana akışı asla düşürmesin
+        print(f"  ✗ Açık dünya arşivi alınamadı ({h})")
 
     # milli maç arşivi (GitHub, ayrı kaynak — football-data engeli kapsamaz)
     if milli_indir(yenile=yenile):
@@ -631,6 +647,20 @@ def veriyi_yukle(ligler: list[str] | None = None) -> pd.DataFrame:
         ek = _ek_arsiv_oku(yol, kod)
         if ek is not None and not ek.empty:
             parcalar.append(ek[kolonlar])
+
+    # açık dünya arşivi (anahtarsız): football-data'nın kapsamadığı ligler
+    try:
+        ana_takimlar = {_normalize(a) for a in
+                        pd.unique(pd.concat([df["HomeTeam"], df["AwayTeam"]]))}
+        acik = _acik_arsiv_oku(ana_takimlar)
+        if acik is not None and not acik.empty:
+            if not ligler or set(acik["Div"]) & set(ligler):
+                if ligler:
+                    acik = acik[acik["Div"].isin(ligler)]
+                if not acik.empty:
+                    parcalar.append(acik[kolonlar])
+    except Exception:  # noqa: BLE001 — açık arşiv bozuksa ana arşiv çalışsın
+        pass
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", pd.errors.PerformanceWarning)
@@ -2252,7 +2282,7 @@ _ACIK_ONCELIKLI = {
 _ACIK_TAKIM_DISLA = re.compile(
     r"(\bu ?1[4-9]\b|\bu ?2[0-3]\b|\bsub ?2[0-3]\b"
     r"|\b(?:reserves?|academy|akademi|youth)\b"
-    r"|\s(?:ii|iii|b|c|w)$)",
+    r"|\s(?:ii|iii|ll|lll|b|c|w)$)",
     re.IGNORECASE,
 )
 
@@ -2285,6 +2315,19 @@ def _acik_duz(metin: str) -> str:
     return re.sub(r"\s+", " ", duz).strip()
 
 
+def _acik_ulke_alani(asama: dict) -> str:
+    """Turnuvanın ülke/konfederasyon etiketi.
+
+    Kaynak CompD alanına bazen sezon yılı ("2025") koyuyor; öyle olduğunda
+    Cnm'ye düşülür, yoksa "2025 Leagues Cup" gibi ülkesi sayı olan kayıtlar
+    çıkıyor ve arşiv kodu "XXX1" oluyordu.
+    """
+    d = _acik_ad(asama.get("CompD"))
+    if d and not re.fullmatch(r"[\d\s/–-]+", d):
+        return d
+    return _acik_ad(asama.get("Cnm") or asama.get("CompST"))
+
+
 def _acik_govdeyi_coz(govde: dict) -> list:
     """Beslemenin gün gövdesini bültenin anlayacağı ince kayıtlara çevirir.
 
@@ -2294,7 +2337,7 @@ def _acik_govdeyi_coz(govde: dict) -> list:
     """
     kayitlar = []
     for sira, asama in enumerate(govde.get("Stages") or []):
-        ulke = _acik_ad(asama.get("CompD") or asama.get("Cnm"))
+        ulke = _acik_ulke_alani(asama)
         lig = _acik_ad(asama.get("CompN") or asama.get("Snm") or asama.get("Cnm"))
         asama_ad = _acik_ad(asama.get("Snm"))
         if _ACIK_DISLA.search(f"{ulke} {lig} {asama_ad} {asama.get('Cnm') or ''}"):
@@ -2338,6 +2381,10 @@ def _acik_lig_adi(ulke: str, lig: str, asama: str) -> str:
     ayıklanır, yoksa bültende "England EFL Cup EFL Cup: Round 2" yazıyor.
     """
     u, l, a = str(ulke or "").strip(), str(lig or "").strip(), str(asama or "").strip()
+    # Kaynak lig adının başına ülkeyi de koyabiliyor ("Malta" / "Malta Premier")
+    for ad in (u,):
+        if ad and l.lower().startswith(ad.lower() + " "):
+            l = l[len(ad):].strip()
     du, dl, da = _acik_duz(u), _acik_duz(l), _acik_duz(a)
     parcalar = [u] if u else []
     if l and dl != du:
@@ -2423,6 +2470,23 @@ def acik_fiksturu_getir(gunler: list[str], zaman_butcesi: float = 25.0) -> tuple
     return kayitlar, durum
 
 
+# Kaynak GEÇMİŞ sezonların turnuva adına sezon eki koyuyor: bugünün maçı
+# "England / Premier League", mayıstaki maçı "England / Premier League 25/26".
+# Ek atılmazsa football-data'nın kendi ligleri "tanımadığımız turnuva" sanılıp
+# açık arşive İKİNCİ KEZ giriyor; aynı maç iki farklı isimlendirmeyle arşive
+# düşüyor, takım geçmişi ve lig ortalamaları bozuluyor. (Ölçüldü: 365 günlük
+# ilk hasatta Serie A, LaLiga, Premier League, Bundesliga ve Ligue 1 böyle
+# sızmıştı — 1.660 çift kayıt.)
+_ACIK_SEZON_EKI = re.compile(
+    r"\s*(\d{4}\s*[/-]\s*\d{4}|\d{2}\s*[/-]\s*\d{2}|\d{4})\s*$"
+)
+
+
+def acik_sezonsuz(lig: str) -> str:
+    """Turnuva adından sezon ekini atar ('Serie A 25/26' -> 'Serie A')."""
+    return _ACIK_SEZON_EKI.sub("", str(lig or "")).strip() or str(lig or "").strip()
+
+
 def acik_oncelikli(ulke: str) -> bool:
     """Tavan dolduğunda bile bültene girmesi gereken ülke/konfederasyon mu?"""
     return _acik_duz(ulke) in _ACIK_ONCELIKLI
@@ -2445,6 +2509,9 @@ _ACIK_AD_KOD.update({
         "Japan J1 League": "JPN",
         "Belgium Belgian Pro League": "B1",
         "Argentina Liga Profesional": "ARG",
+        "Argentina Primera Division": "ARG",
+        "Denmark 3F Superliga": "DNK",
+        "Romania SuperLiga": "ROU",
         "Brazil Serie A": "BRA",
         "China Super League": "CHN",
         "Portugal Primeira Liga": "P1",
@@ -2493,10 +2560,20 @@ _ACIK_KUPA = re.compile(
 )
 
 
+# Ülke alanına bazen turnuvanın kendi adı düşüyor ("Copa Sudamericana",
+# "Champions League"): ülke sanılırsa takımlara o ad etiket olarak yapışıyor
+# ve kulüp kendi liginden kopuyordu.
+_ACIK_TURNUVA_SOZU = re.compile(
+    r"\b(league|liga|ligue|cup|copa|coppa|coupe|kupa|pokal|trophy|championship"
+    r"|friendl\w*|qualifi\w*)\b", re.IGNORECASE)
+
+
 def acik_ulke_mu(ulke: str) -> bool:
-    """Turnuvanın etiketi gerçek bir ÜLKE mi (konfederasyon/uluslararası değil)?"""
+    """Turnuvanın etiketi gerçek bir ÜLKE mi (konfederasyon/turnuva adı değil)?"""
     duz = _acik_duz(ulke)
-    return bool(duz) and duz not in _ACIK_ULKE_DISI and not duz.isdigit()
+    if not duz or duz in _ACIK_ULKE_DISI or duz.isdigit():
+        return False
+    return not _ACIK_TURNUVA_SOZU.search(ulke)
 
 
 def acik_kupa_mi(*adlar) -> bool:
@@ -2526,8 +2603,347 @@ def acik_lig_kodu(ulke: str, lig: str) -> str | None:
                 return kod
     # Aşama eki olan adlar da denenir: kaynak ligi "Liga Profesional: Clausura"
     # diye veriyor, bizim tablomuzda "Liga Profesional" yazıyor.
-    for ad in (lig, str(lig or "").split(":")[0]):
+    sade = acik_sezonsuz(lig)
+    for ad in (lig, sade, sade.split(":")[0]):
         kod = _ACIK_AD_KOD.get(_normalize(f"{ulke} {ad}"))
         if kod:
             return kod
     return None
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Açık dünya ARŞİVİ — anahtarsız sonuç geçmişi
+# ══════════════════════════════════════════════════════════════════════════
+#
+# NEDEN: Bültene dünyanın her maçını koyduk ama ANALİZ hâlâ football-data'nın
+# 38 ligiyle sınırlıydı. Ekvador Serie A, Peru Liga 1, Özbekistan Süper Ligi,
+# Mısır, Suudi, Kore, Sırbistan... hepsi "yalnız listeleme" olarak kalıyordu:
+# maçı görüyorduk ama hakkında tek kelime edemiyorduk. Sınır kaynakta değil,
+# bizde: aynı besleme GEÇMİŞ sonuçları da veriyor.
+#
+# ÖLÇÜM (26.08.2026): 40 günlük geçmiş 9 saniyede indi, 9.147 skorlu maç
+# çıktı; bunların 7.735'i football-data'nın hiç kapsamadığı 310 turnuvadan.
+# Yıllık karşılığı ~70 bin maç. Üstelik İLK YARI skorları da var — ek lig
+# dosyalarında (BRA/CHN/USA/İskandinav) olmayan alan.
+#
+# TASARIM:
+#  • football-data'nın zaten kapsadığı ligler ATLANIR: aynı maç iki kez
+#    girmesin, iki farklı isimlendirmeyle takım geçmişi ikiye bölünmesin.
+#  • Amatör/bölgesel seviyeler atlanır (Oberliga, Isthmian, 3. Divisjon...):
+#    oralarda üst lig kulüpleriyle aynı adı taşıyan kulüpler var ("Hamburg",
+#    "Hearts") ve isim üzerinden birleşince geçmişler karışıyor.
+#  • Hazırlık maçları atlanır: form ve Elo'yu bozar, bahis değeri düşüktür.
+#  • Takım adı çakışması ülke etiketiyle çözülür ("Rangers (HKG)") — hangi
+#    adların çakıştığı yükleme anında hesaplanır, sabit liste yoktur.
+
+ACIK_ARSIV_CSV = os.path.join(VERI_KLASORU, "acik_arsiv.csv")
+ACIK_ARSIV_GUNLER = os.path.join(VERI_KLASORU, "acik_arsiv_gunler.json")
+ACIK_LIG_KAYIT = os.path.join(VERI_KLASORU, "acik_ligler.json")
+ACIK_ARSIV_GUN = 365          # kaynağın arşivi ~1 yıl geriye gidiyor
+# Bir ligin ANALİZ verebilmesi için asgari maç sayısı. Kaynağın arşivinde 560
+# turnuva var ama çoğu birkaç kupa turundan ibaret; 20 maçlık bir havuzdan
+# form/Poisson çıkarmak sayı üretmek olur, bilgi değil. Eşiğin altındaki
+# turnuvalar bültende yine listelenir, yalnız analiz almaz.
+ACIK_ANALIZ_ESIK = 40
+_ACIK_ARSIV_TAZE_GUN = 3      # son günler sonuç düzeltmesi alabilir: hep yenilenir
+
+# Amatör/bölgesel seviyeler + hazırlık maçları: arşive girmez (bülteni yine
+# doldururlar, yalnız analiz almazlar).
+_ACIK_ARSIV_DISLA = re.compile(
+    r"\b(friendl\w*|hazirlik|amateur|amator|regionalliga|oberliga|landesliga"
+    r"|verbandsliga|bezirksliga|kreisliga|isthmian|northern premier"
+    r"|southern league|combined counties|county league|non.?league"
+    r"|national league north|national league south|premier division: "
+    r"|danmarksserien|divisjon|next pro|primera c|primera d"
+    r"|primera b metropolitana|federal a|serie d|promotion league"
+    r"|division [2-9]|[2-9]\.\s*division|division nord|division sud)\b",
+    re.IGNORECASE,
+)
+
+# yükleme anında doldurulur (web katmanı bültende aynı adları kullansın diye)
+ACIK_LIG_ADLARI: dict[str, str] = {}      # Div kodu -> "Ecuador Serie A"
+ACIK_TAKIM_ADI: dict[tuple, str] = {}     # (ülke_norm, isim_norm) -> arşivdeki ad
+ACIK_LIG_TAKIMLARI: dict[str, set] = {}   # Div kodu -> o ligdeki takım adları
+
+
+def _json_oku(yol: str) -> dict:
+    try:
+        with open(yol, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _json_yaz(yol: str, veri_sozlugu: dict) -> None:
+    os.makedirs(VERI_KLASORU, exist_ok=True)
+    with open(yol + ".tmp", "w", encoding="utf-8") as f:
+        json.dump(veri_sozlugu, f, ensure_ascii=False)
+    os.replace(yol + ".tmp", yol)
+
+
+def _acik_ulke_etiketi(ulke: str) -> str:
+    """Ülke adından 3 harflik etiket ('Ecuador' -> 'ECU')."""
+    duz = re.sub(r"[^A-Za-z]", "", _normalize(ulke).upper())
+    return (duz[:3] or "XXX").ljust(3, "X")
+
+
+def acik_arsiv_kodu(ulke: str, lig: str, kayit: dict | None = None,
+                    olustur: bool = False) -> str | None:
+    """Turnuva için kalıcı Div kodu ('ECU1'). olustur=False ise yalnız bakar.
+
+    Kod bir kez atanır ve data/acik_ligler.json'da saklanır: kullanıcının
+    kaydettiği kuponlar/rolling adımları lig koduna bakıyor, kod kaymamalı.
+    """
+    # Sezon eki VE aşama/grup eki atılır: kaynak aynı ligi "Liga II",
+    # "Liga II: Promotion Group", "Liga II: Relegation: Group A" diye üç ayrı
+    # turnuva gibi veriyor; ayrı kod verilirse bir ligin geçmişi üçe bölünüp
+    # her parça analiz için fazla sığ kalıyor.
+    lig = acik_sezonsuz(lig).split(":")[0].strip() or acik_sezonsuz(lig)
+    anahtar = f"{_acik_duz(ulke)}|{_acik_duz(lig)}"
+    kayit = _json_oku(ACIK_LIG_KAYIT) if kayit is None else kayit
+    mevcut = kayit.get(anahtar)
+    if mevcut:
+        return mevcut["kod"]
+    if not olustur:
+        return None
+    taban = _acik_ulke_etiketi(ulke)
+    kullanilan = {v["kod"] for v in kayit.values()} | set(LIGLER)
+    n = 1
+    while f"{taban}{n}" in kullanilan:
+        n += 1
+    kod = f"{taban}{n}"
+    kayit[anahtar] = {"kod": kod, "ulke": ulke, "lig": lig,
+                      "ad": _acik_ad(ulke, lig) if _acik_duz(ulke) != _acik_duz(lig) else lig}
+    return kod
+
+
+def acik_arsive_girer_mi(ulke: str, lig: str) -> bool:
+    """Bu turnuvanın sonuçları kendi arşivimize alınmalı mı?
+
+    Hayır dediğimiz üç durum:
+      1) football-data zaten kapsıyor — aynı maç iki kez girmesin,
+      2) football-data'nın kapsadığı bir ülkenin KUPASI — kupada aynı kulüpler
+         oynar; iki farklı isimlendirmeyle ("Cardiff" / "Cardiff City")
+         arşive girerse takımın geçmişi ikiye bölünür. O maçlar zaten mevcut
+         kupa kapısından football-data adlarıyla analiz alıyor,
+      3) amatör/bölgesel seviye ya da hazırlık maçı.
+    """
+    if acik_lig_kodu(ulke, lig):
+        return False
+    if acik_kupa_mi(lig) and acik_ulke_kodlari(ulke):
+        return False
+    metin = f"{ulke} {lig}"
+    return not (_ACIK_DISLA.search(metin) or _ACIK_ARSIV_DISLA.search(metin))
+
+
+def acik_arsiv_topla(gun_sayisi: int = ACIK_ARSIV_GUN, yenile: bool = False,
+                     zaman_butcesi: float = 240.0) -> dict:
+    """Geçmiş günlerin sonuçlarını toplayıp data/acik_arsiv.csv'ye yazar.
+
+    Artımlıdır: daha önce alınmış günler atlanır, yalnız son birkaç gün
+    (sonuç düzeltmeleri için) yeniden çekilir. Bütçe dolarsa kalan günler
+    bir sonraki çağrıda tamamlanır — çağıran akış asla kilitlenmez.
+    """
+    ozet = {"gun": 0, "mac": 0, "atlanan": 0, "hata": None, "butce_doldu": False}
+    if acik_fikstur_kapali():
+        return ozet
+    os.makedirs(VERI_KLASORU, exist_ok=True)
+    alinan = _json_oku(ACIK_ARSIV_GUNLER)
+    lig_kayit = _json_oku(ACIK_LIG_KAYIT)
+    bugun = simdi_tr().normalize()
+    bitis = time.monotonic() + max(zaman_butcesi, 10.0)
+
+    satirlar, yeni_gunler = [], {}
+    oturum = _oturum()
+    for i in range(1, gun_sayisi + 1):
+        gun = (bugun - pd.Timedelta(days=i)).strftime("%Y-%m-%d")
+        if gun in alinan and not yenile and i > _ACIK_ARSIV_TAZE_GUN:
+            ozet["atlanan"] += 1
+            continue
+        if time.monotonic() >= bitis:
+            ozet["butce_doldu"] = True
+            break
+        try:
+            yanit = oturum.get(_acik_gun_url(gun), timeout=_ACIK_ZAMAN_ASIMI,
+                               proxies=proxy_ayari() or None)
+            yanit.raise_for_status()
+            govde = yanit.json()
+        except Exception as hata:  # noqa: BLE001 — bir gün düşse kalanı gelsin
+            ozet["hata"] = f"{gun}: {str(hata)[:120]}"
+            continue
+        gun_satir = _acik_arsiv_gunu_coz(govde, lig_kayit)
+        satirlar.extend(gun_satir)
+        yeni_gunler[gun] = len(gun_satir)
+        ozet["gun"] += 1
+        ozet["mac"] += len(gun_satir)
+
+    if not yeni_gunler:
+        return ozet
+    _acik_arsiv_yaz(satirlar, yeni_gunler, alinan, lig_kayit, yenile)
+    return ozet
+
+
+def _acik_arsiv_gunu_coz(govde: dict, lig_kayit: dict) -> list[dict]:
+    """Bir günün gövdesinden arşive girecek OYNANMIŞ maçları çıkarır."""
+    cikti = []
+    for asama in govde.get("Stages") or []:
+        ulke = _acik_ulke_alani(asama)
+        lig = _acik_ad(asama.get("CompN") or asama.get("Snm") or asama.get("Cnm"))
+        if not acik_arsive_girer_mi(ulke, lig):
+            continue
+        kod = acik_arsiv_kodu(ulke, lig, kayit=lig_kayit, olustur=True)
+        for m in asama.get("Events") or []:
+            if m.get("Tr1") is None or m.get("Tr2") is None:
+                continue                      # oynanmamış / skor yok
+            if str(m.get("Eps") or "").lower().startswith(("postp", "canc", "aband", "abd")):
+                continue
+            ev = ((m.get("T1") or [{}])[0] or {}).get("Nm")
+            dep = ((m.get("T2") or [{}])[0] or {}).get("Nm")
+            if not ev or not dep:
+                continue
+            if _ACIK_TAKIM_DISLA.search(str(ev)) or _ACIK_TAKIM_DISLA.search(str(dep)):
+                continue
+            try:
+                ftg, fta = int(m["Tr1"]), int(m["Tr2"])
+            except (TypeError, ValueError):
+                continue
+            try:
+                iyg, iya = int(m["Trh1"]), int(m["Trh2"])
+            except (TypeError, ValueError, KeyError):
+                iyg = iya = ""
+            cikti.append({
+                "Tarih": str(m.get("Esd") or "")[:8],   # YYYYMMDD (TR günü)
+                "Div": kod, "Ulke": ulke, "Lig": lig,
+                "Ev": str(ev), "Dep": str(dep),
+                "FTHG": ftg, "FTAG": fta, "HTHG": iyg, "HTAG": iya,
+            })
+    return cikti
+
+
+_ACIK_ARSIV_BASLIK = ["Tarih", "Div", "Ulke", "Lig", "Ev", "Dep",
+                      "FTHG", "FTAG", "HTHG", "HTAG"]
+
+
+def _acik_arsiv_yaz(satirlar: list[dict], yeni_gunler: dict, alinan: dict,
+                    lig_kayit: dict, yenile: bool) -> None:
+    """Yeni satırları mevcut arşivle birleştirip tek CSV olarak yazar."""
+    yeni = pd.DataFrame(satirlar, columns=_ACIK_ARSIV_BASLIK)
+    eski = None
+    if os.path.exists(ACIK_ARSIV_CSV) and not yenile:
+        try:
+            eski = pd.read_csv(ACIK_ARSIV_CSV, dtype=str)
+            # yeniden çekilen günler eskisini ezsin
+            if not yeni.empty:
+                eski = eski[~eski["Tarih"].isin(set(yeni["Tarih"]))]
+        except Exception:  # noqa: BLE001 — bozuk dosya sıfırdan yazılsın
+            eski = None
+    birlesik = pd.concat([x for x in (eski, yeni) if x is not None and not x.empty],
+                         ignore_index=True) if (eski is not None or not yeni.empty) else yeni
+    birlesik = birlesik.drop_duplicates(subset=["Tarih", "Div", "Ev", "Dep"], keep="last")
+    gecici = ACIK_ARSIV_CSV + ".tmp"
+    birlesik.to_csv(gecici, index=False)
+    os.replace(gecici, ACIK_ARSIV_CSV)
+    alinan.update(yeni_gunler)
+    _json_yaz(ACIK_ARSIV_GUNLER, alinan)
+    _json_yaz(ACIK_LIG_KAYIT, lig_kayit)
+
+
+def acik_arsiv_takimi(ulke: str, isim: str) -> str | None:
+    """Beslemedeki takım adının AÇIK ARŞİVDEKİ karşılığı (yoksa None).
+
+    Bülten ve arşiv aynı beslemeden geldiği için eşleşme TAMDIR — bulanık
+    isim benzerliğine hiç gerek yok. Yalnız çakışan adlara eklenen ülke
+    etiketi ("Rangers (HKG)") burada geri uygulanır.
+    """
+    return ACIK_TAKIM_ADI.get((_acik_duz(ulke), _normalize(isim)))
+
+
+def acik_arsiv_ozeti() -> dict:
+    """Arayüzde gösterilecek arşiv durumu (dosya okumadan hızlı özet)."""
+    alinan = _json_oku(ACIK_ARSIV_GUNLER)
+    kayit = _json_oku(ACIK_LIG_KAYIT)
+    return {"gun": len(alinan), "mac": int(sum(alinan.values())), "lig": len(kayit),
+            "hedef_gun": ACIK_ARSIV_GUN,
+            "var": os.path.exists(ACIK_ARSIV_CSV)}
+
+
+def _acik_arsiv_oku(ana_takimlar: set[str]) -> pd.DataFrame | None:
+    """acik_arsiv.csv'yi ana şemaya çevirir ve ad çakışmalarını çözer.
+
+    ana_takimlar: football-data arşivindeki takım adlarının normalize hâli.
+    Aynı ada iki farklı kulüp sahip olabiliyor ("Rangers" İskoçya/Hong Kong/
+    Kenya/Nijerya, "Nacional" Portekiz/Uruguay/Kolombiya, "Juventus" İtalya/
+    Avustralya). İsimle birleştirince iki kulübün geçmişi tek takım sanılıyor
+    ve analiz saçmalıyordu. Çözüm: ad birden fazla ülkede geçiyorsa ya da ana
+    arşivde zaten varsa, ülke etiketiyle ayrılır — "Rangers (HKG)".
+    Etiket yalnız GEREKTİĞİNDE eklenir; çakışmayan adlar sade kalır.
+    """
+    if not os.path.exists(ACIK_ARSIV_CSV):
+        return None
+    try:
+        p = pd.read_csv(ACIK_ARSIV_CSV, dtype={"Tarih": str, "Div": str, "Ulke": str,
+                                               "Lig": str, "Ev": str, "Dep": str})
+    except Exception:  # noqa: BLE001
+        return None
+    p = p.dropna(subset=["Tarih", "Div", "Ev", "Dep", "FTHG", "FTAG"])
+    if p.empty:
+        return None
+
+    # ── ad çakışması çözümü ──────────────────────────────────────────────
+    ulkeler: dict[str, set] = {}
+    for ulke, ev, dep in zip(p["Ulke"], p["Ev"], p["Dep"]):
+        if not acik_ulke_mu(ulke):
+            continue        # konfederasyon turnuvası: takımın gerçek ülkesi değil
+        for ad in (ev, dep):
+            ulkeler.setdefault(_normalize(ad), set()).add(_acik_duz(ulke))
+    cakisan = {n for n, u in ulkeler.items() if len(u) > 1 or n in ana_takimlar}
+
+    ACIK_TAKIM_ADI.clear()
+    ACIK_LIG_TAKIMLARI.clear()
+
+    def _ad(ulke: str, isim: str) -> str:
+        # Etiket YALNIZ ülke turnuvalarında eklenir. Kıtasal turnuvada
+        # ("CONMEBOL Libertadores") etiket koymak kulübü kendi liginden
+        # koparıyordu: "Independiente del Valle" Ekvador Serie A'da sade,
+        # Libertadores'te "(CON)" etiketli olunca iki ayrı takım sanılıyordu.
+        n = _normalize(isim)
+        yeni = (f"{isim} ({_acik_ulke_etiketi(ulke)})"
+                if (n in cakisan and acik_ulke_mu(ulke)) else isim)
+        ACIK_TAKIM_ADI[(_acik_duz(ulke), n)] = yeni
+        return yeni
+
+    c = pd.DataFrame(index=p.index)
+    c["Div"] = p["Div"]
+    c["Tarih"] = pd.to_datetime(p["Tarih"], format="%Y%m%d", errors="coerce")
+    c["HomeTeam"] = [_ad(u, a) for u, a in zip(p["Ulke"], p["Ev"])]
+    c["AwayTeam"] = [_ad(u, a) for u, a in zip(p["Ulke"], p["Dep"])]
+    c["FTHG"] = pd.to_numeric(p["FTHG"], errors="coerce")
+    c["FTAG"] = pd.to_numeric(p["FTAG"], errors="coerce")
+    c = c.dropna(subset=["Tarih", "FTHG", "FTAG"])
+    if c.empty:
+        return None
+    c["FTHG"] = c["FTHG"].astype(int)
+    c["FTAG"] = c["FTAG"].astype(int)
+    c["FTR"] = np.where(c["FTHG"] > c["FTAG"], "H",
+                        np.where(c["FTHG"] == c["FTAG"], "D", "A"))
+    c["HTHG"] = pd.to_numeric(p.loc[c.index, "HTHG"], errors="coerce")
+    c["HTAG"] = pd.to_numeric(p.loc[c.index, "HTAG"], errors="coerce")
+    c["Sezon"] = c["Tarih"].map(lambda t: f"{t.year % 100:02d}{(t.year + 1) % 100:02d}"
+                                if t.month >= 7 else f"{(t.year - 1) % 100:02d}{t.year % 100:02d}")
+    for k in ISTATISTIK_KOLONLARI:
+        c[k] = float("nan")
+    for k in ("oran_ev", "oran_berabere", "oran_dep", "oran_ust25", "oran_alt25",
+              "oran_ev_maks", "oran_berabere_maks", "oran_dep_maks",
+              "oran_ust25_maks", "oran_alt25_maks",
+              "oran_ev_kapanis", "oran_berabere_kapanis", "oran_dep_kapanis",
+              "oran_ust25_kapanis", "oran_alt25_kapanis"):
+        c[k] = float("nan")   # açık arşivde oran yok
+
+    # lig adları ve lig-takım kümeleri: bülten katmanı bunları kullanır
+    kayit = _json_oku(ACIK_LIG_KAYIT)
+    for v in kayit.values():
+        ACIK_LIG_ADLARI[v["kod"]] = v.get("ad") or v.get("lig") or v["kod"]
+    for kod, grup in c.groupby("Div"):
+        if len(grup) >= ACIK_ANALIZ_ESIK:   # sığ turnuvalar analiz vermez
+            ACIK_LIG_TAKIMLARI[str(kod)] = set(grup["HomeTeam"]) | set(grup["AwayTeam"])
+    return c

@@ -55,8 +55,24 @@ def _bakim_dongusu() -> None:
     - Arşiv: günde bir kez güncel sezon dosyaları indirilip veri + Elo
       yeniden yüklenir (eski sezonlar önbellekte olduğundan hızlıdır).
     """
+    # Açık dünya arşivi henüz yoksa ilk turda toplanır: yeni kurulumda kullanıcı
+    # "Veriyi Güncelle"ye basmadan da analiz kapsamı açılsın. Artımlıdır, bir
+    # sonraki turlarda saniyeler sürer.
+    try:
+        if not veri.acik_arsiv_ozeti()["var"]:
+            veri.acik_arsiv_topla()
+            _DURUM["df"] = None      # yeni arşivle yeniden yüklensin
+            _DURUM["fikstur"] = None
+    except Exception:  # noqa: BLE001
+        pass
+
     while True:
         time.sleep(BAKIM_PERIYODU)
+        try:
+            # açık arşiv her turda tazelenir: dünkü sonuçlar birkaç saniyede iner
+            veri.acik_arsiv_topla(zaman_butcesi=60.0)
+        except Exception:  # noqa: BLE001
+            pass
         try:
             if _DURUM["df"] is not None and time.time() - _DURUM["arsiv_zaman"] > ARSIV_YENILEME_ARALIGI:
                 veri.indir()
@@ -149,7 +165,7 @@ def _mac_json(a: dict) -> dict:
         "ev": a["ev"],
         "dep": a["dep"],
         "lig": p["lig"],
-        "lig_adi": veri.LIGLER.get(p["lig"], p["lig"]),
+        "lig_adi": veri.lig_adi(p["lig"]),
         "oranlar": list(a["oranlar"]) if a["oranlar"] else None,
         "form_ev": _form_json(a["form_ev"]),
         "form_dep": _form_json(a["form_dep"]),
@@ -368,6 +384,17 @@ def uygulama_olustur():
                  (f"hata: {d_af['hata']}" if d_af.get("hata")
                   else f"bağlı · bugün {d_af.get('bugun_istek', 0)}/90 istek kullanıldı{pencere}"))
 
+        try:
+            a = veri.acik_arsiv_ozeti()
+            ekle("Açık dünya arşivi (analiz kapsamı)", bool(a.get("mac")),
+                 (f"{a['mac']:,} maç · {a['lig']} turnuva · {a['gun']}/{a['hedef_gun']} gün "
+                  f"toplandı · analiz eşiğini geçen lig: {len(veri.ACIK_LIG_TAKIMLARI)}")
+                 if a.get("mac") else
+                 "henüz toplanmadı — 🔄 Veriyi Güncelle bir yıllık dünya sonuçlarını indirir "
+                 "(anahtar gerekmez, ~1.5 dk)")
+        except Exception as hata:  # noqa: BLE001
+            ekle("Açık dünya arşivi (analiz kapsamı)", False, str(hata)[:160])
+
         d_acik = veri.ACIK_SON_DURUM
         if d_acik.get("kapali"):
             ekle("Açık dünya fikstürü (kupa + eleme maçları)", False,
@@ -422,7 +449,7 @@ def uygulama_olustur():
                 "oddsapi": bool(veri.gizli_anahtar("ODDS_API_IO_KEY", "odds_api_io_key")),
                 "veri_zamani": time.strftime("%d.%m %H:%M", time.localtime(_DURUM["arsiv_zaman"])),
                 "ligler": [
-                    {"kod": lig, "ad": veri.LIGLER.get(lig, lig), "mac": int(adet)}
+                    {"kod": lig, "ad": veri.lig_adi(lig), "mac": int(adet)}
                     for lig, adet in df["Div"].value_counts().items()
                 ],
             }
@@ -827,7 +854,11 @@ def uygulama_olustur():
     # tamamlanır.
     ACIK_ZAMAN_BUTCESI = 25.0
     ACIK_ASAMA_SINIRI = 45    # "ciddi" turnuva sayılan besleme sırası
-    ACIK_GUN_SINIRI = 180     # gün başına sert tavan (emniyet freni)
+    # Gün tavanı ikiye ayrıldı: ANALİZ ALAN maç asla tavana takılmaz (bültenin
+    # değerli kısmı odur), tavan yalnız "yalnız listeleme" satırlarını sınırlar.
+    # Tek tavan varken cumartesileri gerçek ligler kesiliyordu.
+    ACIK_GUN_SINIRI = 500        # gün başına sert üst sınır (emniyet freni)
+    ACIK_LISTELEME_SINIRI = 140  # analiz almayan satırlar için tavan
     # ertelenen/iptal maçlar bültene girmez
     _ACIK_ATIL_DURUM = ("postp", "canc", "aband", "abd", "awarded", "susp", "delayed")
 
@@ -877,6 +908,7 @@ def uygulama_olustur():
             gun_haritasi.setdefault(r.Tarih.date(), []).append((str(r.HomeTeam), str(r.AwayTeam)))
 
         gun_adedi: dict = {}
+        gun_listeleme: dict = {}
         satirlar = []
         for m in kayitlar:
             if str(m.get("durum", "")).lower().startswith(_ACIK_ATIL_DURUM):
@@ -896,23 +928,29 @@ def uygulama_olustur():
             if not (onemli or ev or dep):
                 continue   # ne ciddi turnuva ne de arşivde tanıdığımız takım
 
-            # --- eşleşme güveni ---------------------------------------------
-            # İsim eşleştirme, dünya fikstüründeki binlerce yabancı ismi arşive
-            # bağlarken yanılabiliyor: bültende "Nautico – Ath Bilbao",
-            # "Tigers FC – Juventus", "Peterboro – Anstey Nomads" gibi var
-            # olmayan maçlar çıkıyordu. İki kapı konuldu.
-            #
-            # 1) Turnuva ülkeye aitse, arşivimizde o ülkenin TAKİP ETTİĞİMİZ bir
-            #    ligi ya da bir KUPASI olmalı. Avustralya NorZone ligi, Çek
-            #    kupası ya da Almanya Oberliga'sında oynayan takımlar arşivde
-            #    yok; oradaki "Hearts"/"Hamburg" İskoçya'nın/Almanya'nın üst lig
-            #    kulübü DEĞİLDİR.
-            # 2) Ülke turnuvasıysa takımın arşivdeki ligi de o ülkenin olmalı.
-            # Uluslararası turnuvalarda (UEFA/CONMEBOL...) ikisi de uygulanmaz:
-            # orada takım her ülkeden gelebilir.
+            # --- eşleşme: önce AÇIK ARŞİV (tam eşleşme) ----------------------
+            # Açık arşiv bültenle AYNI beslemeden geliyor: takım adları birebir
+            # aynı. Bu yüzden burada bulanık eşleştirme yok — ad tam tutar ya
+            # da tutmaz. Yanlış eşleşme riski sıfır, kapsam ise football-data'nın
+            # 38 liginden 149 ligine çıkıyor (Ekvador, Peru, Sırbistan, Mısır,
+            # Kore, Özbekistan... hepsi analiz alıyor).
+            arsiv_kod = veri.acik_arsiv_kodu(m.get("ulke"), m.get("lig"))
             kod_lig = veri.acik_lig_kodu(m.get("ulke"), m.get("lig"))
             kupa = veri.acik_kupa_mi(m.get("lig"), m.get("lig_ad"))
-            if veri.acik_ulke_mu(m.get("ulke")):
+            if arsiv_kod and arsiv_kod in veri.ACIK_LIG_TAKIMLARI:
+                takimlar = veri.ACIK_LIG_TAKIMLARI[arsiv_kod]
+                a_ev = veri.acik_arsiv_takimi(m.get("ulke"), str(m.get("ev") or ""))
+                a_dep = veri.acik_arsiv_takimi(m.get("ulke"), str(m.get("dep") or ""))
+                ev = a_ev if a_ev in takimlar else None
+                dep = a_dep if a_dep in takimlar else None
+            elif veri.acik_ulke_mu(m.get("ulke")):
+                # Açık arşivde olmayan ülke turnuvası: eski bulanık yol, ama iki
+                # kapıyla. İsim eşleştirme yabancı adlarda yanılıp bültende
+                # "Nautico – Ath Bilbao", "Tigers FC – Juventus" gibi var olmayan
+                # maçlar üretiyordu.
+                # 1) Turnuva, arşivimizde takip ettiğimiz bir lige ya da o
+                #    ülkenin kupasına ait olmalı.
+                # 2) Takımın arşivdeki ligi de o ülkenin olmalı.
                 ulke_kodlari = veri.acik_ulke_kodlari(m.get("ulke"))
                 guvenli = bool(ulke_kodlari) and (kupa or kod_lig in (ulke_kodlari or ()))
                 if not guvenli:
@@ -922,8 +960,10 @@ def uygulama_olustur():
                         ev = None
                     if dep and son_lig.get(dep) not in ulke_kodlari:
                         dep = None
+            # kalan durum: uluslararası turnuva (UEFA/CONMEBOL) — takım her
+            # ülkeden gelebilir, bulanık eşleşme olduğu gibi kalır
 
-            kod = kod_lig
+            kod = kod_lig or arsiv_kod
             if kod is None and kupa:
                 kod = "KUPA"   # kupada iki takım farklı liglerden gelir: lig
                                # kodu iddiasında bulunma, rozet "KUPA" olsun
@@ -937,12 +977,17 @@ def uygulama_olustur():
                 if son_lig.get(ev) != kod or son_lig.get(dep) != kod:
                     analiz_var = False
 
+            if not analiz_var and gun_listeleme.get(gun, 0) >= ACIK_LISTELEME_SINIRI:
+                continue   # tavan yalnız analiz almayan satırlara uygulanır
+
             e_ad, d_ad = ev or str(m.get("ev")), dep or str(m.get("dep"))
             ayni_gun = gun_haritasi.get(gun, [])
             if any(_ayni_takim(e_ad, me) and _ayni_takim(d_ad, md) for me, md in ayni_gun):
                 continue  # bültende zaten var (CSV/fd.org/AF katmanı)
             gun_haritasi.setdefault(gun, []).append((e_ad, d_ad))
             gun_adedi[gun] = gun_adedi.get(gun, 0) + 1
+            if not analiz_var:
+                gun_listeleme[gun] = gun_listeleme.get(gun, 0) + 1
             satirlar.append(
                 {
                     "Tarih": tarih,
@@ -950,7 +995,7 @@ def uygulama_olustur():
                     "HomeTeam": e_ad,
                     "AwayTeam": d_ad,
                     "LigAdi": veri.AF_LIG_ADLARI.get(kod) or m.get("lig_ad")
-                              or veri.LIGLER.get(kod, kod),
+                              or veri.lig_adi(kod),
                     "analiz_yok": not analiz_var,
                 }
             )
@@ -1128,6 +1173,11 @@ def uygulama_olustur():
                     kapsam["acik"] = 0
                     kapsam["acik_hata"] = str(h)[:200]
                 kapsam["acik_kapali"] = bool(veri.acik_fikstur_kapali())
+                try:
+                    kapsam["acik_arsiv"] = veri.acik_arsiv_ozeti()
+                    kapsam["acik_arsiv"]["analiz_lig"] = len(veri.ACIK_LIG_TAKIMLARI)
+                except Exception:  # noqa: BLE001
+                    pass
                 kapsam["toplam"] = int(len(fik))
                 kapsam["af_anahtar"] = bool(veri.gizli_anahtar("APIFOOTBALL_KEY", "apifootball_key"))
                 # "Oran neden yok" sorusu ekrandan okunabilsin: oran bültenin
@@ -1240,7 +1290,7 @@ def uygulama_olustur():
             "saat": r["Tarih"].strftime("%H:%M"),
             "lig": r["Div"],
             "lig_adi": (ozel_ad if isinstance(ozel_ad, str) and ozel_ad else None)
-                       or veri.LIGLER.get(r["Div"], r["Div"]),
+                       or veri.lig_adi(r["Div"]),
             "ev": r["HomeTeam"],
             "dep": r["AwayTeam"],
             "oranlar": oranlar,
@@ -1885,7 +1935,7 @@ def uygulama_olustur():
         except (KeyError, ValueError) as hata:
             return jsonify({"hata": f"Maç kurulamadı: {hata}"}), 404
 
-        metin = rapor.rapor_olustur(a, lig_adi=veri.LIGLER.get(a["poisson"]["lig"], "")) + ek_bolum
+        metin = rapor.rapor_olustur(a, lig_adi=veri.lig_adi(a["poisson"]["lig"])) + ek_bolum
         try:
             from . import gemini_yorum
             return jsonify({"yorum": gemini_yorum.yorum_al(metin)})
@@ -1988,7 +2038,7 @@ def uygulama_olustur():
                 {
                     "tarih": r.Tarih.strftime("%d.%m.%Y"),
                     "lig": r.Div,
-                    "lig_adi": veri.LIGLER.get(r.Div, r.Div),
+                    "lig_adi": veri.lig_adi(r.Div),
                     "ev": r.HomeTeam,
                     "dep": r.AwayTeam,
                     "skor": f"{int(r.FTHG)}-{int(r.FTAG)}",

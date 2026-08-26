@@ -307,6 +307,42 @@ ya da o ülkenin kupasına ait olmalı, (b) takımın arşivdeki ligi de o ülke
 olmalı. Uluslararası turnuvalarda ikisi de uygulanmaz — orada takım her
 ülkeden gelebilir. Geçemeyen maç yine listelenir, yalnız analiz almaz.
 
+### Analiz kapsamı: açık dünya arşivi
+
+Bülteni doldurmak yetmiyordu — **analiz** hâlâ football-data'nın 38 ligiyle
+sınırlıydı. Ekvador Serie A, Peru Liga 1, Sırbistan, Mısır, Kore, Özbekistan,
+Kolombiya… hepsi bültende görünüyor ama "yalnız listeleme" olarak kalıyordu.
+
+Aynı açık besleme **geçmiş sonuçları da veriyor** (ilk yarı skorlarıyla
+birlikte, ~1 yıl geriye). `guncelle` bunları toplayıp `data/acik_arsiv.csv`'ye
+yazar; arşiv ana veriyle birleşir.
+
+| | önce | sonra |
+|---|---|---|
+| Arşivdeki lig | 38 | **374** |
+| Analiz verebilen lig | 38 | **188** (38 + 150) |
+| Bültende analiz alan maç | %19 | **%56** |
+
+Ölçüm (26.08.2026, 9 günlük bülten): 1.729 maçın 966'sı tam analiz alıyor.
+Hasat 365 günü ~60 saniyede iniyor, dosya ~2 MB; artımlıdır, sonraki
+güncellemeler birkaç saniye sürer. Anahtar gerekmez.
+
+**Neden bulanık eşleştirme yok.** Bülten ve arşiv aynı beslemeden geliyor,
+takım adları birebir aynı. Bu yüzden bu liglerde isim eşleştirme *tam*
+yapılır — daha önce "Nautico – Ath Bilbao", "Tigers FC – Juventus" gibi var
+olmayan maçlar üreten bulanık eşleşme sınıfı burada hiç devreye girmiyor.
+
+**Arşive girmeyenler** (bültende yine listelenirler, yalnız analiz almazlar):
+football-data'nın zaten kapsadığı ligler (çift kayıt olmasın), kapsanan
+ülkelerin kupaları (aynı kulüpler iki farklı adla arşive girip geçmişi
+bölerdi), amatör/bölgesel seviyeler (üst lig kulüpleriyle aynı adı taşıyan
+kulüpler var), hazırlık maçları, kadın/altyapı/rezerv turnuvaları. 40 maçtan
+az veri biriken turnuvalar da analiz vermez — 20 maçlık havuzdan form/Poisson
+çıkarmak sayı üretmek olur, bilgi değil.
+
+Aynı adı taşıyan farklı kulüpler ülke etiketiyle ayrılır ("Rangers (HKG)",
+"Nacional (URU)") — etiket yalnız gerçekten çakışan adlara eklenir.
+
 ### Oranlar: ücretsiz çözüm
 
 Anahtarsız kaynakların hiçbiri oran vermiyor; oran ya `fixtures.csv`'den gelir
