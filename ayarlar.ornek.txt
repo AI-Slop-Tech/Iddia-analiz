@@ -20,3 +20,9 @@
 
 # football-data.org anahtarı — takvim genişletme (ücretsiz)
 #FOOTBALL_DATA_ORG_KEY=buraya_anahtariniz
+
+# Açık dünya fikstürü (kupa + eleme maçları) varsayılan olarak AÇIKTIR ve
+# anahtar istemez. Kapatmak isterseniz:
+#IDDAA_ACIK_FIKSTUR=0
+# (Aynı ayar açık dünya ARŞİVİNİ de kapatır: kapatılırsa football-data'nın
+#  kapsamadığı ~150 lig analiz veremez, maçlar yalnız listelenir.)

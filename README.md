@@ -264,6 +264,121 @@ analizi o oranla da alabilirsiniz — bülten sitelerini kazımak kullanım
 > Kaynak Türkiye'den erişime kapalıdır; sunucunuz Türkiye'deyse
 > [Erişim sorunu (Türkiye)](#erişim-sorunu-türkiye) bölümüne bakın.
 
+### Bülteni hangi katmanlar dolduruyor?
+
+Takvim dört kaynağın birleşimidir. Panelin **Ayarlar → Bülten kapsamı**
+kutusu her katmanın o an kaç maç eklediğini ve hata varsa nedenini gösterir.
+
+| Katman | Ne getirir | Anahtar |
+|---|---|---|
+| `football-data.co.uk` | **Oranlar** + ~22 lig, birkaç gün ileri | gerekmez |
+| `football-data.org` | 12 turnuva, 8 gün ileri (oransız) | ücretsiz anahtar |
+| `API-Football` | Dünya fikstürü + 14 kitapçı oranı, **bugün ±1 gün** | ücretsiz anahtar |
+| **Açık dünya fikstürü** | Kupa/eleme dahil tüm dünya, **8 gün ileri** (oransız) | gerekmez |
+
+Son katman olmadan takvim çok sığ kalıyor: 26.08.2026 günü ölçüldüğünde
+`fixtures.csv` dosyasının **tamamı 5 satırdı** (yalnız La Liga + National
+League), ek lig dosyası bir haftalıktı ve içindeki bütün maçlar geçmişte
+kalmıştı, football-data.org ücretsiz planı Şampiyonlar Ligi'nin **eleme
+turlarını kapsamıyor**, API-Football ücretsiz planı da yalnız bugün ve yarını
+veriyor. Lyon–Fenerbahçe (ŞL playoff) bu yüzden bültende hiç görünmüyordu.
+Açık katman aynı gün için 174 maç görüyor.
+
+Getirdiği maçlarda **oran yoktur** — bunlar bültende oranlı maçlarla birlikte
+listelenir, takımlar arşivde tanınıyorsa tam analiz alır, tanınmıyorsa
+"yalnız listeleme" etiketiyle görünür. Değer taraması yalnız oranlı maçlar
+üzerinde çalışmaya devam eder.
+
+Katmanı kapatmak isterseniz:
+
+```bash
+export IDDAA_ACIK_FIKSTUR=0      # kupa/eleme maçları bültene girmez
+```
+
+**Rozetler.** `ŞL/EL/KL` Avrupa kupaları, `KUPA` ulusal kupalar (EFL Cup,
+Coppa Italia, DFB Pokal, Türkiye Kupası...), `DÜNYA` ise arşivimizdeki bir lige
+oturmayan turnuvalar. Bülten üstündeki lig seçicisinden bunlara göre süzebilirsiniz.
+
+**Yanlış eşleşmeye karşı iki kapı.** Dünya fikstüründeki binlerce yabancı ismi
+arşive bağlarken isim benzerliği yanılabiliyor; bülten bir ara "Nautico – Ath
+Bilbao", "Tigers FC – Juventus" gibi var olmayan maçlar gösterdi. Bir maçın
+analiz alması için (a) turnuvanın ülkesi arşivimizde takip ettiğimiz bir lige
+ya da o ülkenin kupasına ait olmalı, (b) takımın arşivdeki ligi de o ülkenin
+olmalı. Uluslararası turnuvalarda ikisi de uygulanmaz — orada takım her
+ülkeden gelebilir. Geçemeyen maç yine listelenir, yalnız analiz almaz.
+
+### Analiz kapsamı: açık dünya arşivi
+
+Bülteni doldurmak yetmiyordu — **analiz** hâlâ football-data'nın 38 ligiyle
+sınırlıydı. Ekvador Serie A, Peru Liga 1, Sırbistan, Mısır, Kore, Özbekistan,
+Kolombiya… hepsi bültende görünüyor ama "yalnız listeleme" olarak kalıyordu.
+
+Aynı açık besleme **geçmiş sonuçları da veriyor** (ilk yarı skorlarıyla
+birlikte, ~1 yıl geriye). `guncelle` bunları toplayıp `data/acik_arsiv.csv`'ye
+yazar; arşiv ana veriyle birleşir.
+
+| | önce | sonra |
+|---|---|---|
+| Arşivdeki lig | 38 | **188** (38 + 150) |
+| Bültende analiz alan maç | %19 | **%56** |
+
+Ölçüm (26.08.2026, 9 günlük bülten): 1.661 maçın 934'ü tam analiz alıyor.
+Hasat 365 günü ~60 saniyede iniyor, dosya ~2 MB; artımlıdır, sonraki
+güncellemeler birkaç saniye sürer. Anahtar gerekmez.
+
+**Mevcut analizler değişmez.** Bu katman football-data'nın kapsadığı hiçbir
+şeye dokunmuyor: 38 ligin maç sayıları, takım adı çözümlemesi ve maç
+analizleri (gol beklentisi, olasılıklar, Elo, form, H2H) eski sürümle
+**birebir aynı** — eski ve yeni sürüm aynı veriyle yan yana çalıştırılıp
+karşılaştırıldı.
+
+**Neden bulanık eşleştirme yok.** Bülten ve arşiv aynı beslemeden geliyor,
+takım adları birebir aynı. Bu yüzden bu liglerde isim eşleştirme *tam*
+yapılır — daha önce "Nautico – Ath Bilbao", "Tigers FC – Juventus" gibi var
+olmayan maçlar üreten bulanık eşleşme sınıfı burada hiç devreye girmiyor.
+
+**Arşive girmeyenler** (bültende yine listelenirler, yalnız analiz almazlar):
+
+- football-data'nın zaten kapsadığı ligler — çift kayıt olmasın.
+- Kapsanan ülkelerin kupaları — kupada aynı kulüpler oynar; iki farklı adla
+  ("Cardiff" / "Cardiff City") arşive girerse takımın geçmişi ikiye bölünür.
+- Amatör/bölgesel seviyeler — orada üst lig kulübüyle aynı adı taşıyan
+  kulüpler var ("Hamburg", "Hearts").
+- Hazırlık maçları, kadın/altyapı/rezerv turnuvaları (Hollanda'nın "Jong"
+  takımları dahil).
+- **Bir yılda 40 maçtan az biriken turnuvalar** — analiz veremezler, üstelik
+  alınırlarsa başka kaynaktan gelen geçmişi oynatırlar: tek maçlık süper
+  kupalar yüzünden PSG'nin Elo'su 8 puan kaymıştı.
+
+**Kimlik yönetimi.** Aynı kulübün iki adı varsa birleştirilir ("Paris
+Saint-Germain" → "Paris SG", "FC Volendam" → "Volendam"); birleştirme yalnız
+küratörlü takma ad tablosu ya da tek farkı genel kulüp eki olan adlar için
+yapılır ve ülke şartı aranır. Serbest benzerlik kabul edilmez: "Jong Ajax"
+Ajax'a, "Canberra Juventus" Juventus'a, "Barcelona SC" (Ekvador) Barcelona'ya
+bağlanmaz. Ters yönde, aynı adı taşıyan FARKLI kulüpler ülke etiketiyle
+ayrılır ("Rangers (HKG)", "Al Ahly (EGY)") — etiket yalnız gerçekten çakışan
+adlara eklenir.
+
+### Oranlar: ücretsiz çözüm
+
+Anahtarsız kaynakların hiçbiri oran vermiyor; oran ya `fixtures.csv`'den gelir
+(~22 lig, birkaç gün ileri) ya da bir oran API'sinden. İkisi de ücretsiz,
+ikisi de karta gerek duymuyor:
+
+| Kaynak | Ücretsiz kota | Ne verir |
+|---|---|---|
+| [odds-api.io](https://odds-api.io) | **günde 500 istek** | 1X2, Alt/Üst, İY/MS, korner — bültenin tamamını fiyatlandırmaya yeter |
+| [API-Football](https://dashboard.api-football.com) | günde 100 istek | 14+ kitapçı, İY/MS; bugün ±1 gün penceresi |
+
+Anahtarı panelden (⚙ Ayarlar) yapıştırmak yeterli — Coolify ortam değişkeni
+şart değil, `data/ayarlar.json`'a kalıcı yazılır. Oranlar maç başına çekilip
+diskte önbelleklenir; arka plan ısıtıcısı bugün+yarının maçlarını kendiliğinden
+fiyatlandırır ve günlük kotayı tüketmemek için hem süre hem istek tavanına uyar.
+
+> Bir maçın turnuvası odds-api'de farklı adlandırılmış olabilir ("England EFL
+> Cup" ↔ "England - League Cup"); eşleme ada göre parça örtüşmesiyle yapılır,
+> tutmazsa o maç oransız kalır ama bülten bozulmaz.
+
 ## Erişim sorunu (Türkiye)
 
 `football-data.co.uk` bahis oranı yayınladığı için **Türkiye'den erişime

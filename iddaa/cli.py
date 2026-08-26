@@ -56,7 +56,7 @@ def _cmd_durum(args: argparse.Namespace) -> int:  # noqa: ARG001
     print(f"Oran kapsamı    : maçların %{oranli * 100:.1f}'inde 1X2 oranı var")
     print("\nLig bazında maç sayısı:")
     for lig, adet in df["Div"].value_counts().items():
-        print(f"  {lig:<4} {veri.LIGLER.get(lig, ''):<28} {adet:>6,} maç")
+        print(f"  {lig:<4} {veri.lig_adi(lig):<28} {adet:>6,} maç")
     return 0
 
 
@@ -92,7 +92,7 @@ def _cmd_analiz(args: argparse.Namespace) -> int:
         df, ev, dep, oranlar=oranlar, tolerans=args.tolerans,
         elo=analiz.elo_hesapla(df), ust_alt=ust_alt,
     )
-    lig_adi = veri.LIGLER.get(sonuc["poisson"]["lig"], sonuc["poisson"]["lig"])
+    lig_adi = veri.lig_adi(sonuc["poisson"]["lig"])
     metin = rapor.rapor_olustur(sonuc, lig_adi=lig_adi)
     print(metin)
 
@@ -161,7 +161,7 @@ def _cmd_backtest(args: argparse.Namespace) -> int:
         return 1
     print(
         f"🧪 Backtest: son {args.sezon} sezon, "
-        f"{veri.LIGLER.get(args.lig, args.lig) if args.lig else 'tüm ligler'}, "
+        f"{veri.lig_adi(args.lig) if args.lig else 'tüm ligler'}, "
         f"eşik +%{args.esik * 100:.0f} — hesaplanıyor (~10-30 sn)..."
     )
     maks_oran = None if args.maks_oran == 0 else args.maks_oran

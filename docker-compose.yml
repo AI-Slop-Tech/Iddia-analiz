@@ -46,6 +46,10 @@ services:
       # (https://dashboard.api-football.com — günde 100 istek). 14+ kitapçının
       # İY/MS oranları ve ŞL/Avrupa kupası maçlarının fiyatları gelir.
       - APIFOOTBALL_KEY=${APIFOOTBALL_KEY:-}
+      # Açık dünya fikstürü (kupa + eleme maçları) VARSAYILAN OLARAK AÇIKTIR ve
+      # anahtar istemez; bülteni haftanın tamamı için doldurur. IDDAA_PROXY
+      # tanımlıysa istekleri de vekilden geçer. Kapatmak için: 0
+      - IDDAA_ACIK_FIKSTUR=${IDDAA_ACIK_FIKSTUR:-}
     volumes:
       - iddaa-veri:/app/data
     healthcheck:
