@@ -365,6 +365,19 @@ def uygulama_olustur():
                  (f"hata: {d_af['hata']}" if d_af.get("hata")
                   else f"bağlı · bugün {d_af.get('bugun_istek', 0)}/90 istek kullanıldı{pencere}"))
 
+        d_acik = veri.ACIK_SON_DURUM
+        if d_acik.get("kapali"):
+            ekle("Açık dünya fikstürü (kupa + eleme maçları)", False,
+                 "IDDAA_ACIK_FIKSTUR=0 ile kapatılmış — kupa/eleme maçları bültene girmez")
+        else:
+            ekle("Açık dünya fikstürü (kupa + eleme maçları)",
+                 bool(d_acik.get("mac")),
+                 (f"son çekim {d_acik.get('zaman') or '—'} · {d_acik.get('gun') or 0}/8 gün · "
+                  f"{d_acik.get('mac') if d_acik.get('mac') is not None else '?'} maç görüldü"
+                  + (f" · son hata: {d_acik['hata']}" if d_acik.get("hata") else ""))
+                 if d_acik.get("zaman")
+                 else "henüz denenmedi — bülten kurulunca dolar (anahtar gerekmez)")
+
         ekle("Gemini yorumu", bool(veri.gizli_anahtar("GEMINI_API_KEY", "gemini_api_key")),
              "bağlı" if veri.gizli_anahtar("GEMINI_API_KEY", "gemini_api_key")
              else "anahtar yok (isteğe bağlı özellik)")
@@ -401,6 +414,7 @@ def uygulama_olustur():
                 "apifootball": bool(veri.gizli_anahtar("APIFOOTBALL_KEY", "apifootball_key")),
                 "kapsam": _DURUM.get("kapsam"),
                 "af_durum": dict(veri.AF_SON_DURUM),
+                "acik_durum": dict(veri.ACIK_SON_DURUM),
                 "oddsapi": bool(veri.gizli_anahtar("ODDS_API_IO_KEY", "odds_api_io_key")),
                 "veri_zamani": time.strftime("%d.%m %H:%M", time.localtime(_DURUM["arsiv_zaman"])),
                 "ligler": [
@@ -566,6 +580,58 @@ def uygulama_olustur():
         )
         return jsonify(_mac_json(a))
 
+    def _son_lig_haritasi(df: pd.DataFrame) -> dict:
+        """Takım → arşivdeki EN SON lig kodu. Bulanık eşleşme koruması için:
+        Hollanda maçındaki "NEC", Meksika'nın Necaxa'sına bağlanmasın."""
+        return {
+            s["Takim"]: s["Div"]
+            for _, s in (
+                pd.concat(
+                    [
+                        df[["HomeTeam", "Div", "Tarih"]].rename(columns={"HomeTeam": "Takim"}),
+                        df[["AwayTeam", "Div", "Tarih"]].rename(columns={"AwayTeam": "Takim"}),
+                    ]
+                )
+                .sort_values("Tarih")
+                .drop_duplicates("Takim", keep="last")
+                .iterrows()
+            )
+        }
+
+    def _takim_esitleyici():
+        """İki ismin aynı takım olup olmadığını difflib'siz söyleyen hızlı ölçüt.
+
+        Kapsama katmanları bunu TEKİLLEŞTİRME için kullanır; yanlış "aynı"
+        demek maçı bültenden düşürür. Eskiden tek ortak parça yetiyordu ve
+        "Real Betis – Real Madrid", listedeki "Real Madrid – Real Sociedad"
+        ile aynı sayılıp eleniyordu ("real" ikisinde de var). Artık tek ortak
+        parça ancak ayırt ediciyse (uzun, iki ad da kısa) kabul edilir.
+        """
+        bellek: dict = {}
+        genel = {"real", "atletico", "athletic", "sporting", "olympique", "olympiakos",
+                 "dynamo", "dinamo", "union", "racing", "rapid", "standard", "national",
+                 "nacional", "internacional", "america", "united", "city", "town",
+                 "county", "rovers", "albion", "wanderers", "sport", "santa", "san"}
+
+        def parcala(ad: str) -> frozenset:
+            if ad not in bellek:
+                bellek[ad] = frozenset(veri._oddsapi_takim_parcalari(ad))
+            return bellek[ad]
+
+        def ayni(a: str, b: str) -> bool:
+            A, B = parcala(a), parcala(b)
+            if not A or not B:
+                return False
+            ortak = A & B
+            if not ortak:
+                return False
+            if len(ortak) >= 2:
+                return True
+            tek = next(iter(ortak))
+            return len(tek) >= 5 and len(A) <= 2 and len(B) <= 2 and tek not in genel
+
+        return ayni
+
     def _dis_kapsami_ekle(df: pd.DataFrame, fik: pd.DataFrame, yenile: bool) -> pd.DataFrame:
         """football-data.org kapsama maçlarını bültene katar (oran yok).
 
@@ -595,19 +661,7 @@ def uygulama_olustur():
         # ligiyle uyuşmalı (ör. Hollanda maçındaki "NEC", Meksika'nın
         # Necaxa'sına bağlanmasın). Lig kodu arşivde yoksa (ŞL, CLI gibi
         # ligler-arası turnuvalar) kontrol atlanır.
-        son_lig = {}
-        for _, s in (
-            pd.concat(
-                [
-                    df[["HomeTeam", "Div", "Tarih"]].rename(columns={"HomeTeam": "Takim"}),
-                    df[["AwayTeam", "Div", "Tarih"]].rename(columns={"AwayTeam": "Takim"}),
-                ]
-            )
-            .sort_values("Tarih")
-            .drop_duplicates("Takim", keep="last")
-            .iterrows()
-        ):
-            son_lig[s["Takim"]] = s["Div"]
+        son_lig = _son_lig_haritasi(df)
 
         mevcut = {
             (r.Tarih.date(), r.HomeTeam, r.AwayTeam) for r in fik.itertuples()
@@ -685,32 +739,9 @@ def uygulama_olustur():
                     hafiza[ad] = None
             return hafiza[ad]
 
-        son_lig = {}
-        for _, s in (
-            pd.concat(
-                [
-                    df[["HomeTeam", "Div", "Tarih"]].rename(columns={"HomeTeam": "Takim"}),
-                    df[["AwayTeam", "Div", "Tarih"]].rename(columns={"AwayTeam": "Takim"}),
-                ]
-            )
-            .sort_values("Tarih")
-            .drop_duplicates("Takim", keep="last")
-            .iterrows()
-        ):
-            son_lig[s["Takim"]] = s["Div"]
+        son_lig = _son_lig_haritasi(df)
 
-        parca_bellek: dict = {}
-
-        def _parcala(ad: str) -> frozenset:
-            if ad not in parca_bellek:
-                parca_bellek[ad] = frozenset(veri._oddsapi_takim_parcalari(ad))
-            return parca_bellek[ad]
-
-        def _ayni_takim(a: str, b: str) -> bool:
-            # hızlı tekilleştirme: parça kesişimi yeter (difflib yok — 700×90
-            # karşılaştırmada difflib bülten kurulumunu 50 sn'ye çıkarıyordu)
-            A, B = _parcala(a), _parcala(b)
-            return bool(A and B and (A & B))
+        _ayni_takim = _takim_esitleyici()
 
         gun_haritasi: dict = {}
         for r in fik.itertuples():
@@ -759,6 +790,144 @@ def uygulama_olustur():
                     "AwayTeam": d_ad,
                     "LigAdi": veri.AF_LIG_ADLARI.get(kod)
                               or f"{m.get('ulke') or ''} {m.get('lig_ad') or ''}".strip(),
+                    "analiz_yok": not analiz_var,
+                }
+            )
+        if not satirlar:
+            return fik
+        birlesik = pd.concat([fik, pd.DataFrame(satirlar)], ignore_index=True)
+        return birlesik.sort_values("Tarih").reset_index(drop=True)
+
+    # Açık kapsam penceresi ve süzgeçleri.
+    #
+    # Kaynak cumartesileri 800+ maç görüyor ve bunların büyük kısmı bölgesel
+    # amatör lig — hepsini dökmek bülteni okunmaz yapar. Ayıklama beslemenin
+    # KENDİ önem sırasına dayanır (29.08.2026 ölçümü: 0=Premier League,
+    # 1=LaLiga, 2=Bundesliga, 3=Serie A, 4=Ligue 1 ... 9=Süper Lig, ardından
+    # alfabetik ülke bloğu). Bir maç şu üç koşuldan biriyle bültene girer:
+    #   1) turnuva Türkiye'nin ya da bir konfederasyonun (UEFA/CONMEBOL...) —
+    #      Türkiye Kupası alfabetik blokta "T"de kalıp tavana takılmasın diye,
+    #   2) takımlardan en az biri istatistik arşivinde var — analiz edebildiğimiz
+    #      ya da kullanıcının takip ettiği kulüpler,
+    #   3) turnuva günün ilk ACIK_ASAMA_SINIRI turnuvası arasında.
+    ACIK_GUN_SAYISI = 8       # bugün + 7 gün
+    ACIK_ASAMA_SINIRI = 45    # "ciddi" turnuva sayılan besleme sırası
+    ACIK_GUN_SINIRI = 180     # gün başına sert tavan (emniyet freni)
+    # ertelenen/iptal maçlar bültene girmez
+    _ACIK_ATIL_DURUM = ("postp", "canc", "aband", "abd", "awarded", "susp", "delayed")
+
+    def _acik_kapsami_ekle(df: pd.DataFrame, fik: pd.DataFrame) -> pd.DataFrame:
+        """Anahtarsız dünya fikstürünü bültene 4. katman olarak katar.
+
+        Diğer üç katmanın hiçbiri kupa/eleme maçlarını haftanın tamamı için
+        veremiyor (ayrıntı: veri.py'deki "Açık dünya fikstürü" başlığı). Bu
+        katman anahtar, kota ve vekil gerektirmeden takvimi doldurur; oran
+        getirmez. Takımlar arşivde çözülüyorsa maç tam analiz alır, yoksa
+        "yalnız listeleme" olarak görünür.
+        """
+        durum = veri.ACIK_SON_DURUM
+        durum.update({"zaman": veri.simdi_tr().strftime("%H:%M"), "gun": 0,
+                      "mac": 0, "hata": None,
+                      "kapali": veri.acik_fikstur_kapali()})
+        if durum["kapali"]:
+            return fik
+
+        simdi = veri.simdi_tr()
+        kayitlar = []
+        for i in range(ACIK_GUN_SAYISI):
+            gun = (simdi.normalize() + pd.Timedelta(days=i)).strftime("%Y-%m-%d")
+            try:
+                gunun = veri.acik_gun_fiksturu(gun)
+                durum["gun"] += 1
+            except Exception as h:  # noqa: BLE001 — bir gün düşerse kalanı yine gelsin
+                durum["hata"] = f"{gun}: {str(h)[:120]}"
+                try:
+                    gunun = veri.acik_gun_fiksturu(gun, sadece_onbellek=True)
+                except Exception:  # noqa: BLE001
+                    continue
+            kayitlar.extend(gunun)
+        durum["mac"] = len(kayitlar)
+        if not kayitlar:
+            return fik
+
+        # önem sırası: önce Türkiye/konfederasyon, sonra beslemenin kendi sırası
+        kayitlar.sort(key=lambda m: (0 if veri.acik_oncelikli(m.get("ulke")) else 1,
+                                     m.get("sira", 9999), str(m.get("ts"))))
+
+        son_lig = _son_lig_haritasi(df)
+        _ayni_takim = _takim_esitleyici()
+        cozucu = veri.takim_cozucu(df, hizli=True)
+        hafiza: dict = {}
+
+        def _esle(ad: str):
+            if ad not in hafiza:
+                try:
+                    hafiza[ad] = cozucu(ad)
+                except ValueError:
+                    hafiza[ad] = None
+            return hafiza[ad]
+
+        gun_haritasi: dict = {}
+        for r in fik.itertuples():
+            gun_haritasi.setdefault(r.Tarih.date(), []).append((str(r.HomeTeam), str(r.AwayTeam)))
+
+        gun_adedi: dict = {}
+        satirlar = []
+        for m in kayitlar:
+            if str(m.get("durum", "")).lower().startswith(_ACIK_ATIL_DURUM):
+                continue
+            try:
+                tarih = pd.to_datetime(str(m.get("ts")), format="%Y%m%d%H%M%S")
+            except (ValueError, TypeError):
+                continue
+            if tarih < simdi.normalize():
+                continue
+            gun = tarih.date()
+            if gun_adedi.get(gun, 0) >= ACIK_GUN_SINIRI:
+                continue
+
+            onemli = veri.acik_oncelikli(m.get("ulke")) or m.get("sira", 9999) < ACIK_ASAMA_SINIRI
+            ev, dep = _esle(str(m.get("ev") or "")), _esle(str(m.get("dep") or ""))
+            if not (onemli or ev or dep):
+                continue   # ne ciddi turnuva ne de arşivde tanıdığımız takım
+
+            # ÜLKE denetimi: bulanık/takma-ad eşleşmesi takımı başka bir ülkenin
+            # kulübüne bağlamış olabilir ("Brazil Serie B / Athletic Club" →
+            # İspanya'nın Ath Bilbao'su). Ülkesi bilinen turnuvalarda takımın
+            # arşivdeki ligi o ülkeye ait değilse eşleşme düşürülür — maç yine
+            # listelenir, yalnız analiz almaz.
+            ulke_kodlari = veri.acik_ulke_kodlari(m.get("ulke"))
+            if ulke_kodlari is not None:
+                if ev and son_lig.get(ev) not in ulke_kodlari:
+                    ev = None
+                if dep and son_lig.get(dep) not in ulke_kodlari:
+                    dep = None
+
+            kod = veri.acik_lig_kodu(m.get("ulke"), m.get("lig"))
+            if kod is None and ev and dep and son_lig.get(ev) == son_lig.get(dep):
+                kod = son_lig.get(ev) or "DÜNYA"
+            kod = kod or "DÜNYA"
+            analiz_var = bool(ev and dep)
+            if analiz_var and kod in veri.LIGLER:
+                # aynı denetimin lig düzeyi: takımın güncel ligi maçın ligiyle
+                # uyuşmuyorsa yalnız listele
+                if son_lig.get(ev) != kod or son_lig.get(dep) != kod:
+                    analiz_var = False
+
+            e_ad, d_ad = ev or str(m.get("ev")), dep or str(m.get("dep"))
+            ayni_gun = gun_haritasi.get(gun, [])
+            if any(_ayni_takim(e_ad, me) and _ayni_takim(d_ad, md) for me, md in ayni_gun):
+                continue  # bültende zaten var (CSV/fd.org/AF katmanı)
+            gun_haritasi.setdefault(gun, []).append((e_ad, d_ad))
+            gun_adedi[gun] = gun_adedi.get(gun, 0) + 1
+            satirlar.append(
+                {
+                    "Tarih": tarih,
+                    "Div": kod,
+                    "HomeTeam": e_ad,
+                    "AwayTeam": d_ad,
+                    "LigAdi": veri.AF_LIG_ADLARI.get(kod) or m.get("lig_ad")
+                              or veri.LIGLER.get(kod, kod),
                     "analiz_yok": not analiz_var,
                 }
             )
@@ -906,6 +1075,14 @@ def uygulama_olustur():
             except Exception as h:  # noqa: BLE001 — kapsama katmanı bülteni düşürmesin
                 kapsam["af"] = 0
                 kapsam["af_hata"] = str(h)[:200]
+            n = len(fik)
+            try:
+                fik = _acik_kapsami_ekle(df, fik)
+                kapsam["acik"] = int(len(fik) - n)
+            except Exception as h:  # noqa: BLE001
+                kapsam["acik"] = 0
+                kapsam["acik_hata"] = str(h)[:200]
+            kapsam["acik_kapali"] = bool(veri.acik_fikstur_kapali())
             kapsam["toplam"] = int(len(fik))
             kapsam["af_anahtar"] = bool(veri.gizli_anahtar("APIFOOTBALL_KEY", "apifootball_key"))
             # "Oran neden yok" sorusu ekrandan okunabilsin: oran bültenin

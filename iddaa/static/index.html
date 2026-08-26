@@ -1281,6 +1281,25 @@ function _gunSecimiKoru(){
     AKTIF_TABLO_GUN = tarihler.includes(HAFTA.bugun) ? HAFTA.bugun : tarihler[0];
 }
 
+// Bülten lig seçicisi: arşivdeki ligler /api/durum'dan geliyor ama takvimde
+// artık kupa/eleme kodları da var (ŞL, TK, DÜNYA...). Bültende gerçekten
+// bulunan kodlar seçiciye eklenir — 150 maçlık bir günü lige göre süzebilmek
+// için şart.
+function ligSeciciyiTazele(){
+  const sec = $('#h-lig'); if(!sec || !HAFTA) return;
+  const varolan = new Set([...sec.options].map(o => o.value));
+  const adlar = new Map();
+  HAFTA.gunler.forEach(g => g.maclar.forEach(m => {
+    if(!m.lig || varolan.has(m.lig) || adlar.has(m.lig)) return;
+    // DÜNYA tek bir lig değil, "eşleştirilemeyen turnuvalar" kovası —
+    // altındaki ilk maçın lig adını etiket yapmak yanıltıcı olurdu.
+    adlar.set(m.lig, m.lig === 'DÜNYA' ? 'Diğer (dünya fikstürü)' : (m.lig_adi || m.lig));
+  }));
+  [...adlar.entries()].sort((a,b) => a[1].localeCompare(b[1], 'tr')).forEach(([kod, ad]) => {
+    sec.insertAdjacentHTML('beforeend', `<option value="${esc(kod)}">${esc(ad)}</option>`);
+  });
+}
+
 async function haftaYukle(yenile, sessiz){
   if(!sessiz)
     $('#hafta-liste').innerHTML = '<div class="iskelet"></div>'.repeat(6);
@@ -1299,6 +1318,7 @@ async function haftaYukle(yenile, sessiz){
       bosFiksturAciklamasi();
       return;
     }
+    ligSeciciyiTazele();
     _gunSecimiKoru();
     if(!HAFTA.gunler.map(g => g.tarih).includes(AKTIF_SR_GUN))
       AKTIF_SR_GUN = HAFTA.gunler.map(g => g.tarih).includes(HAFTA.bugun) ? HAFTA.bugun : HAFTA.gunler[0].tarih;
@@ -3058,12 +3078,19 @@ function kapsamCiz(d){
     ? 'anahtar kayıtlı değil — yukarıdaki alana yapıştırın'
     : (af.hata ? '' : (af.pencere_free
         ? 'ücretsiz plan penceresi: yalnız bugün ve yarın'
-        : `bugün ${af.bugun_istek || 0} istek harcandı (günlük tavan 90)`));
+        : `bugün ${af.bugun_istek || 0} istek harcandı (tavan 90; 72 üstü yalnız gün fikstürüne ayrılır)`));
+  const acik = d.acik_durum || {};
+  const acikNot = k.acik_kapali
+    ? 'IDDAA_ACIK_FIKSTUR=0 ile kapatılmış'
+    : (acik.zaman
+        ? `${acik.gun || 0}/8 gün alındı · kaynakta ${acik.mac || 0} maç görüldü · anahtar gerekmez`
+        : 'bülten kurulunca dolar — anahtar, kota ve vekil gerektirmez');
   kutu.innerHTML = surumSatiri + `
     ${satir(iks('dosya') + ' football-data.co.uk (oranlı)', k.csv, null, 'ana kaynak, anahtar gerekmez')}
     ${satir(iks('dunya') + ' football-data.org', k.fdorg, k.fdorg_hata, k.fdorg_hata ? '' : 'takvim genişletme (oransız)')}
     ${satir(iks('gecmis') + ' dünkü arşiv', k.dun, k.dun_hata, 'sonuç denetimi için')}
     ${satir(iks('futbol') + ' API-Football (dünya)', k.af, k.af_hata || af.hata, afNot)}
+    ${satir(iks('dunya') + ' açık dünya fikstürü (kupa/eleme)', k.acik, k.acik_hata || acik.hata, acikNot)}
     <div class="capraz-satir" style="border-top:2px solid var(--cizgi)">
       <span style="flex:1"><b>TOPLAM BÜLTEN</b></span><b>${k.toplam} maç</b></div>
     ${k.oranli !== undefined ? `<div class="capraz-satir">

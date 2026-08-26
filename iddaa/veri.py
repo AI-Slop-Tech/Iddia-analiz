@@ -633,6 +633,25 @@ def _normalize(isim: str) -> str:
 _COZUCU_DURUM: dict = {"ref": None, "cozucu": {}}
 
 
+def _kapsama_uygun(hedef: str, aday: str) -> bool:
+    """Alt-dize eşleşmesi ancak ANLAMLI ise takım eşleşmesi sayılır.
+
+    Eskiden "hedef in aday or aday in hedef" yetiyordu. Dünya fikstüründeki
+    yüzlerce yabancı isim bu yüzden arşive yanlış bağlanıyordu: "Mount Druitt
+    Town Rangers" içinde "angers" geçtiği için Ligue 1'in Angers'ına, "Sierra
+    Leone" içinde "leon" geçtiği için Leon'a oturuyor; bülten "Nautico –
+    Ath Bilbao" gibi var olmayan maçlar gösteriyordu. Üç koşul aranır:
+      • kısa ad en az 4 harf (le, ny gibi parçalar eşleşmesin),
+      • uzun ad kısa adın en fazla iki katı ("angers" 22 harflik ada girmesin),
+      • kısa ad uzun adın BAŞINDA ya da SONUNDA geçsin — ortada geçen dizi
+        neredeyse her zaman başka bir kelimenin parçasıdır.
+    """
+    kisa, uzun = (hedef, aday) if len(hedef) <= len(aday) else (aday, hedef)
+    if len(kisa) < 4 or len(kisa) * 2 < len(uzun):
+        return False   # ucuz elemeler önce: bu döngü isim başına tüm arşivi tarar
+    return uzun.startswith(kisa) or uzun.endswith(kisa)
+
+
 def takim_cozucu_onbellekli(df: pd.DataFrame, hizli: bool = False):
     """takim_cozucu'nun istek boyu paylaşılan hâli.
 
@@ -669,7 +688,7 @@ def takim_cozucu(df: pd.DataFrame, hizli: bool = False):
         if hedef in TAKMA_ADLAR and _normalize(TAKMA_ADLAR[hedef]) in norm_map:
             return norm_map[_normalize(TAKMA_ADLAR[hedef])]
 
-        icinde_gecen = [v for k, v in norm_map.items() if hedef in k or k in hedef]
+        icinde_gecen = [v for k, v in norm_map.items() if _kapsama_uygun(hedef, k)]
         if len(icinde_gecen) == 1:
             return icinde_gecen[0]
 
@@ -1763,8 +1782,20 @@ def _af_anahtar() -> str:
     return gizli_anahtar("APIFOOTBALL_KEY", "apifootball_key")
 
 
-def _af_sayac_artir() -> bool:
-    """Günlük yumuşak tavan (90): aşılırsa yeni ağ isteği yapılmaz, önbellek çalışır."""
+AF_GUNLUK_TAVAN = 90        # ücretsiz plan 100/gün — emniyet payı bırakılır
+AF_SIRADAN_TAVAN = 72       # maç başına oran istekleri bu noktada durur
+
+
+def _af_sayac_artir(oncelikli: bool = False) -> bool:
+    """Günlük yumuşak tavan: aşılırsa yeni ağ isteği yapılmaz, önbellek çalışır.
+
+    Kota İKİ dilimlidir. Maç başına oran çeken (sıradan) istekler AF_SIRADAN_TAVAN'da
+    durur; kalan dilim yalnız gün fikstürü gibi ÖNCELİKLİ isteklere ayrılır.
+    Eskiden tek tavan vardı: arka plan oran ısıtıcısı 90 isteği saatler içinde
+    bitiriyor, ardından günün fikstür listesi (tek istekte yüzlerce maç getiren
+    en değerli çağrı) kotasızlıktan düşüyordu — sunucuda bülten boşalırken
+    aynı sürüm kendi bilgisayarında dolu görünmesinin sebeplerinden biri buydu.
+    """
     dosya = os.path.join(VERI_KLASORU, "af_sayac.json")
     bugun = simdi_tr().strftime("%Y-%m-%d")
     try:
@@ -1774,7 +1805,7 @@ def _af_sayac_artir() -> bool:
         s = {}
     if s.get("gun") != bugun:
         s = {"gun": bugun, "adet": 0}
-    if s["adet"] >= 90:
+    if s["adet"] >= (AF_GUNLUK_TAVAN if oncelikli else AF_SIRADAN_TAVAN):
         AF_SON_DURUM["bugun_istek"] = s["adet"]
         return False
     s["adet"] += 1
@@ -1810,8 +1841,11 @@ def _af_getir(yol: str, parametreler: dict, oncelikli: bool = False):
             raise RuntimeError("API-Football hız sınırı: istek aralığı korunuyor")
         if bekle > 0:
             time.sleep(bekle)
-        if not _af_sayac_artir():
-            raise RuntimeError("API-Football günlük istek tavanına ulaşıldı (90)")
+        if not _af_sayac_artir(oncelikli):
+            raise RuntimeError(
+                f"API-Football günlük istek tavanına ulaşıldı "
+                f"({AF_GUNLUK_TAVAN if oncelikli else AF_SIRADAN_TAVAN})"
+            )
         _AF_SON_ISTEK["zaman"] = time.time()
 
     yanit = requests.get(
@@ -2055,3 +2089,236 @@ def af_iyms(ev: str, dep: str, tarih: pd.Timestamp,
         else:
             AF_SON_DURUM["hata"] = metin[:160]
         return None
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Açık dünya fikstürü — anahtarsız kapsama katmanı
+# ══════════════════════════════════════════════════════════════════════════
+#
+# NEDEN: Bültendeki üç kaynağın hiçbiri kupa/eleme maçlarını haftanın tamamı
+# için veremiyor. 26.08.2026 günü ölçüldü:
+#   • fixtures.csv (football-data.co.uk) — TÜM dosya 5 satırdı (yalnız SP1/EC),
+#     kupa maçı hiç yok, en fazla 2-3 gün ileri gidiyor.
+#   • new_league_fixtures.csv — haftada bir yayımlanıyor (o gün 21.08 damgalı);
+#     hafta ortasında içindeki bütün maçlar geçmişte kalıyor: 0 maç ekliyor.
+#   • football-data.org ücretsiz plan — 12 turnuva; ŞL'nin ELEME/playoff
+#     turları kapsam dışı.
+#   • API-Football ücretsiz plan — yalnız "bugün ±1 gün" penceresi + günde 100
+#     istek; hafta sonunu asla dolduramıyor.
+# Sonuç: Lyon–Fenerbahçe (ŞL playoff, 26.08 22:00) gibi maçlar bültene hiç
+# girmiyordu — kullanıcının gördüğü "ligler eksik" tablosu buydu.
+#
+# BU KATMAN: anahtar istemeyen açık bir günlük fikstür beslemesinden önümüzdeki
+# haftanın TAMAMINI doldurur (aynı gün 174 maç). Oran getirmez; maçları
+# listeler, takımlar arşivde çözülüyorsa maç tam analiz alır.
+# IDDAA_ACIK_FIKSTUR=0 ile kapatılabilir.
+
+ACIK_FIKSTUR_TABAN = "https://prod-public-api.livescore.com/v1/api/app/date/soccer"
+_ACIK_TTL = 3 * 3600          # gün dosyası en fazla 3 saatte bir tazelenir
+_ACIK_TR_OFSET = 3            # besleme gün sınırlarını ve saatleri bu ofsetle döner
+_ACIK_ZAMAN_ASIMI = 20
+
+# öz-teşhis (kapsam kutusu "neden az maç var" sorusunu ekrandan yanıtlasın)
+ACIK_SON_DURUM: dict = {"zaman": None, "gun": 0, "mac": None, "hata": None, "kapali": False}
+
+# Bahis bülteninde karşılığı olmayan kategoriler: kadınlar, altyapı, rezerv...
+# Kelime sınırıyla eşlenir ki "Southampton" içindeki "u2" gibi tesadüfler
+# kupon dışı bırakılmasın.
+_ACIK_DISLA = re.compile(
+    r"\b(w|women|womens|ladies|girls|feminin\w*|femenin\w*|femminile|frauen"
+    r"|kadinlar|kadınlar|kvinde\w*|damallsvenskan|toppserien|liga f|wsl|nwsl"
+    r"|u1[4-9]|u2[0-3]|sub-?2[0-3]|youth|junior\w*|juvenil|primavera|academy"
+    r"|reserve\w*|reserv\w*|futsal|beach|esoccer|esports|indoor)\b",
+    re.IGNORECASE,
+)
+
+# Beslemenin turnuva sırası ZATEN önem sırasıdır (29.08.2026 ölçümü: 0=Premier
+# League, 1=LaLiga, 2=Bundesliga, 3=Serie A, ... 9=Süper Lig, sonra alfabetik
+# ülke bloğu). Tavan uygulanırken bu sıra kullanılır. Yalnız şunlar sıradan
+# bağımsız olarak her zaman girer: Türkiye ve konfederasyon turnuvaları —
+# Türkiye Kupası alfabetik blokta "T"de kaldığı için tavana takılabiliyordu.
+_ACIK_ONCELIKLI = {
+    "turkey", "turkiye", "türkiye",
+    "uefa", "conmebol", "concacaf", "caf", "afc", "fifa", "international",
+}
+
+# Rezerv/altyapı takımları: hem bültende karşılığı yok hem de bulanık isim
+# eşleşmesinde tehlikeli — "Hannover 96 II" arşivdeki "Hannover"e oturup
+# A takımının istatistikleriyle analiz edilebiliyordu.
+_ACIK_TAKIM_DISLA = re.compile(
+    r"(\bu ?1[4-9]\b|\bu ?2[0-3]\b|\bsub ?2[0-3]\b"
+    r"|\b(?:reserves?|academy|akademi|youth)\b"
+    r"|\s(?:ii|iii|b|c|w)$)",
+    re.IGNORECASE,
+)
+
+# Besleme turnuva adı → bizim lig kodumuz (bültendeki rozet + analiz ipucu).
+# UEFA kupaları yalnız konfederasyon UEFA ise eşlenir: CONCACAF'ın da bir
+# "Champions League"i var, o "ŞL" rozetini almamalı.
+_ACIK_UEFA_KOD = (("champions league", "ŞL"), ("europa league", "EL"),
+                  ("conference league", "KL"))
+_ACIK_TR_KOD = (("süper lig", "T1"), ("super lig", "T1"),
+                ("kupa", "TK"), ("cup", "TK"))
+
+
+def acik_fikstur_kapali() -> bool:
+    """IDDAA_ACIK_FIKSTUR=0/off/kapali ise katman uykuya alınır."""
+    return (os.environ.get("IDDAA_ACIK_FIKSTUR") or "").strip().lower() in (
+        "0", "off", "false", "hayir", "hayır", "kapali", "kapalı"
+    )
+
+
+def _acik_gun_url(gun: str) -> str:
+    return f"{ACIK_FIKSTUR_TABAN}/{gun.replace('-', '')}/{_ACIK_TR_OFSET}"
+
+
+def _acik_ad(*parcalar) -> str:
+    return " ".join(str(p).strip() for p in parcalar if p and str(p).strip())
+
+
+def _acik_duz(metin: str) -> str:
+    duz = re.sub(r"[^0-9a-zçğıöşü ]+", " ", str(metin or "").lower())
+    return re.sub(r"\s+", " ", duz).strip()
+
+
+def _acik_govdeyi_coz(govde: dict) -> list:
+    """Beslemenin gün gövdesini bültenin anlayacağı ince kayıtlara çevirir.
+
+    'sira' alanı beslemedeki turnuva sırasıdır: kaynak önce öne çıkan
+    turnuvaları, sonra ülke adına göre alfabetik olanları veriyor. Tavan
+    uygulanırken bu sıra "önem" ölçüsü olarak kullanılır.
+    """
+    kayitlar = []
+    for sira, asama in enumerate(govde.get("Stages") or []):
+        ulke = _acik_ad(asama.get("CompD") or asama.get("Cnm"))
+        lig = _acik_ad(asama.get("CompN") or asama.get("Snm") or asama.get("Cnm"))
+        asama_ad = _acik_ad(asama.get("Snm"))
+        if _ACIK_DISLA.search(f"{ulke} {lig} {asama_ad} {asama.get('Cnm') or ''}"):
+            continue
+        for m in asama.get("Events") or []:
+            ev = ((m.get("T1") or [{}])[0] or {}).get("Nm")
+            dep = ((m.get("T2") or [{}])[0] or {}).get("Nm")
+            if not ev or not dep:
+                continue
+            if _ACIK_TAKIM_DISLA.search(str(ev)) or _ACIK_TAKIM_DISLA.search(str(dep)):
+                continue
+            kayitlar.append(
+                {
+                    "ts": str(m.get("Esd") or ""),   # YYYYMMDDHHMMSS, TR saati
+                    "ulke": ulke,
+                    "lig": lig,
+                    "lig_ad": _acik_lig_adi(ulke, lig, asama_ad),
+                    "ev": str(ev),
+                    "dep": str(dep),
+                    "durum": str(m.get("Eps") or ""),
+                    "sira": sira,
+                }
+            )
+    return kayitlar
+
+
+# Aşama adı ancak GERÇEK bilgi katıyorsa turnuva adına eklenir.
+_ACIK_ASAMA_BILGI = re.compile(
+    r"\b(qualification|qualifying|round|group|final|semi|quarter|play-?off|leg"
+    r"|stage|apertura|clausura|relegation|promotion|preliminary)\b",
+    re.IGNORECASE,
+)
+
+
+def _acik_lig_adi(ulke: str, lig: str, asama: str) -> str:
+    """Bültende görünecek turnuva adı: 'UEFA Champions League Qualification',
+    'Türkiye Süper Lig'.
+
+    Kaynak alanları sık sık tekrar ediyor ("Germany"/"Germany",
+    "EFL Cup"/"EFL Cup: Round 2"); tekrarlar ve bilgi katmayan aşama adları
+    ayıklanır, yoksa bültende "England EFL Cup EFL Cup: Round 2" yazıyor.
+    """
+    u, l, a = str(ulke or "").strip(), str(lig or "").strip(), str(asama or "").strip()
+    du, dl, da = _acik_duz(u), _acik_duz(l), _acik_duz(a)
+    parcalar = [u] if u else []
+    if l and dl != du:
+        parcalar.append(l)
+    kapsanan = da and dl and (da.startswith(dl) or dl.startswith(da))
+    if a and da != du and not kapsanan and _ACIK_ASAMA_BILGI.search(a):
+        parcalar.append(a)
+    return " ".join(parcalar) or l or u
+
+
+def acik_gun_fiksturu(gun: str, sadece_onbellek: bool = False) -> list:
+    """Bir TÜRKİYE gününün dünya fikstürü — tek istek, 3 saat önbellek.
+
+    gun: 'YYYY-MM-DD'. Ağ/format hatasında istisna fırlatır; çağıran katman
+    her günü ayrı korur, bir gün düşse de kalan günler gelir.
+    """
+    onbellek = _oddsapi_onbellek("acik_fikstur.json")
+    kayit = onbellek.get(gun)
+    # süzgeç/alan değişince eski önbellek kayıtları kullanılmaz (yoksa yeni
+    # sürüm günlerce eski biçimi servis eder)
+    eski_bicim = bool(kayit and kayit.get("veri") and "lig_ad" not in kayit["veri"][0])
+    if kayit and not eski_bicim and time.time() - kayit.get("zaman", 0) < _ACIK_TTL:
+        return kayit["veri"]
+    if sadece_onbellek or acik_fikstur_kapali():
+        return [] if eski_bicim else (kayit or {}).get("veri", [])
+    yanit = _oturum().get(
+        _acik_gun_url(gun), timeout=_ACIK_ZAMAN_ASIMI, proxies=proxy_ayari() or None
+    )
+    yanit.raise_for_status()
+    kayitlar = _acik_govdeyi_coz(yanit.json())
+    onbellek[gun] = {"zaman": time.time(), "veri": kayitlar}
+    for eski in [k for k, v in onbellek.items() if time.time() - v.get("zaman", 0) > 3 * 86400]:
+        onbellek.pop(eski, None)
+    _oddsapi_onbellek_yaz("acik_fikstur.json", onbellek)
+    return kayitlar
+
+
+def acik_oncelikli(ulke: str) -> bool:
+    """Tavan dolduğunda bile bültene girmesi gereken ülke/konfederasyon mu?"""
+    return _acik_duz(ulke) in _ACIK_ONCELIKLI
+
+
+# Kendi lig kodlarımızın adları zaten _ODDSAPI_LIG_IPUCU'nda duruyor
+# ("Spain - LaLiga" → SP1). Aynı harita burada da kullanılır: beslemedeki
+# "Spain / LaLiga" bu sayede SP1 rozetini ve gerçek lig analizini alır.
+_ACIK_AD_KOD = {_normalize(ad): kod for kod, ad in _ODDSAPI_LIG_IPUCU.items()}
+
+
+# Ülke → o ülkenin arşivdeki lig kodları. Bulanık isim eşleşmesini ÜLKE
+# düzeyinde denetlemek için: beslemedeki "Brazil Serie B / Athletic Club",
+# takma ad tablosu üzerinden İspanya'nın "Ath Bilbao"suna oturuyor ve bülten
+# "Nautico – Ath Bilbao" diye var olmayan bir maç gösteriyordu. Takımın
+# arşivdeki ligi maçın ülkesiyle uyuşmuyorsa eşleşme reddedilir (maç yine
+# listelenir, yalnız "analiz yok" olur).
+_ACIK_ULKE_KODLARI: dict[str, set[str]] = {
+    "england": {"E0", "E1", "E2", "E3", "EC"},
+    "scotland": {"SC0", "SC1", "SC2", "SC3"},
+    "spain": {"SP1", "SP2"}, "germany": {"D1", "D2"},
+    "italy": {"I1", "I2"}, "france": {"F1", "F2"},
+    "netherlands": {"N1"}, "portugal": {"P1"}, "belgium": {"B1"},
+    "greece": {"G1"}, "turkiye": {"T1"}, "turkey": {"T1"},
+}
+for _kod, (_ulke, _ad) in EK_LIGLER.items():
+    _ACIK_ULKE_KODLARI.setdefault(_ulke.lower(), set()).add(_kod)
+_ACIK_ULKE_KODLARI.setdefault("united states", set()).update(_ACIK_ULKE_KODLARI.get("usa", set()))
+
+
+def acik_ulke_kodlari(ulke: str) -> set[str] | None:
+    """Beslemedeki ülke adının arşivdeki lig kodları (bilinmiyorsa None).
+
+    None dönmesi 'denetleme' demektir: UEFA/CONMEBOL gibi ülkeler-arası
+    turnuvalarda takımın ligi zaten başka bir ülkededir.
+    """
+    return _ACIK_ULKE_KODLARI.get(_acik_duz(ulke))
+
+
+def acik_lig_kodu(ulke: str, lig: str) -> str | None:
+    """Turnuva adından bilinen lig kodumuzu çıkarır (yoksa None)."""
+    u, l = _acik_duz(ulke), _acik_duz(lig)
+    if u == "uefa":
+        for anahtar, kod in _ACIK_UEFA_KOD:
+            if anahtar in l:
+                return kod
+    if u in ("turkiye", "turkey", "türkiye"):
+        for anahtar, kod in _ACIK_TR_KOD:
+            if anahtar in l:
+                return kod
+    return _ACIK_AD_KOD.get(_normalize(f"{ulke} {lig}"))

@@ -264,6 +264,37 @@ analizi o oranla da alabilirsiniz — bülten sitelerini kazımak kullanım
 > Kaynak Türkiye'den erişime kapalıdır; sunucunuz Türkiye'deyse
 > [Erişim sorunu (Türkiye)](#erişim-sorunu-türkiye) bölümüne bakın.
 
+### Bülteni hangi katmanlar dolduruyor?
+
+Takvim dört kaynağın birleşimidir. Panelin **Ayarlar → Bülten kapsamı**
+kutusu her katmanın o an kaç maç eklediğini ve hata varsa nedenini gösterir.
+
+| Katman | Ne getirir | Anahtar |
+|---|---|---|
+| `football-data.co.uk` | **Oranlar** + ~22 lig, birkaç gün ileri | gerekmez |
+| `football-data.org` | 12 turnuva, 8 gün ileri (oransız) | ücretsiz anahtar |
+| `API-Football` | Dünya fikstürü + 14 kitapçı oranı, **bugün ±1 gün** | ücretsiz anahtar |
+| **Açık dünya fikstürü** | Kupa/eleme dahil tüm dünya, **8 gün ileri** (oransız) | gerekmez |
+
+Son katman olmadan takvim çok sığ kalıyor: 26.08.2026 günü ölçüldüğünde
+`fixtures.csv` dosyasının **tamamı 5 satırdı** (yalnız La Liga + National
+League), ek lig dosyası bir haftalıktı ve içindeki bütün maçlar geçmişte
+kalmıştı, football-data.org ücretsiz planı Şampiyonlar Ligi'nin **eleme
+turlarını kapsamıyor**, API-Football ücretsiz planı da yalnız bugün ve yarını
+veriyor. Lyon–Fenerbahçe (ŞL playoff) bu yüzden bültende hiç görünmüyordu.
+Açık katman aynı gün için 174 maç görüyor.
+
+Getirdiği maçlarda **oran yoktur** — bunlar bültende oranlı maçlarla birlikte
+listelenir, takımlar arşivde tanınıyorsa tam analiz alır, tanınmıyorsa
+"yalnız listeleme" etiketiyle görünür. Değer taraması yalnız oranlı maçlar
+üzerinde çalışmaya devam eder.
+
+Katmanı kapatmak isterseniz:
+
+```bash
+export IDDAA_ACIK_FIKSTUR=0      # kupa/eleme maçları bültene girmez
+```
+
 ## Erişim sorunu (Türkiye)
 
 `football-data.co.uk` bahis oranı yayınladığı için **Türkiye'den erişime
