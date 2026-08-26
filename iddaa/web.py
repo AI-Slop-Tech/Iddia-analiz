@@ -21,7 +21,7 @@ import time
 import pandas as pd
 
 from . import __version__ as SURUM
-from . import analiz, backtest, kayit, kupon, rapor, veri, yorum
+from . import analiz, backtest, kayit, kupon, rapor, rolling, veri, yorum
 
 _DURUM: dict = {
     "df": None, "elo": None, "fikstur": None, "kitapcilar": [],
@@ -1823,6 +1823,70 @@ def uygulama_olustur():
             tamam = kupon.elle_isaretle(int(govde.get("id", 0)),
                                         int(govde.get("indeks", -1)),
                                         str(govde.get("durum", "")))
+        except (ValueError, TypeError) as hata:
+            return jsonify({"hata": str(hata)}), 400
+        return jsonify({"tamam": tamam})
+
+    # ---------------------------------------------------------- 📈 Rolling
+    @app.get("/api/rolling")
+    def rolling_listele():
+        try:
+            df = _df()
+        except FileNotFoundError:
+            df = None
+        planlar = rolling.sonuclandir(df)
+        return jsonify({"planlar": [rolling.hesapla(p) for p in planlar]})
+
+    @app.post("/api/rolling")
+    def rolling_olustur():
+        govde = request.get_json(silent=True) or {}
+        try:
+            plan = rolling.olustur(str(govde.get("ad", "")),
+                                   float(govde.get("baslangic", 0)),
+                                   float(govde.get("hedef_oran", 2.0) or 2.0),
+                                   int(govde.get("hedef_gun", 15) or 15))
+        except (ValueError, TypeError) as hata:
+            return jsonify({"hata": str(hata)}), 400
+        return jsonify({"tamam": True, "plan": rolling.hesapla(plan)})
+
+    @app.post("/api/rolling-sil")
+    def rolling_sil():
+        govde = request.get_json(silent=True) or {}
+        return jsonify({"tamam": rolling.sil(int(govde.get("id", 0)))})
+
+    @app.post("/api/rolling-adim")
+    def rolling_adim():
+        govde = request.get_json(silent=True) or {}
+        try:
+            plan = rolling.adim_ekle(int(govde.get("id", 0)), govde.get("secim") or {})
+        except (ValueError, TypeError) as hata:
+            return jsonify({"hata": str(hata)}), 400
+        return jsonify({"tamam": True, "plan": rolling.hesapla(plan)})
+
+    @app.post("/api/rolling-adim-sil")
+    def rolling_adim_sil():
+        govde = request.get_json(silent=True) or {}
+        return jsonify({"tamam": rolling.adim_sil(int(govde.get("id", 0)),
+                                                  int(govde.get("indeks", -1)))})
+
+    @app.post("/api/rolling-duzenle")
+    def rolling_duzenle():
+        govde = request.get_json(silent=True) or {}
+        try:
+            tamam = rolling.adim_duzenle(int(govde.get("id", 0)),
+                                         int(govde.get("indeks", -1)),
+                                         govde.get("alanlar") or {})
+        except (ValueError, TypeError) as hata:
+            return jsonify({"hata": str(hata)}), 400
+        return jsonify({"tamam": tamam})
+
+    @app.post("/api/rolling-isaretle")
+    def rolling_isaretle():
+        govde = request.get_json(silent=True) or {}
+        try:
+            tamam = rolling.elle_isaretle(int(govde.get("id", 0)),
+                                          int(govde.get("indeks", -1)),
+                                          str(govde.get("durum", "")))
         except (ValueError, TypeError) as hata:
             return jsonify({"hata": str(hata)}), 400
         return jsonify({"tamam": tamam})
