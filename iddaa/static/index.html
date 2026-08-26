@@ -454,6 +454,10 @@
   .yarikg-hucre .adil{font-size:10.5px;color:var(--cok-soluk)}
   .yarikg-hucre input{width:66px;padding:4px 6px;font-size:12px;margin-top:4px}
   .yarikg-hucre .evc{font-size:11.5px;font-weight:750;margin-left:6px}
+  .roll-tablo{width:100%;border-collapse:collapse;font-size:12.5px;min-width:560px}
+  .roll-tablo th{color:var(--cok-soluk);font-weight:700;text-align:left;padding:6px 8px;border-bottom:1px solid var(--cizgi);font-size:11px;text-transform:uppercase}
+  .roll-tablo td{padding:7px 8px;border-bottom:1px solid var(--cizgi)}
+  .roll-tablo tr:hover td{background:var(--kart-ic)}
   .sr-alt{display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin-top:4px}
 
   /* ---------------- kupon fişi ---------------- */
@@ -642,6 +646,7 @@
 <symbol id="i-hedef" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></symbol>
 <symbol id="i-gecmis" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></symbol>
 <symbol id="i-backtest" viewBox="0 0 24 24"><path d="M14 2v6a2 2 0 0 0 .245.96l5.51 10.08A2 2 0 0 1 18 22H6a2 2 0 0 1-1.755-2.96l5.51-10.08A2 2 0 0 0 10 8V2"/><path d="M6.453 15h11.094"/><path d="M8.5 2h7"/></symbol>
+<symbol id="i-rolling" viewBox="0 0 24 24"><path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="m19 9-5 5-4-4-3 3"/></symbol>
 <symbol id="i-daha" viewBox="0 0 24 24"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></symbol>
 <symbol id="i-ayar" viewBox="0 0 24 24"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></symbol>
 <symbol id="i-teshis" viewBox="0 0 24 24"><path d="M11 2v2"/><path d="M5 2v2"/><path d="M5 3H4a2 2 0 0 0-2 2v4a6 6 0 0 0 12 0V5a2 2 0 0 0-2-2h-1"/><path d="M8 15a6 6 0 0 0 12 0v-3"/><circle cx="20" cy="10" r="2"/></symbol>
@@ -712,6 +717,7 @@
       <button class="sekme" data-s="tablo"><svg class="ic"><use href="#i-tablo"/></svg><span>Tahmin Tablosu</span></button>
       <button class="sekme" data-s="surpriz"><svg class="ic"><use href="#i-radar"/></svg><span>Sürpriz Radarı</span></button>
       <button class="sekme" data-s="kupon"><svg class="ic"><use href="#i-kupon"/></svg><span>Kupon Defteri</span><span class="rozet-sayi" hidden></span></button>
+      <button class="sekme" data-s="rolling"><svg class="ic"><use href="#i-rolling"/></svg><span>Rolling</span></button>
     <div class="yan-baslik">Analiz</div>
       <button class="sekme" data-s="sonuc"><svg class="ic"><use href="#i-sonuc"/></svg><span>Sonuçlar</span></button>
       <button class="sekme" data-s="oran"><svg class="ic"><use href="#i-oran"/></svg><span>Oran Analizi</span></button>
@@ -879,6 +885,36 @@
   </section>
 
   <!-- ============ SONUÇLAR ============ -->
+  <section id="s-rolling">
+    <div class="kart">
+      <h2><svg class="ic"><use href="#i-rolling"/></svg> Rolling Planlayıcı</h2>
+      <div class="alt-baslik">Kasayı her adımda <b>tamamen</b> yeni bir seçime taşırsın: 400 TL → tutarsa 800 → tutarsa 1.600…
+        Oranları sen yazarsın, bakiye zincirini ve olasılık matematiğini sistem hesaplar; sonuçlar maç bitince
+        kupon defterindeki kuralla <b>otomatik işlenir</b>.</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px">
+        <div><label>Başlangıç (₺)</label><input id="rp-b" type="number" value="400" min="1" oninput="rpHesapla()"></div>
+        <div><label>Adım oranı</label><input id="rp-o" type="number" value="2.00" step="0.05" min="1.01" oninput="rpHesapla()"></div>
+        <div><label>Gün / adım</label><input id="rp-n" type="number" value="15" min="1" max="60" oninput="rpHesapla()"></div>
+        <div><label>Adım tutma şansı %</label><input id="rp-p" type="number" value="48" min="1" max="99" oninput="rpHesapla()"></div>
+      </div>
+      <div style="display:flex;gap:8px;margin:8px 0;flex-wrap:wrap">
+        <button class="mini-btn" onclick="rpOnayar(1.35,74)">🛡 Sağlam modu (1.35 · %74)</button>
+        <button class="mini-btn" onclick="rpOnayar(2.00,48)">🎯 2x modu (2.00 · %48)</button>
+        <span class="ipucu" style="align-self:center">2.00 oranı %50 ima eder; kitapçı marjı gerçek şansı ~%48'e çeker</span>
+      </div>
+      <div id="rp-sonuc" class="capraz-kutu"></div>
+      <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+        <input id="rp-ad" placeholder="plan adı (ör. Eylül 2x denemesi)" style="flex:1;min-width:180px">
+        <button class="btn" onclick="rollingOlustur()">🚀 Bu ayarlarla plan başlat</button>
+      </div>
+    </div>
+    <div id="rolling-liste"></div>
+    <div class="not">🧮 <b>Rolling matematiği saklanamaz:</b> adım şansı p, oran o ise seriyi bitirme olasılığı p^N,
+      paranın beklenen değeri B·(p·o)^N'dir. Kitapçı marjı yüzünden p·o çoğu zaman 1'in altındadır — yani rolling
+      kâr beklentisi <b>yaratmaz</b>, varyansı katlar. Bu sekme hayal kurdurmak için değil, denemeyi
+      <b>kayıt altında ve gerçek sayılarla</b> yapman için var. Ana kasayla değil, gözden çıkardığın parayla oyna.</div>
+  </section>
+
   <section id="s-kupon">
     <div class="kart">
       <h2><svg class="ic "><use href="#i-kupon"/></svg>Kupon Defteri</h2>
@@ -1038,6 +1074,7 @@
   <button class="sekme" data-s="tablo"><svg class="ic"><use href="#i-tablo"/></svg><span>Tablo</span></button>
   <button class="sekme" data-s="surpriz"><svg class="ic"><use href="#i-radar"/></svg><span>Radar</span></button>
   <button class="sekme" data-s="kupon"><svg class="ic"><use href="#i-kupon"/></svg><span>Kupon</span><span class="rozet-sayi" hidden></span></button>
+  <button class="sekme" data-s="rolling"><svg class="ic"><use href="#i-rolling"/></svg><span>Rolling</span></button>
   <button class="sekme" id="btn-daha" onclick="dahaAc()"><svg class="ic"><use href="#i-daha"/></svg><span>Daha</span></button>
 </nav>
 <div class="daha-kaplama" id="daha-kaplama" onclick="if(event.target===this)dahaKapat()">
@@ -1126,6 +1163,7 @@ function sekmeAc(ad){
   dahaKapat();
   window.scrollTo({top: 0, behavior: 'instant'});
   if(ad === 'kupon') kuponSekmesiCiz();
+  if(ad === 'rolling') rollingYukle();
   if(ad === 'tablo' && AKTIF_TABLO_GUN && !TABLOLAR[AKTIF_TABLO_GUN]) tabloOlustur();
 }
 
@@ -1576,6 +1614,8 @@ function saglamBolumu(liste){
         <span class="buyukev ${g.basabas && g.p > g.basabas ? 'ev-poz' : 'ev-neg'}"
               title="${g.basabas ? 'başabaş için %' + (g.basabas*100).toFixed(0) + ' gerekiyor' : ''}">%${(g.p*100).toFixed(0)}</span>
         <button class="mini-btn" onclick='oranSec(${arg})'>${iks('ekle')}</button>
+        <button class="mini-btn" title="Aktif Rolling planına adım olarak ekle"
+          onclick='rollingSaglamEkle(${JSON.stringify(m.ev)},${JSON.stringify(m.dep)},${JSON.stringify(SECIM_AD[g.secim]||g.secim)},${g.oran},${JSON.stringify(AKTIF_GUN)},${JSON.stringify(m.saat||"")},${JSON.stringify(m.lig||"")})'>📈</button>
         ${g.gerekce ? `<span class="gerekce">${iks('gerekce')}<span>${g.gerekce.map(esc).join(' · ')}</span></span>` : ''}
       </div>`;
     }).join('')}
@@ -3079,6 +3119,166 @@ async function kapsamYenile(){
   }catch(h){
     if(kutu) kutu.innerHTML = `<span class="ev-neg">${iks('dikkat')} ${esc(h.message)}</span>`;
   }
+}
+
+// ═══════════════════════════ 📈 ROLLING ═══════════════════════════
+let ROLLING_PLANLAR = [];
+const tl = x => Number(x).toLocaleString('tr-TR', {maximumFractionDigits: 0});
+
+function rpOnayar(o, p){ $('#rp-o').value = o; $('#rp-p').value = p; rpHesapla(); }
+
+// Projeksiyon: hayali sayıyı DA dürüst sayıları DA aynı kutuda göster.
+function rpHesapla(){
+  const B = +$('#rp-b').value || 0, o = +$('#rp-o').value || 1,
+        N = Math.min(60, +$('#rp-n').value || 1), p = (+$('#rp-p').value || 50) / 100;
+  const final = B * Math.pow(o, N);
+  const seri = Math.pow(p, N);
+  const ev = B * Math.pow(p * o, N);
+  let adimlar = '';
+  for(let i = 1; i <= N; i++){
+    if(i <= 3 || i === N)
+      adimlar += `<span class="chip">${i}. gün: <b>${tl(B * Math.pow(o, i))}₺</b></span> `;
+    else if(i === 4) adimlar += '<span class="ipucu">… </span>';
+  }
+  $('#rp-sonuc').innerHTML = `
+    <div class="capraz-satir" style="border-top:0"><span style="flex:1">Hepsi tutarsa (${N} adım × ${o.toFixed(2)})</span>
+      <b class="ev-poz" style="font-size:16px">${tl(final)} ₺</b></div>
+    <div class="capraz-satir"><span style="flex:1">Seriyi bitirme olasılığı (p=%${(p*100).toFixed(0)})</span>
+      <b class="${seri >= 0.05 ? '' : 'ev-neg'}">%${(seri*100).toFixed(seri >= 0.001 ? 2 : 5)}</b>
+      <span class="ipucu">≈ ${tl(Math.round(1/Math.max(seri,1e-12)))} denemede 1</span></div>
+    <div class="capraz-satir"><span style="flex:1">Paranın beklenen değeri (matematiksel)</span>
+      <b class="${ev >= B ? 'ev-poz' : 'ev-neg'}">${tl(ev)} ₺</b>
+      <span class="ipucu">${ev < B ? 'başlangıcın altında — marjın bedeli' : 'başlangıcın üstünde'}</span></div>
+    <div class="capraz-satir" style="flex-wrap:wrap">${adimlar}</div>`;
+}
+
+async function rollingYukle(){
+  try{
+    const r = await api('/api/rolling');
+    ROLLING_PLANLAR = r.planlar || [];
+  }catch(h){ bildir(h.message, true); ROLLING_PLANLAR = []; }
+  rollingCiz();
+  rpHesapla();
+}
+
+async function rollingOlustur(){
+  try{
+    await api('/api/rolling', {ad: $('#rp-ad').value, baslangic: +$('#rp-b').value,
+      hedef_oran: +$('#rp-o').value, hedef_gun: +$('#rp-n').value});
+    $('#rp-ad').value = '';
+    bildir('Plan oluşturuldu — ilk adımı ekle.');
+    rollingYukle();
+  }catch(h){ bildir(h.message, true); }
+}
+
+function rollingAktifPlan(){
+  return ROLLING_PLANLAR.find(p => p.durum === 'aktif') || null;
+}
+
+async function rollingSaglamEkle(ev, dep, pazar, oran, tarih, saat, lig){
+  if(!ROLLING_PLANLAR.length){
+    try{ ROLLING_PLANLAR = (await api('/api/rolling')).planlar || []; }catch(h){}
+  }
+  const plan = rollingAktifPlan();
+  if(!plan){ bildir('Önce 📈 Rolling sekmesinden bir plan başlat.', true); sekmeAc('rolling'); return; }
+  try{
+    await api('/api/rolling-adim', {id: plan.id,
+      secim: {tarih, saat, lig, ev, dep, pazar, oran}});
+    bildir(`📈 ${ev} – ${dep} plana eklendi (${tl(plan.bakiye)}₺ yatırım).`);
+    ROLLING_PLANLAR = [];   // sekme açılınca tazelensin
+    if(document.querySelector('#s-rolling.aktif')) rollingYukle();
+  }catch(h){ bildir(h.message, true); }
+}
+
+const ROLL_PAZARLAR = ['MS1','MS0','MS2','ÜST 2.5','ALT 2.5','KG VAR','KG YOK','ÇŞ 1X','ÇŞ 12','ÇŞ X2'];
+
+function rollingCiz(){
+  const kutu = $('#rolling-liste'); if(!kutu) return;
+  if(!ROLLING_PLANLAR.length){
+    kutu.innerHTML = '<div class="kart bos-durum"><div class="dev">📈</div><p>Henüz plan yok — yukarıdan başlat.</p></div>';
+    return;
+  }
+  kutu.innerHTML = ROLLING_PLANLAR.map(pl => {
+    const rozet = pl.durum === 'yatti' ? '<span class="chip ev-neg">💀 seri bitti</span>'
+      : pl.durum === 'tamam' ? '<span class="chip ev-poz">🏁 hedef tamam</span>'
+      : '<span class="chip">🟢 aktif</span>';
+    const bugun = new Date(), gg = String(bugun.getDate()).padStart(2,'0'),
+          aa = String(bugun.getMonth()+1).padStart(2,'0');
+    const satirlar = pl.adimlar.map((a, i) => {
+      const son = i === pl.adimlar.length - 1;
+      const oranHucre = a.durum === 'bekliyor'
+        ? `<input type="number" step="0.01" min="1.01" value="${a.oran}" style="width:70px;padding:4px"
+             onchange="rollingOranDegis(${pl.id},${i},this.value)">`
+        : `<b>${Number(a.oran).toFixed(2)}</b>`;
+      const sonucHucre = a.durum === 'bekliyor'
+        ? `<button class="mini-btn" onclick="rollingIsaret(${pl.id},${i},'tuttu')">✓</button>
+           <button class="mini-btn" onclick="rollingIsaret(${pl.id},${i},'yatti')">✗</button>
+           ${son ? `<button class="mini-btn" title="son adımı sil" onclick="rollingAdimSil(${pl.id},${i})">🗑</button>` : ''}`
+        : `<span class="${a.durum === 'tuttu' ? 'ev-poz' : 'ev-neg'}" style="font-weight:800">
+             ${a.durum === 'tuttu' ? '✅' : '❌'}${a.skor ? ' ' + esc(a.skor) : ''}</span>
+           <button class="mini-btn" title="geri al" onclick="rollingIsaret(${pl.id},${i},'bekliyor')">↺</button>`;
+      return `<tr>
+        <td>${i+1}</td><td class="ipucu">${esc(a.tarih || '')}</td>
+        <td>${esc(a.ev)}${a.dep ? ' – ' + esc(a.dep) : ''}<div class="ipucu">${esc(a.pazar || '')}</div></td>
+        <td>${oranHucre}</td>
+        <td>${tl(a.yatirim)}₺</td>
+        <td style="white-space:nowrap">${sonucHucre}</td>
+        <td>${a.bakiye === null ? '<span class="ipucu">…</span>'
+              : `<b class="${a.bakiye > 0 ? 'ev-poz' : 'ev-neg'}">${tl(a.bakiye)}₺</b>`}</td>
+      </tr>`;
+    }).join('');
+    const ekleSatiri = pl.durum === 'aktif' ? `
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;align-items:center">
+        <input id="ra-t-${pl.id}" value="${gg}.${aa}.${bugun.getFullYear()}" style="width:96px" title="tarih">
+        <input id="ra-e-${pl.id}" placeholder="ev sahibi" style="flex:1;min-width:110px">
+        <input id="ra-d-${pl.id}" placeholder="deplasman" style="flex:1;min-width:110px">
+        <input id="ra-p-${pl.id}" list="roll-pazarlar" placeholder="pazar" style="width:100px">
+        <input id="ra-o-${pl.id}" type="number" step="0.01" min="1.01" value="${pl.hedef_oran}" style="width:76px" title="oran">
+        <button class="mini-btn" onclick="rollingAdimEkle(${pl.id})">➕ Adım ekle</button>
+        <span class="ipucu">ya da bültendeki 🛡 satırından 📈 ile</span>
+      </div>` : '';
+    return `<div class="kart" style="margin-top:10px">
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <h2 style="margin:0">${esc(pl.ad)}</h2>${rozet}
+        <span class="chip">${tl(pl.baslangic)}₺ → <b>${tl(pl.bakiye)}₺</b> (${pl.kat}×)</span>
+        <span class="chip">${pl.tamamlanan}/${pl.hedef_gun} adım</span>
+        <span style="flex:1"></span>
+        <button class="mini-btn" onclick="rollingSil(${pl.id})">🗑 Planı sil</button>
+      </div>
+      <div style="overflow-x:auto;margin-top:8px">
+      <table class="roll-tablo"><thead><tr>
+        <th>#</th><th>tarih</th><th>maç · pazar</th><th>oran</th><th>yatırılan</th><th>sonuç</th><th>bakiye</th>
+      </tr></thead><tbody>${satirlar ||
+        '<tr><td colspan="7" class="ipucu" style="text-align:center">henüz adım yok</td></tr>'}</tbody></table></div>
+      ${ekleSatiri}
+    </div>`;
+  }).join('') + `<datalist id="roll-pazarlar">${ROLL_PAZARLAR.map(x => `<option value="${x}">`).join('')}</datalist>`;
+}
+
+async function rollingAdimEkle(id){
+  const g = k => ($('#ra-' + k + '-' + id) || {}).value || '';
+  try{
+    await api('/api/rolling-adim', {id, secim: {tarih: g('t'), ev: g('e'), dep: g('d'),
+      pazar: g('p'), oran: +g('o')}});
+    rollingYukle();
+  }catch(h){ bildir(h.message, true); }
+}
+async function rollingOranDegis(id, indeks, oran){
+  try{ await api('/api/rolling-duzenle', {id, indeks, alanlar: {oran: +oran}}); rollingYukle(); }
+  catch(h){ bildir(h.message, true); rollingYukle(); }
+}
+async function rollingIsaret(id, indeks, durum){
+  try{ await api('/api/rolling-isaretle', {id, indeks, durum}); rollingYukle(); }
+  catch(h){ bildir(h.message, true); }
+}
+async function rollingAdimSil(id, indeks){
+  try{ await api('/api/rolling-adim-sil', {id, indeks}); rollingYukle(); }
+  catch(h){ bildir(h.message, true); }
+}
+async function rollingSil(id){
+  if(!confirm('Bu plan ve tüm adımları silinsin mi?')) return;
+  try{ await api('/api/rolling-sil', {id}); rollingYukle(); }
+  catch(h){ bildir(h.message, true); }
 }
 
 async function ayarAc(){
