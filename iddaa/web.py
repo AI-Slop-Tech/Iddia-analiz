@@ -1442,6 +1442,9 @@ def uygulama_olustur():
             hedef_oran = max(1.10, min(20.0, float(govde.get("hedef", 2.0))))
             maks_bacak = max(1, min(6, int(govde.get("maks_bacak", 3))))
             esik = max(0.40, min(0.90, float(govde.get("esik", 0.60))))
+            kapsam = str(govde.get("kapsam", "yaygin"))
+            if kapsam not in ("temel", "yaygin", "genis"):
+                kapsam = "yaygin"
         except (TypeError, ValueError):
             return jsonify({"hata": "Geçersiz parametre."}), 400
         try:
@@ -1534,15 +1537,22 @@ def uygulama_olustur():
                     "dep_ad": r["AwayTeam"],
                     "saat": r["Tarih"].strftime("%H:%M"),
                     "lig": str(lig_ad),
+                    "lig_kodu": str(r["Div"]) if pd.notna(r.get("Div")) else None,
                     "secenekler": secenekler,
                 })
 
-        havuz, elenen = sistem.havuz_kur(maclar)
+        havuz, elenen, kapsam_disi = sistem.havuz_kur(maclar, kapsam=kapsam)
+        derin_mac = sum(1 for m in maclar
+                        if sistem.lig_derinligi(m.get("lig"), m.get("lig_kodu")) == "derin")
         return jsonify({
             "tarih": tarih,
             "mac_sayisi": taranan,
             "aday_sayisi": len(havuz),
             "elenen": elenen,
+            "kapsam": kapsam,
+            "kapsam_disi": kapsam_disi,
+            "derin_mac": derin_mac,
+            "sig_mac": len(maclar) - derin_mac,
             "min_oran": hedef_oran,
             "kupon": sistem.kupon_kur(havuz, hedef=hedef_oran,
                                       maks_bacak=maks_bacak, esik=esik),
@@ -1550,7 +1560,8 @@ def uygulama_olustur():
             "karne": sistem.karne_tablosu() + sistem.fiyatlanamaz_satirlari(),
             "karne_not": sistem.KARNE_NOT,
             "strateji": sistem.strateji_karne(hedef_oran, esik),
-            "notlar": sistem.notlar(oransiz),
+            "notlar": sistem.notlar(oransiz, kapsam=kapsam,
+                                     sig_mac=len(maclar) - derin_mac),
         })
 
     @app.post("/api/bulten-tara")

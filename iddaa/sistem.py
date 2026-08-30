@@ -327,23 +327,144 @@ def _bacak(aday: dict) -> dict:
         # MS1'in tüm dağılımdaki oranı %43.8 (ev sahibi kazanma taban oranı),
         # ama model %60+ dediğinde %71.5. Kullanıcıyı ilgilendiren ikincisi.
         "karne": _karne_rozeti(k),
+        "katman": aday.get("katman", "temel"),
+        "lig_derin": bool(aday.get("lig_derin")),
         "gerekce": aday.get("gerekce", []),
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# PAZARIN AÇILMA YAYGINLIĞI — ölçüm DEĞİL, kitapçı gözlemi
+#
+# Model bir pazarı doğru fiyatlayabiliyor olabilir ama kitapçı o maç için o
+# pazarı AÇMAMIŞ olabilir; öneri o zaman oynanamaz. Kullanıcı bunu bildirdi:
+# Peru 2. Lig ve Ekvador maçlarında yalnız 2.5 alt/üst açıkken sisteme
+# ALT 3.5 / ALT 4.5 önerttik.
+#
+# Aşağıdaki katmanlar İSTATİSTİK DEĞİL, bahis sitelerinde hangi pazarın ne
+# sıklıkla açıldığına dair gözlemdir; arşivde "kitapçı bu pazarı açtı mı"
+# verisi yok, dolayısıyla ölçülemez. Bu yüzden ayrı tutuluyor ve arayüzde de
+# ölçülmüş karneden ayrı gösteriliyor.
+#   temel  : hemen her maçta açık (MS, çifte şans, KG, 2.5 alt/üst)
+#   yaygin : orta ve büyük liglerde genelde açık (1.5/3.5 çizgileri, ilk yarı,
+#            İY/MS, handikap, toplam korner)
+#   genis  : çoğunlukla yalnız büyük lig/derbi kuponlarında (takım gol sayısı,
+#            takım korneri, kart, 4.5+ çizgileri, iki yarı kombinasyonları)
+
+TEMEL_PAZARLAR = {
+    "MS1", "MS0", "MS2", "ÇŞ 1X", "ÇŞ 12", "ÇŞ X2",
+    "KG VAR", "KG YOK", "ÜST 2.5", "ALT 2.5",
+}
+
+YAYGIN_PAZARLAR = TEMEL_PAZARLAR | {
+    "ÜST 1.5", "ALT 1.5", "ÜST 3.5", "ALT 3.5",
+    "İY 0.5 ÜST", "İY 0.5 ALT", "İY 1.5 ÜST", "İY 1.5 ALT",
+    "İY 1", "İY 0", "İY 2", "İY KG VAR", "İY KG YOK",
+    "2Y GOL VAR", "2Y GOL YOK",
+    "HER İKİ YARI GOL VAR", "HER İKİ YARI GOL YOK",
+    "HND 0:1 1", "HND 0:1 0", "HND 0:1 2",
+    "HND 1:0 1", "HND 1:0 0", "HND 1:0 2",
+    "1 ve ÜST 2.5", "1 ve ALT 2.5", "0 ve ÜST 2.5", "0 ve ALT 2.5",
+    "2 ve ÜST 2.5", "2 ve ALT 2.5",
+    "KORNER ÜST 8.5", "KORNER ALT 8.5", "KORNER ÜST 9.5", "KORNER ALT 9.5",
+    "KORNER ÜST 10.5", "KORNER ALT 10.5",
+}
+
+
+def pazar_katmani(pazar: str) -> str:
+    """Pazarın bahis sitesinde açılma yaygınlığı: temel / yaygin / genis."""
+    if pazar in TEMEL_PAZARLAR:
+        return "temel"
+    if pazar in YAYGIN_PAZARLAR or pazar.startswith("İY/MS "):
+        return "yaygin"
+    return "genis"
+
+
+# Derin pazar açılan ligler: büyük Avrupa ligleri, üst düzey kupalar ve
+# yaygın takip edilen ulusal ligler. Buradaki maçlarda "genis" pazarlar da
+# çoğunlukla açıktır. Liste eksikse zarar yok: eksik lig "sığ" sayılır ve
+# sistem daha temkinli, oynanabilir pazarlar önerir.
+DERIN_LIG_KODLARI = {
+    # Avrupa'nın büyük ligleri ve alt ligleri
+    "E0", "E1", "D1", "D2", "I1", "I2", "SP1", "SP2", "F1", "F2",
+    "N1", "B1", "P1", "T1", "SC0", "G1",
+    # Türkiye'de yoğun oynanan, kitapçının derin pazar açtığı ülke ligleri
+    # (football-data.co.uk ek lig dosyalarının kodları)
+    "BRA", "ARG", "MEX", "USA", "JPN", "RUS", "AUT", "DNK", "SWE", "NOR",
+}
+DERIN_LIG_IZLERI = (
+    # ÜLKE ADIYLA NİTELENDİRİLDİ: çıplak "serie a" izi, "Ecuador Serie A"yı da
+    # yakalayıp derin sayıyordu — kullanıcının şikâyet ettiği maç tam da oydu
+    # (Orense–CSD Macara'ya ALT 4.5 önerilmişti, oysa kitapçı açmamış).
+    # Yanlış "derin" demek oynanamaz öneri üretir; yanlış "sığ" demek yalnız
+    # temkinli davranmaktır. Bu yüzden şüphede olduğumuzda sığ tarafta kalıyoruz.
+    "england premier", "english premier", "championship",
+    "spain laliga", "spain la liga", "italy serie a", "italian serie a",
+    "germany bundesliga", "german bundesliga", "france ligue 1", "french ligue 1",
+    "netherlands eredivisie", "portugal primeira", "scotland premiership",
+    "turkey super", "turkey süper", "türkiye süper", "süper lig", "super lig",
+    "belgium pro", "jupiler", "brazil serie a", "brasileirao", "brasileirão",
+    "champions league", "şampiyonlar ligi", "europa league", "conference league",
+    "major league soccer", "usa mls",
+)
+
+
+def lig_derinligi(lig: str | None, kod: str | None = None) -> str:
+    """Bu ligde derin pazarlar açılır mı? 'derin' ya da 'sig'."""
+    if kod and str(kod).strip() in DERIN_LIG_KODLARI:
+        return "derin"
+    ad = (lig or "").strip().lower()
+    if not ad:
+        return "sig"
+    if ad in {k.lower() for k in DERIN_LIG_KODLARI}:
+        return "derin"
+    return "derin" if any(iz in ad for iz in DERIN_LIG_IZLERI) else "sig"
+
+
+KAPSAM_SIRASI = {"temel": 0, "yaygin": 1, "genis": 2}
+
+
+def kapsama_uygun(pazar: str, kapsam: str, lig_derin: bool) -> bool:
+    """Pazar, seçilen kapsama ve ligin derinliğine göre önerilebilir mi?
+
+    Merdiven:
+      kapsam "temel"  → yalnız her maçta açık pazarlar
+      kapsam "yaygin" → temel + yaygın; SIĞ ligde temele iner
+      kapsam "genis"  → hepsi; SIĞ ligde yaygına iner
+    Sığ ligde bir kademe inmenin sebebi ölçüm değil gözlem: küçük liglerde
+    kitapçı derin pazarları açmıyor, açılmayan pazara öneri yapmak boş.
+    """
+    katman = KAPSAM_SIRASI[pazar_katmani(pazar)]
+    tavan = KAPSAM_SIRASI.get(kapsam, 1)
+    if not lig_derin:
+        tavan = max(0, tavan - 1)
+    return katman <= tavan
 
 
 TABAN_ESIK = 0.40     # havuz tabanı; kupon eşiği bunun üstünde ayrıca uygulanır
 TEKLI_MIN_P = 0.45    # ölçümde (bölüm E) bu tabanla %49.3 isabet / %+1.6 getiri çıktı
 
 
-def havuz_kur(maclar: list[dict], esik: float = TABAN_ESIK) -> tuple[list[dict], int]:
-    """Maçlardan gelen seçim listelerini tek havuzda toplar, ölçüm süzgecinden geçirir.
+def havuz_kur(maclar: list[dict], esik: float = TABAN_ESIK,
+              kapsam: str = "yaygin") -> tuple[list[dict], int, int]:
+    """Maçlardan gelen seçim listelerini tek havuzda toplar, süzgeçlerden geçirir.
 
-    maclar: [{"mac_id","ev_ad","dep_ad","saat","lig","secenekler":[{pazar,p,oran,gerekce}]}]
-    Döner: (havuz, elenen_sayisi)
+    İki ayrı süzgeç var ve karıştırılmamalı:
+      1) ÖLÇÜM süzgeci — model bu pazarı doğru fiyatlıyor mu? (guvenilir)
+      2) KAPSAM süzgeci — kitapçı bu pazarı bu maçta açıyor mu? (kapsama_uygun)
+    İkincisi ölçüm değil gözlemdir; doğru fiyatlanan ama açılmayan bir pazar
+    kullanıcı için işe yaramaz.
+
+    maclar: [{"mac_id","ev_ad","dep_ad","saat","lig","lig_kodu","secenekler":[...]}]
+    Döner: (havuz, olcum_elenen, kapsam_elenen)
     """
-    havuz, elenen = [], 0
+    havuz, elenen, kapsam_disi = [], 0, 0
     for m in maclar:
+        derin = lig_derinligi(m.get("lig"), m.get("lig_kodu")) == "derin"
         for s in m.get("secenekler", []):
+            if not kapsama_uygun(s["pazar"], kapsam, derin):
+                kapsam_disi += 1
+                continue
             gecer, _neden = guvenilir(s["pazar"])
             if not gecer:
                 elenen += 1
@@ -363,10 +484,11 @@ def havuz_kur(maclar: list[dict], esik: float = TABAN_ESIK) -> tuple[list[dict],
                     f"bu pazar {k['n']:,} maçta ölçüldü, sapması "
                     f"{k['fark']*100:+.1f} puan".replace(",", "."))
             gerekce.append(f"ayırt gücü {k['ayirt']*100:+.1f} puan")
-            havuz.append({**m, **s, "p": p, "gerekce": gerekce})
+            havuz.append({**m, **s, "p": p, "katman": pazar_katmani(s["pazar"]),
+                          "lig_derin": derin, "gerekce": gerekce})
     # en güvenilirden başla; eşitlikte fiyatı olan (dolayısıyla EV'si ölçülebilen) önde
     havuz.sort(key=lambda x: (-x["p"], -(x.get("oran") or 0)))
-    return havuz, elenen
+    return havuz, elenen, kapsam_disi
 
 
 def _fiyat(aday: dict) -> float:
@@ -520,7 +642,7 @@ def _strateji_notu() -> str:
     )
 
 
-def notlar(oransiz: int = 0) -> list[str]:
+def notlar(oransiz: int = 0, kapsam: str = "yaygin", sig_mac: int = 0) -> list[str]:
     """Sekmenin altındaki dürüstlük notları."""
     n = [
         "🎯 <b>'Garanti maç' diye bir şey yok</b> — bu sekme de onu vaat etmiyor. "
@@ -538,6 +660,7 @@ def notlar(oransiz: int = 0) -> list[str]:
         "🔗 Kombine bacakları hep <b>farklı maçlardan</b> seçilir. Aynı maçtan iki "
         "seçim birbirine bağımlıdır (aynı skorun iki yüzü); orada olasılıkları çarpmak "
         "kuponu olduğundan güvenli gösterir.",
+        _kapsam_notu(kapsam, sig_mac),
         _strateji_notu(),
     ]
     eksik = " · ".join(f"<b>{ad}</b>: {sebep}" for ad, sebep in FIYATLANAMAZ.items())
@@ -548,6 +671,22 @@ def notlar(oransiz: int = 0) -> list[str]:
         n.append(f"ℹ️ Günün {oransiz} maçında oran bulunamadığı için o maçlar "
                  "değerlendirmeye girmedi.")
     return n
+
+
+def _kapsam_notu(kapsam: str, sig_mac: int) -> str:
+    """Açılmayan pazar sorununu ve bu süzgecin ölçüm OLMADIĞINI anlatır."""
+    ad = {"temel": "Temel", "yaygin": "Yaygın", "genis": "Hepsi"}.get(kapsam, "Yaygın")
+    return (
+        f"🏷️ <b>Kitapçı bu pazarı açmış mı?</b> Model bir pazarı doğru fiyatlıyor olabilir "
+        "ama bahis sitesi o maçta o pazarı açmamış olabilir; öyle bir öneri işe yaramaz. "
+        f"Bu yüzden pazarlar açılma yaygınlığına göre üç katmana ayrıldı ve şu an "
+        f"<b>{ad}</b> kapsamındasın. Küçük liglerde (2. lig, az takip edilen ülke ligleri) "
+        "sistem bir kademe daha iniyor — orada kitapçı zaten yalnız temel pazarları açıyor"
+        + (f"; bugün taranan maçların <b>{sig_mac} tanesi</b> bu gruba giriyor" if sig_mac else "")
+        + ". <b>Dikkat:</b> bu katmanlar ölçüm değil <b>gözlemdir</b> — arşivde 'kitapçı bu "
+        "pazarı açtı mı' verisi yok, dolayısıyla ölçülemez. Ölçülmüş karne ile "
+        "karıştırılmasın diye ayrı tutuluyor. Bir öneri sitende yoksa kapsamı düşür."
+    )
 
 
 def karne_tablosu() -> list[dict]:
