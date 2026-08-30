@@ -960,6 +960,12 @@
           <input id="sis-bacak" type="number" value="3" min="1" max="6"></div>
         <div><label>Güven eşiği (model %)</label>
           <input id="sis-esik" type="number" value="60" min="40" max="90"></div>
+        <div><label>Pazar kapsamı</label>
+          <select id="sis-kapsam">
+            <option value="temel">Temel — her maçta açık olanlar</option>
+            <option value="yaygin" selected>Yaygın — çoğu maçta açık (önerilen)</option>
+            <option value="genis">Hepsi — açılmayanlar da çıkabilir</option>
+          </select></div>
       </div>
       <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;align-items:center">
         <button class="btn" onclick="sistemTara()"><svg class="ic"><use href="#i-tara"/></svg> Sistemi çalıştır</button>
@@ -3665,6 +3671,14 @@ function sisRozet(k){
     karne %${(k.gercek*100).toFixed(0)} · n=${tl(k.n)}</span>`;
 }
 
+function sisKatman(b){
+  if(b.katman === 'temel') return '';
+  const yazi = b.katman === 'yaygin'
+    ? 'çoğu maçta açık — sitende yoksa kapsamı düşür'
+    : 'yalnız büyük lig kuponlarında açılır; sitende olmayabilir';
+  return `<span class="chip" title="${yazi}">${b.katman === 'yaygin' ? '◇ yaygın pazar' : '◈ dar pazar'}</span>`;
+}
+
 function sisBacakHTML(b, i){
   const oranMetin = b.oran
     ? `@ <b>${b.oran.toFixed(2)}</b>`
@@ -3680,7 +3694,7 @@ function sisBacakHTML(b, i){
     <span style="min-width:120px"><b>${esc(b.pazar)}</b> ${oranMetin}</span>
     <span class="buyukev" title="ölçüm düzeltmesi uygulanmış model olasılığı">%${(b.p*100).toFixed(0)}</span>
     ${ev}
-    ${sisRozet(b.karne)}
+    ${sisRozet(b.karne)}${sisKatman(b)}
     ${b.gerekce && b.gerekce.length
       ? `<span class="gerekce">${iks('gerekce')}<span>${b.gerekce.map(esc).join(' · ')}</span></span>` : ''}
   </div>`;
@@ -3766,6 +3780,8 @@ function sistemCiz(d){
         <span class="chip">${tl(d.mac_sayisi)} maç tarandı</span>
         <span class="chip">${tl(d.aday_sayisi)} seçim değerlendirildi</span>
         ${d.elenen ? `<span class="chip">${tl(d.elenen)} seçim ölçüm süzgecinde elendi</span>` : ''}
+        ${d.kapsam_disi ? `<span class="chip" title="kitapçının bu maçlarda açmadığı pazarlar">${tl(d.kapsam_disi)} seçim kapsam dışı</span>` : ''}
+        ${d.sig_mac ? `<span class="chip" title="küçük liglerde yalnız temel pazarlar önerilir">${tl(d.sig_mac)} maç küçük ligde</span>` : ''}
       </div>
     </div>
     ${kuponHTML}${tekliHTML}${karneHTML}`;
@@ -3781,7 +3797,8 @@ async function sistemTara(){
       tarih: AKTIF_GUN,
       hedef: +$('#sis-hedef').value,
       maks_bacak: +$('#sis-bacak').value,
-      esik: (+$('#sis-esik').value) / 100
+      esik: (+$('#sis-esik').value) / 100,
+      kapsam: $('#sis-kapsam').value
     });
     SISTEM_SON = d;
     sistemCiz(d);
