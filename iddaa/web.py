@@ -1480,36 +1480,47 @@ def uygulama_olustur():
             if not a:
                 continue
             en_iyi = _en_iyi_hepsi(r, maks)
-            secenekler = []
-            for s in analiz.guvenli_secimler(a, sinir=0.50):
-                gerekce = []
-                if a.get("kalip") and a["kalip"].get("n"):
-                    gerekce.append(f"benzer oranlı {a['kalip']['n']:,} geçmiş maç".replace(",", "."))
-                secenekler.append({
-                    "pazar": s["pazar"],
-                    "p": s["p"],
-                    "oran": en_iyi.get(s["pazar"]) or s.get("oran"),
-                    "gerekce": gerekce,
-                })
-            # Korner: guvenli_secimler kapsamında değil, ayrı motordan gelir.
-            # Poisson yaklaşımı deney22'de ölçüldü ve kalibrasyonu geçti; bültende
-            # korner fiyatı olmadığı için oran YOK (adil oranla kıyaslanır).
+            ortak = []
+            if a.get("kalip") and a["kalip"].get("n"):
+                ortak.append(f"benzer oranlı {a['kalip']['n']:,} geçmiş maç".replace(",", "."))
+
+            # Korner ve kart ayrı motorlardan gelir; arşivde takım verisi yoksa
+            # (kalıp modu) kurulamazlar, o maçlarda yalnız gol pazarları olur.
+            korner = kart = None
             if not bool(r.get("analiz_yok", False) is True):
                 try:
-                    kb = analiz.korner_beklentisi(df, r["HomeTeam"], r["AwayTeam"], r["Div"])
+                    korner = analiz.korner_beklentisi(df, r["HomeTeam"], r["AwayTeam"], r["Div"])
+                    kart = analiz.kart_beklentisi(df, r["HomeTeam"], r["AwayTeam"], r["Div"])
                 except Exception:  # noqa: BLE001
-                    kb = None
-                if kb:
-                    kaynak = (f"beklenen korner {kb['toplam']} "
-                              f"(lig ortalaması {kb['lig_ort']})")
-                    for cizgi, p_ust in kb["ustler"].items():
-                        for yon, p in (("ÜST", p_ust), ("ALT", 1.0 - p_ust)):
-                            secenekler.append({
-                                "pazar": f"KORNER {yon} {float(cizgi)}",
-                                "p": float(p),
-                                "oran": None,
-                                "gerekce": [kaynak],
-                            })
+                    korner = kart = None
+
+            # 137 pazarlık geniş havuz. guvenli_secimler() dar çekirdek kümedir ve
+            # bülten/tablo ona bağlı olduğu için dokunulmadı; burada tum_pazarlar
+            # kullanılıyor. MS ve Ü/A 2.5'te piyasa çapalı model olasılığı
+            # (deger_analizi) daha iyi kalibre olduğu için onun değeri geçerli.
+            try:
+                pazarlar = analiz.tum_pazarlar(a["poisson"], korner, kart)
+            except Exception:  # noqa: BLE001
+                continue
+            for secim, p_piyasa in ((a.get("deger") or {}).get("model_p") or {}).items():
+                if secim in pazarlar:
+                    pazarlar[secim] = float(p_piyasa)
+
+            secenekler = []
+            for pazar, p in pazarlar.items():
+                gerekce = list(ortak)
+                if pazar.startswith("KORNER") or " KORNER " in pazar:
+                    gerekce.append(f"beklenen korner {korner['toplam']} "
+                                   f"(lig ortalaması {korner['lig_ort']})")
+                elif pazar.startswith("KART"):
+                    gerekce.append(f"beklenen sarı kart {kart['toplam']} "
+                                   f"(lig ortalaması {kart['lig_ort']})")
+                secenekler.append({
+                    "pazar": pazar,
+                    "p": float(p),
+                    "oran": en_iyi.get(pazar),   # yalnız MS ve Ü/A 2.5'te gerçek fiyat var
+                    "gerekce": gerekce,
+                })
             if secenekler:
                 # DİKKAT: pandas'ta NaN "doğru" sayılır, bu yüzden `r.get("LigAdi") or
                 # r["Div"]` boş lig adında NaN döndürür ve jsonify geçersiz JSON yazar
@@ -1536,8 +1547,9 @@ def uygulama_olustur():
             "kupon": sistem.kupon_kur(havuz, hedef=hedef_oran,
                                       maks_bacak=maks_bacak, esik=esik),
             "tekliler": sistem.tekli_degerler(havuz, min_oran=hedef_oran),
-            "karne": sistem.karne_tablosu(),
+            "karne": sistem.karne_tablosu() + sistem.fiyatlanamaz_satirlari(),
             "karne_not": sistem.KARNE_NOT,
+            "strateji": sistem.strateji_karne(hedef_oran, esik),
             "notlar": sistem.notlar(oransiz),
         })
 

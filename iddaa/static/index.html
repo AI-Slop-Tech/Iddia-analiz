@@ -1897,11 +1897,17 @@ async function gunTara(){
   if(!TARAMALAR[AKTIF_GUN])
     $('#one-cikanlar').innerHTML = '<div class="iskelet" style="height:110px"></div>';
   try{
-    TARAMALAR[AKTIF_GUN] = await api('/api/bulten-tara', {tarih: AKTIF_GUN});
+    // ÖNCE bekle, SONRA yaz: `TARAMALAR[AKTIF_GUN] = await ...` yazarsak
+    // JavaScript atama hedefini await'ten önce çözer. Tarama sürerken bülten
+    // yenilenirse (haftaYukle içinde TARAMALAR = {}) sonuç artık çöpe giden
+    // ESKİ nesneye yazılır; ardından buradaki okuma undefined olur ve
+    // "Cannot read properties of undefined" hatası düşerdi.
+    const sonuc = await api('/api/bulten-tara', {tarih: AKTIF_GUN});
+    TARAMALAR[AKTIF_GUN] = sonuc;
     TARAMA_ZAMAN[AKTIF_GUN] = Date.now();
     Object.keys(MAC_DETAY_CACHE).forEach(k => delete MAC_DETAY_CACHE[k]);  // detaylar da tazelensin
     oneCikanCiz();
-    bildir(`${TARAMALAR[AKTIF_GUN].length} maç tarandı ve değer sırasına dizildi.`);
+    bildir(`${sonuc.length} maç tarandı ve değer sırasına dizildi.`);
   }catch(h){ bildir(h.message, true); }
   btnHazir(b, 'tara', 'Günü Tara');
 }
@@ -3654,8 +3660,8 @@ let SISTEM_SON = null;
 
 function sisRozet(k){
   if(!k) return '<span class="chip" title="bu pazar için ölçüm yok">ölçülmedi</span>';
-  const s = k.guvenilir ? 'ev-poz' : 'ev-neg';
-  return `<span class="chip ${s}" title="${k.n} maçta ölçüldü: model %${(k.dedi*100).toFixed(1)} dedi, gerçekte %${(k.gercek*100).toFixed(1)} oldu">
+  const kapsam = k.bolge ? 'model %60+ dediği maçlarda' : 'tüm maçlarda';
+  return `<span class="chip ev-poz" title="${kapsam} ${k.n} maçta ölçüldü: model %${(k.dedi*100).toFixed(1)} dedi, gerçekte %${(k.gercek*100).toFixed(1)} oldu">
     karne %${(k.gercek*100).toFixed(0)} · n=${tl(k.n)}</span>`;
 }
 
@@ -3694,9 +3700,16 @@ function sistemCiz(d){
         <div class="capraz-satir"><span style="flex:1">Modelin <b>iddia ettiği</b> beklenen değer (100₺ için)</span>
           <b class="${k.ev >= 0 ? 'ev-poz' : 'ev-neg'}">${(100*(1+k.ev)).toFixed(0)} ₺</b>
           <span class="ipucu">${k.ev >= 0 ? 'model kendini kârda görüyor' : 'model bile eksi diyor'}</span></div>
-        <div class="capraz-satir"><span style="flex:1">Ölçümde <b>gerçekte</b> ne oldu (aynı kurallarla geçmiş kuponlar)</span>
-          <b>%43 tuttu</b>
-          <span class="ipucu">getiri %+2.5 ± 6.6 — yani sıfırdan ayırt edilemiyor</span></div>
+        ${d.strateji ? `<div class="capraz-satir">
+          <span style="flex:1">Ölçümde <b>gerçekte</b> ne oldu — aynı kurallarla ${tl(d.strateji.n)} geçmiş kupon
+            ${d.strateji.tam_eslesme ? '' : `<span class="ipucu">(en yakın ölçülen ayar: hedef ${d.strateji.hedef.toFixed(2)} · eşik %${(d.strateji.esik*100).toFixed(0)})</span>`}</span>
+          <b class="${d.strateji.gercek >= d.strateji.dedi ? 'ev-poz' : 'ev-neg'}">%${(d.strateji.gercek*100).toFixed(1)} tuttu</b>
+          <span class="ipucu">sistem %${(d.strateji.dedi*100).toFixed(1)} demişti —
+            ${Math.abs(d.strateji.gercek - d.strateji.dedi) <= 0.02
+              ? 'söylediği olasılık doğru çıkmış' : 'sapma var, ayarı değiştir'}</span></div>
+        <div class="capraz-satir"><span style="flex:1">Bu kuponun <b>kâra geçme sınırı</b></span>
+          <b>${(1 / Math.max(d.strateji.gercek, 0.01)).toFixed(2)}</b>
+          <span class="ipucu">sitende bu toplam oranın üstünü bulabilirsen matematik senden yana</span></div>` : ''}
         ${k.basabas ? `<div class="capraz-satir"><span style="flex:1">Başabaş için gereken tutma şansı</span>
           <b>%${(k.basabas*100).toFixed(1)}</b></div>` : ''}
       </div>
@@ -3727,13 +3740,17 @@ function sistemCiz(d){
       <table class="roll-tablo"><thead><tr>
         <th>pazar</th><th>ölçüm</th><th>model dedi</th><th>gerçekte</th><th>sapma</th><th>ayırt gücü</th><th>durum</th>
       </tr></thead><tbody>
-      ${d.karne.map(x => `<tr>
+      ${d.karne.map(x => x.veri_yok ? `<tr>
         <td><b>${esc(x.pazar)}</b></td>
-        <td>${tl(x.n)} maç</td>
+        <td colspan="5" class="ipucu">ölçülemedi — veri yok</td>
+        <td><span class="ev-neg">🚫 ${esc(x.neden || '')}</span></td>
+      </tr>` : `<tr>
+        <td><b>${esc(x.pazar)}</b></td>
+        <td>${tl(x.n)} maç${x.bolge ? '<div class="ipucu">%60+ bölgesi</div>' : ''}</td>
         <td>%${(x.dedi*100).toFixed(1)}</td>
         <td><b>%${(x.gercek*100).toFixed(1)}</b></td>
-        <td class="${Math.abs(x.fark) <= 0.01 ? 'ev-poz' : (Math.abs(x.fark) > 0.03 ? 'ev-neg' : '')}"
-            title="modelin dediği ile gerçekleşenin farkı; 3 puanı geçerse pazar elenir">
+        <td class="${Math.abs(x.fark) <= 0.01 ? 'ev-poz' : (Math.abs(x.fark) > 0.035 ? 'ev-neg' : '')}"
+            title="modelin dediği ile gerçekleşenin farkı; öneri bölgesinde 3.5 puanı geçerse pazar elenir">
           ${x.fark >= 0 ? '+' : ''}${(x.fark*100).toFixed(1)} puan</td>
         <td class="${x.ayirt >= 0.08 ? 'ev-poz' : ''}">${x.ayirt >= 0 ? '+' : ''}${(x.ayirt*100).toFixed(1)}</td>
         <td>${x.guvenilir ? '<span class="ev-poz">✅ kullanılıyor</span>'

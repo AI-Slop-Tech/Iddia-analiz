@@ -16,7 +16,7 @@ from itertools import combinations
 
 import pandas as pd
 
-from . import veri
+from . import analiz, veri
 
 KUPON_DOSYASI = os.path.join(veri.VERI_KLASORU, "kuponlar.json")
 GECERLI_SISTEMLER = ("kombine",)  # + "k/n" biçimi (ör. "2/4") çalışma anında doğrulanır
@@ -131,7 +131,8 @@ def _pazar_sonucu(pazar: str, r) -> str:
             iy_toplam = int(r["HTHG"]) + int(r["HTAG"])
             ust_geldi = iy_toplam > cizgi
             return "tuttu" if ust_geldi == parcalar[2].startswith(("U", "Ü")) else "yatti"
-        return "belirsiz"
+        # "İY 0.5 ÜST" kalıbına uymayan İY adları (ör. "İY 0" = ilk yarı sonucu)
+        # aşağıdaki ortak çözücüye düşsün; burada "belirsiz" demek onları yutuyordu.
     if p.startswith("KORNER"):  # "KORNER ÜST 9.5" / "KORNER ALT 9.5"
         parcalar = p.split()
         if len(parcalar) == 3:
@@ -161,6 +162,13 @@ def _pazar_sonucu(pazar: str, r) -> str:
             hthg, htag = int(r["HTHG"]), int(r["HTAG"])
             iy = "1" if hthg > htag else ("0" if hthg == htag else "2")
             return "tuttu" if (iy == parcalar[0] and ftr == parcalar[1]) else "yatti"
+    # Yukarıdaki kurallar eski (dar) pazar kümesini aynen karşılamaya devam eder.
+    # Buraya düşen ad, Sistem Önerisi'nin geniş havuzundan gelmiş olabilir
+    # (takım gol sayısı, handikap, MS+Alt/Üst, yarı sonucu, kart, takım korneri…).
+    # Öyleyse ortak çözücüye sorulur; o da bilmiyorsa gerçekten belirsizdir.
+    gercek = analiz.pazar_gerceklesti(str(pazar), r)
+    if gercek is not None:
+        return "tuttu" if gercek else "yatti"
     return "belirsiz"
 
 
