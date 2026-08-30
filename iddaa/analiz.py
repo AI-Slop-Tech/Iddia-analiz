@@ -1024,6 +1024,24 @@ def _birebir_korner(sec: pd.DataFrame) -> dict | None:
             "ust95": round(float((toplam > 9.5).mean()), 3)}
 
 
+def _istatistik_dilimi(df: pd.DataFrame, kolonlar: tuple[str, str], anahtar: str):
+    """Korner/kart gibi ek istatistik sütunları için süzülmüş tablo — bir kez.
+
+    Bu iki fonksiyon eskiden HER maçta 364 bin satırlık tabloyu yeniden
+    dropna ediyordu (ikisi birlikte maç başına ~42 ms). Sistem Önerisi bir
+    günde yüzlerce maç tarıyor; süzme artık tablo başına bir kez yapılır.
+    """
+    onb = _dilim_onbellek(df)
+    if anahtar in onb:
+        return onb[anahtar]
+    if not all(k in df.columns for k in kolonlar):
+        onb[anahtar] = None
+        return None
+    D = df.dropna(subset=list(kolonlar))
+    onb[anahtar] = D if len(D) >= 200 else None
+    return onb[anahtar]
+
+
 def korner_beklentisi(df: pd.DataFrame, ev: str, dep: str,
                       lig_ipucu: str | None = None) -> dict | None:
     """Beklenen korner sayıları: takımların zaman ağırlıklı korner üretim/yeme
@@ -1032,10 +1050,8 @@ def korner_beklentisi(df: pd.DataFrame, ev: str, dep: str,
     Not: korner dağılımı Poisson'dan biraz daha oynaktır (aşırı saçılım);
     olasılıklar yaklaşıktır ve bandın ortası en güvenilir bölgedir.
     """
-    if "HC" not in df.columns or "AC" not in df.columns:
-        return None
-    D = df.dropna(subset=["HC", "AC"])
-    if len(D) < 200:
+    D = _istatistik_dilimi(df, ("HC", "AC"), "korner_dilimi")
+    if D is None:
         return None
     ref = D["Tarih"].max()
     lig_df = D[D["Div"] == lig_ipucu] if lig_ipucu and (D["Div"] == lig_ipucu).any() else D
@@ -1368,6 +1384,353 @@ def guvenli_secimler(a: dict, sinir: float = 0.70) -> list[dict]:
     adaylar = [x for x in adaylar if x["pazar"] not in YARI_ONERILMEZ]
     adaylar.sort(key=lambda x: -x["p"])
     return adaylar
+
+
+def _skor_matrisi(lam_ev: float, lam_dep: float, n: int = MAKS_GOL) -> list[list[float]]:
+    """Normalize edilmiş skor olasılık matrisi (Dixon-Coles düzeltmeli)."""
+    pe = [_poisson_pmf(i, lam_ev) for i in range(n + 1)]
+    pd_ = [_poisson_pmf(j, lam_dep) for j in range(n + 1)]
+    m = [[pe[i] * pd_[j] * dc_tau(i, j, lam_ev, lam_dep, DC_RHO)
+          for j in range(n + 1)] for i in range(n + 1)]
+    t = sum(sum(s) for s in m)
+    return [[x / t for x in s] for s in m]
+
+
+def tum_pazarlar(poisson: dict, korner: dict | None = None,
+                 kart: dict | None = None) -> dict[str, float]:
+    """Skor matrisinden türetilebilen BÜTÜN pazarların olasılıkları.
+
+    guvenli_secimler() dar bir çekirdek küme döndürür ve öyle kalmalıdır
+    (bülten/tahmin tablosu ona bağlı). Bu fonksiyon AYRI ve geniştir: toplam
+    ve takım bazlı alt/üst çizgileri, handikaplar, MS+Alt/Üst birleşimleri,
+    yarı sonuçları, İY/MS, iki yarı kombinasyonları, korner ve kart pazarları.
+
+    Sistem Önerisi sekmesi bu havuzu kullanır; hangi pazarın gerçekten
+    kullanılacağına ÖLÇÜM karar verir (bkz. sistem.PAZAR_KARNE).
+    """
+    p: dict[str, float] = {}
+    le, ld = float(poisson["lambda_ev"]), float(poisson["lambda_dep"])
+    m = _skor_matrisi(le, ld)
+    N = len(m)
+    hucre = [(i, j, m[i][j]) for i in range(N) for j in range(N)]
+
+    def topla(kosul) -> float:
+        return sum(v for i, j, v in hucre if kosul(i, j))
+
+    # 1) Maç sonucu ve çifte şans
+    p["MS1"] = topla(lambda i, j: i > j)
+    p["MS0"] = topla(lambda i, j: i == j)
+    p["MS2"] = topla(lambda i, j: i < j)
+    p["ÇŞ 1X"] = p["MS1"] + p["MS0"]
+    p["ÇŞ 12"] = p["MS1"] + p["MS2"]
+    p["ÇŞ X2"] = p["MS0"] + p["MS2"]
+
+    # 2) Toplam gol alt/üst — bültende yalnız 2.5 vardı, tüm çizgiler eklendi
+    for c in (0.5, 1.5, 2.5, 3.5, 4.5, 5.5):
+        ust = topla(lambda i, j, c=c: i + j > c)
+        p[f"ÜST {c}"] = ust
+        p[f"ALT {c}"] = 1.0 - ust
+
+    # 3) Takım gol sayıları (bahis sitesinde "Ev Sahibi / Deplasman Alt-Üst")
+    for ad, eksen in (("EV", 0), ("DEP", 1)):
+        for c in (0.5, 1.5, 2.5, 3.5):
+            ust = topla(lambda i, j, c=c, e=eksen: (i if e == 0 else j) > c)
+            p[f"{ad} ÜST {c}"] = ust
+            p[f"{ad} ALT {c}"] = 1.0 - ust
+
+    # 4) Karşılıklı gol
+    kg = topla(lambda i, j: i >= 1 and j >= 1)
+    p["KG VAR"] = kg
+    p["KG YOK"] = 1.0 - kg
+
+    # 5) Handikaplı maç sonucu (site: "Handikaplı Maç Sonucu 0:1 / 1:0 / 2:0")
+    for ev_h, dep_h in ((0, 1), (1, 0), (2, 0), (0, 2)):
+        etiket = f"HND {ev_h}:{dep_h}"
+        p[f"{etiket} 1"] = topla(lambda i, j, a=ev_h, b=dep_h: i + a > j + b)
+        p[f"{etiket} 0"] = topla(lambda i, j, a=ev_h, b=dep_h: i + a == j + b)
+        p[f"{etiket} 2"] = topla(lambda i, j, a=ev_h, b=dep_h: i + a < j + b)
+
+    # 6) Maç sonucu + alt/üst birleşimi (site: "Maç Sonucu ve Alt/Üst 2.5")
+    for c in (1.5, 2.5, 3.5):
+        for ad, kosul in (("1", lambda i, j: i > j), ("0", lambda i, j: i == j),
+                          ("2", lambda i, j: i < j)):
+            p[f"{ad} ve ÜST {c}"] = topla(lambda i, j, k=kosul, c=c: k(i, j) and i + j > c)
+            p[f"{ad} ve ALT {c}"] = topla(lambda i, j, k=kosul, c=c: k(i, j) and i + j < c)
+
+    # 7) Yarı bazlı pazarlar — yarı payı ligin gerçek İY verisinden geliyor
+    pay = float(poisson.get("iy_pay", 0.45))
+    iy_m = _skor_matrisi(le * pay, ld * pay, n=6)
+    y2_m = _skor_matrisi(le * (1 - pay), ld * (1 - pay), n=6)
+
+    def yari(mat, on_ek):
+        h = [(i, j, mat[i][j]) for i in range(len(mat)) for j in range(len(mat))]
+        d = {}
+        d[f"{on_ek}1"] = sum(v for i, j, v in h if i > j)
+        d[f"{on_ek}0"] = sum(v for i, j, v in h if i == j)
+        d[f"{on_ek}2"] = sum(v for i, j, v in h if i < j)
+        for c in (0.5, 1.5, 2.5):
+            ust = sum(v for i, j, v in h if i + j > c)
+            d[f"{on_ek}{c} ÜST"] = ust
+            d[f"{on_ek}{c} ALT"] = 1.0 - ust
+        kgy = sum(v for i, j, v in h if i >= 1 and j >= 1)
+        d[f"{on_ek}KG VAR"] = kgy
+        d[f"{on_ek}KG YOK"] = 1.0 - kgy
+        return d
+
+    p.update(yari(iy_m, "İY "))
+    p.update(yari(y2_m, "2Y "))
+    # ölçülmüş yarı kalibrasyonu varsa modelin ham değerinin yerine o geçer
+    iy_blok, y2_blok = poisson.get("iy") or {}, poisson.get("y2") or {}
+    if "ust05" in iy_blok:
+        p["İY 0.5 ÜST"] = iy_blok["ust05"]
+        p["İY 0.5 ALT"] = 1.0 - iy_blok["ust05"]
+    if "ust05" in y2_blok:
+        p["2Y GOL VAR"] = y2_blok["ust05"]
+        p["2Y GOL YOK"] = 1.0 - y2_blok["ust05"]
+    if poisson.get("iki_yari_gol") is not None:
+        p["HER İKİ YARI GOL VAR"] = poisson["iki_yari_gol"]
+        p["HER İKİ YARI GOL YOK"] = 1.0 - poisson["iki_yari_gol"]
+
+    # 8) İki yarıyı da kazanma / her iki yarıda gol atma (yarılar bağımsız varsayılır)
+    p["EV HER İKİ YARIYI KAZANIR"] = p["İY 1"] * p["2Y 1"]
+    p["DEP HER İKİ YARIYI KAZANIR"] = p["İY 2"] * p["2Y 2"]
+    ev_iy_gol = 1.0 - sum(iy_m[0][j] for j in range(len(iy_m)))
+    ev_y2_gol = 1.0 - sum(y2_m[0][j] for j in range(len(y2_m)))
+    dep_iy_gol = 1.0 - sum(iy_m[i][0] for i in range(len(iy_m)))
+    dep_y2_gol = 1.0 - sum(y2_m[i][0] for i in range(len(y2_m)))
+    p["EV HER İKİ YARIDA GOL ATAR"] = ev_iy_gol * ev_y2_gol
+    p["DEP HER İKİ YARIDA GOL ATAR"] = dep_iy_gol * dep_y2_gol
+
+    # 9) İY/MS dokuzlusu
+    for kombo, deger in iyms_olasiliklar(poisson).items():
+        p[f"İY/MS {kombo}"] = deger
+
+    # 10) Korner (varsa): toplam ve takım bazlı
+    if korner:
+        for cizgi, ust in (korner.get("ustler") or {}).items():
+            p[f"KORNER ÜST {float(cizgi)}"] = float(ust)
+            p[f"KORNER ALT {float(cizgi)}"] = 1.0 - float(ust)
+        for ad, beklenti in (("EV", korner.get("ev")), ("DEP", korner.get("dep"))):
+            if not beklenti:
+                continue
+            for c in (3.5, 4.5, 5.5, 6.5):
+                ust = 1.0 - sum(_poisson_pmf(i, float(beklenti))
+                                for i in range(int(math.floor(c)) + 1))
+                p[f"{ad} KORNER ÜST {c}"] = ust
+                p[f"{ad} KORNER ALT {c}"] = 1.0 - ust
+
+    # 11) Sarı kart (varsa)
+    if kart:
+        for cizgi, ust in (kart.get("ustler") or {}).items():
+            p[f"KART ÜST {float(cizgi)}"] = float(ust)
+            p[f"KART ALT {float(cizgi)}"] = 1.0 - float(ust)
+
+    return {k: max(0.0, min(1.0, float(v))) for k, v in p.items()}
+
+
+def pazar_gerceklesti(pazar: str, satir) -> bool | None:
+    """tum_pazarlar() adlarının oynanmış bir maçta gerçekleşip gerçekleşmediği.
+
+    None = bu maçta belirlenemiyor (gerekli veri yok, ör. İY skoru veya korner).
+    Hem ölçüm hem de kupon/Rolling otomatik sonuçlandırma bunu kullanır ki
+    "sistem önerdi ama sonucu işlenemedi" durumu olmasın.
+    """
+    def _say(alan):
+        deger = satir.get(alan) if hasattr(satir, "get") else None
+        return None if deger is None or pd.isna(deger) else int(deger)
+
+    fthg, ftag = _say("FTHG"), _say("FTAG")
+    if fthg is None or ftag is None:
+        return None
+    toplam = fthg + ftag
+    ms = "1" if fthg > ftag else ("0" if fthg == ftag else "2")
+    hthg, htag = _say("HTHG"), _say("HTAG")
+    iy_var = hthg is not None and htag is not None
+    if iy_var:
+        iy_toplam = hthg + htag
+        iy_ms = "1" if hthg > htag else ("0" if hthg == htag else "2")
+        y2e, y2d = fthg - hthg, ftag - htag
+        y2_toplam = y2e + y2d
+        y2_ms = "1" if y2e > y2d else ("0" if y2e == y2d else "2")
+
+    p = pazar.strip()
+
+    def cizgi_son(metin: str) -> float | None:
+        """Metindeki sayısal çizgi. Sayı sonda ("ÜST 2.5") ya da ortada
+        ("0.5 ÜST") olabildiği için bütün sözcükler taranır."""
+        for parca in metin.split():
+            try:
+                return float(parca)
+            except ValueError:
+                continue
+        return None
+
+    # ── maç sonucu / çifte şans
+    if p in ("MS1", "MS0", "MS2"):
+        return p[-1] == ms
+    if p == "ÇŞ 1X":
+        return ms in ("1", "0")
+    if p == "ÇŞ 12":
+        return ms in ("1", "2")
+    if p == "ÇŞ X2":
+        return ms in ("0", "2")
+    if p == "KG VAR":
+        return fthg > 0 and ftag > 0
+    if p == "KG YOK":
+        return not (fthg > 0 and ftag > 0)
+
+    # ── handikap
+    if p.startswith("HND "):
+        parcalar = p.split()
+        if len(parcalar) == 3 and ":" in parcalar[1]:
+            try:
+                a, b = (int(x) for x in parcalar[1].split(":"))
+            except ValueError:
+                return None
+            e, d = fthg + a, ftag + b
+            gercek = "1" if e > d else ("0" if e == d else "2")
+            return parcalar[2] == gercek
+        return None
+
+    # ── maç sonucu + alt/üst
+    if " ve " in p:
+        sol, sag = p.split(" ve ", 1)
+        c = cizgi_son(sag)
+        if c is None or sol not in ("1", "0", "2"):
+            return None
+        gol_tuttu = toplam > c if sag.startswith(("ÜST", "UST")) else toplam < c
+        return (sol == ms) and gol_tuttu
+
+    # ── takım gol / korner alt-üst
+    for on_ek, ev_mi in (("EV ", True), ("DEP ", False)):
+        if not p.startswith(on_ek):
+            continue
+        kalan = p[len(on_ek):]
+        if kalan == "HER İKİ YARIYI KAZANIR":
+            if not iy_var:
+                return None
+            return (iy_ms == "1" and y2_ms == "1") if ev_mi else (iy_ms == "2" and y2_ms == "2")
+        if kalan == "HER İKİ YARIDA GOL ATAR":
+            if not iy_var:
+                return None
+            return (hthg > 0 and y2e > 0) if ev_mi else (htag > 0 and y2d > 0)
+        c = cizgi_son(kalan)
+        if c is None:
+            return None
+        if kalan.startswith("KORNER"):
+            kv = _say("HC") if ev_mi else _say("AC")
+            if kv is None:
+                return None
+            return kv > c if " ÜST " in kalan else kv < c
+        deger = fthg if ev_mi else ftag
+        return deger > c if kalan.startswith(("ÜST", "UST")) else deger < c
+
+    # ── yarı pazarları
+    for on_ek in ("İY ", "2Y "):
+        if not p.startswith(on_ek):
+            continue
+        if not iy_var:
+            return None
+        ilk = on_ek == "İY "
+        t, sonuc = (iy_toplam, iy_ms) if ilk else (y2_toplam, y2_ms)
+        e, d = (hthg, htag) if ilk else (y2e, y2d)
+        kalan = p[len(on_ek):]
+        if kalan in ("1", "0", "2"):
+            return kalan == sonuc
+        if kalan == "KG VAR":
+            return e > 0 and d > 0
+        if kalan == "KG YOK":
+            return not (e > 0 and d > 0)
+        if kalan in ("GOL VAR",):
+            return t > 0
+        if kalan in ("GOL YOK",):
+            return t == 0
+        c = cizgi_son(kalan)
+        if c is None:
+            return None
+        return t > c if kalan.endswith(("ÜST", "UST")) else t < c
+
+    # ── iki yarı birden
+    if p == "HER İKİ YARI GOL VAR":
+        return None if not iy_var else (iy_toplam > 0 and (toplam - iy_toplam) > 0)
+    if p == "HER İKİ YARI GOL YOK":
+        return None if not iy_var else not (iy_toplam > 0 and (toplam - iy_toplam) > 0)
+
+    # ── İY/MS
+    if p.startswith("İY/MS "):
+        kombo = p.split()[-1]
+        if not iy_var or "/" not in kombo:
+            return None
+        a, b = kombo.split("/")
+        return iy_ms == a and ms == b
+
+    # ── toplam korner / kart / gol çizgileri
+    if p.startswith("KORNER "):
+        hc, ac = _say("HC"), _say("AC")
+        if hc is None or ac is None:
+            return None
+        c = cizgi_son(p)
+        return None if c is None else ((hc + ac) > c if " ÜST " in p else (hc + ac) < c)
+    if p.startswith("KART "):
+        hy, ay = _say("HY"), _say("AY")
+        if hy is None or ay is None:
+            return None
+        c = cizgi_son(p)
+        return None if c is None else ((hy + ay) > c if " ÜST " in p else (hy + ay) < c)
+    if p.startswith(("ÜST ", "UST ", "ALT ")):
+        c = cizgi_son(p)
+        return None if c is None else (toplam > c if p.startswith(("ÜST", "UST")) else toplam < c)
+    return None
+
+
+def kart_beklentisi(df: pd.DataFrame, ev: str, dep: str,
+                    lig_ipucu: str | None = None) -> dict | None:
+    """Beklenen sarı kart sayısı ve Üst/Alt olasılıkları.
+
+    korner_beklentisi ile aynı iskelet: takımların zaman ağırlıklı kart alma /
+    rakibe kart aldırma oranları. Kart dağılımı Poisson'dan daha oynaktır
+    (hakem etkisi, derbi etkisi); olasılıklar yaklaşıktır — bu yüzden hangi
+    çizginin gerçekten kullanılabileceğine ölçüm karar verir.
+    """
+    D = _istatistik_dilimi(df, ("HY", "AY"), "kart_dilimi")
+    if D is None:
+        return None
+    ref = D["Tarih"].max()
+    lig_df = D[D["Div"] == lig_ipucu] if lig_ipucu and (D["Div"] == lig_ipucu).any() else D
+    lig_ev, lig_dep = float(lig_df["HY"].mean()), float(lig_df["AY"].mean())
+
+    def taraf(takim: str, evde: bool):
+        sec = D[D["HomeTeam" if evde else "AwayTeam"] == takim]
+        if len(sec) < 4:
+            return None, None
+        w = _agirlik(sec["Tarih"], ref)
+        alan = _agirlikli_ort(sec["HY" if evde else "AY"], w, lig_ev if evde else lig_dep)
+        aldiran = _agirlikli_ort(sec["AY" if evde else "HY"], w, lig_dep if evde else lig_ev)
+        return alan, aldiran
+
+    ev_alan, ev_aldiran = taraf(ev, True)
+    dep_alan, dep_aldiran = taraf(dep, False)
+    if ev_alan is None and dep_alan is None:
+        return None
+    if ev_alan is None:
+        ev_alan, ev_aldiran = lig_ev, lig_dep
+    if dep_alan is None:
+        dep_alan, dep_aldiran = lig_dep, lig_ev
+
+    b_ev = max(0.4, min(6.0, (ev_alan + dep_aldiran) / 2))
+    b_dep = max(0.4, min(6.0, (dep_alan + ev_aldiran) / 2))
+    toplam = b_ev + b_dep
+
+    def ust(c: float) -> float:
+        return 1.0 - sum(_poisson_pmf(i, toplam) for i in range(int(math.floor(c)) + 1))
+
+    return {
+        "toplam": round(toplam, 1),
+        "ev": round(b_ev, 1),
+        "dep": round(b_dep, 1),
+        "lig_ort": round(lig_ev + lig_dep, 1),
+        "ustler": {str(c): round(ust(c), 3) for c in (2.5, 3.5, 4.5, 5.5)},
+    }
 
 
 def gercek_hucreler(fthg: int, ftag: int, hthg: int | None, htag: int | None) -> dict:
