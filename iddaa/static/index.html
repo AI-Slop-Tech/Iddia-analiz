@@ -700,6 +700,7 @@
 <symbol id="i-gecmis" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></symbol>
 <symbol id="i-backtest" viewBox="0 0 24 24"><path d="M14 2v6a2 2 0 0 0 .245.96l5.51 10.08A2 2 0 0 1 18 22H6a2 2 0 0 1-1.755-2.96l5.51-10.08A2 2 0 0 0 10 8V2"/><path d="M6.453 15h11.094"/><path d="M8.5 2h7"/></symbol>
 <symbol id="i-rolling" viewBox="0 0 24 24"><path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="m19 9-5 5-4-4-3 3"/></symbol>
+<symbol id="i-sistem" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></symbol>
 <symbol id="i-daha" viewBox="0 0 24 24"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></symbol>
 <symbol id="i-ayar" viewBox="0 0 24 24"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></symbol>
 <symbol id="i-teshis" viewBox="0 0 24 24"><path d="M11 2v2"/><path d="M5 2v2"/><path d="M5 3H4a2 2 0 0 0-2 2v4a6 6 0 0 0 12 0V5a2 2 0 0 0-2-2h-1"/><path d="M8 15a6 6 0 0 0 12 0v-3"/><circle cx="20" cy="10" r="2"/></symbol>
@@ -769,6 +770,7 @@
       <button class="sekme aktif" data-s="hafta"><svg class="ic"><use href="#i-bulten"/></svg><span>Bülten</span></button>
       <button class="sekme" data-s="tablo"><svg class="ic"><use href="#i-tablo"/></svg><span>Tahmin Tablosu</span></button>
       <button class="sekme" data-s="surpriz"><svg class="ic"><use href="#i-radar"/></svg><span>Sürpriz Radarı</span></button>
+      <button class="sekme" data-s="sistem"><svg class="ic"><use href="#i-sistem"/></svg><span>Sistem Önerisi</span></button>
       <button class="sekme" data-s="kupon"><svg class="ic"><use href="#i-kupon"/></svg><span>Kupon Defteri</span><span class="rozet-sayi" hidden></span></button>
       <button class="sekme" data-s="rolling"><svg class="ic"><use href="#i-rolling"/></svg><span>Rolling</span></button>
     <div class="yan-baslik">Analiz</div>
@@ -945,6 +947,29 @@
   </section>
 
   <!-- ============ SONUÇLAR ============ -->
+  <section id="s-sistem">
+    <div class="kart">
+      <h2><svg class="ic"><use href="#i-sistem"/></svg> Sistem Önerisi</h2>
+      <div class="alt-baslik">Günün <b>bütün maçlarını</b> ve fiyatlanabilen <b>bütün pazarlarını</b> tarar,
+        her seçimi <b>ölçülmüş karnesiyle</b> sıralar ve hedef orana ulaşan kuponu kurar.
+        Sıralama ölçüme dayanır: aşağıdaki "pazar karnesi" 10.000 maçlık eğitim/test ayrımından çıktı.</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px">
+        <div><label>Hedef toplam oran</label>
+          <input id="sis-hedef" type="number" value="2.00" step="0.05" min="1.10" max="20"></div>
+        <div><label>En fazla bacak</label>
+          <input id="sis-bacak" type="number" value="3" min="1" max="6"></div>
+        <div><label>Güven eşiği (model %)</label>
+          <input id="sis-esik" type="number" value="60" min="40" max="90"></div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;align-items:center">
+        <button class="btn" onclick="sistemTara()"><svg class="ic"><use href="#i-tara"/></svg> Sistemi çalıştır</button>
+        <span class="ipucu" id="sis-gun-not"></span>
+      </div>
+    </div>
+    <div id="sistem-sonuc"></div>
+    <div class="not" id="sis-dipnot"></div>
+  </section>
+
   <section id="s-rolling">
     <div class="kart">
       <h2><svg class="ic"><use href="#i-rolling"/></svg> Rolling Planlayıcı</h2>
@@ -1131,7 +1156,7 @@
 <nav class="alt-nav" aria-label="Ana gezinme">
   <button class="sekme aktif" data-s="hafta"><svg class="ic"><use href="#i-bulten"/></svg><span>Bülten</span></button>
   <button class="sekme" data-s="tablo"><svg class="ic"><use href="#i-tablo"/></svg><span>Tablo</span></button>
-  <button class="sekme" data-s="surpriz"><svg class="ic"><use href="#i-radar"/></svg><span>Radar</span></button>
+  <button class="sekme" data-s="sistem"><svg class="ic"><use href="#i-sistem"/></svg><span>Sistem</span></button>
   <button class="sekme" data-s="kupon"><svg class="ic"><use href="#i-kupon"/></svg><span>Kupon</span><span class="rozet-sayi" hidden></span></button>
   <button class="sekme" data-s="rolling"><svg class="ic"><use href="#i-rolling"/></svg><span>Rolling</span></button>
   <button class="sekme" id="btn-daha" onclick="dahaAc()"><svg class="ic"><use href="#i-daha"/></svg><span>Daha</span></button>
@@ -1139,6 +1164,7 @@
 <div class="daha-kaplama" id="daha-kaplama" onclick="if(event.target===this)dahaKapat()">
   <div class="daha-sayfa" role="dialog" aria-label="Diğer bölümler">
     <div class="daha-tut"></div>
+    <button class="sekme" data-s="surpriz"><svg class="ic"><use href="#i-radar"/></svg><span>Sürpriz Radarı</span></button>
     <button class="sekme" data-s="sonuc"><svg class="ic"><use href="#i-sonuc"/></svg><span>Sonuçlar & Karne</span></button>
     <button class="sekme" data-s="oran"><svg class="ic"><use href="#i-oran"/></svg><span>Oran Analizi</span></button>
     <button class="sekme" data-s="takim"><svg class="ic"><use href="#i-hedef"/></svg><span>Takım Analizi</span></button>
@@ -1402,6 +1428,8 @@ const BOLUM = {
   hafta:   ['Bülten',           'günün maçları ve değer taraması'],
   tablo:   ['Tahmin Tablosu',   'seçili günün tüm maçları tek tabloda'],
   surpriz: ['Sürpriz Radarı',   'İY/MS çapraz sonuç taraması'],
+  sistem:  ['Sistem Önerisi',   'ölçülmüş karneye göre günün en mantıklı kuponu'],
+  rolling: ['Rolling',          'kasa zinciri ve adım takibi'],
   kupon:   ['Kupon Defteri',    'topladığın seçimler ve karneleri'],
   sonuc:   ['Sonuçlar & Karne', 'oynanan maçlar ve tahmin isabeti'],
   oran:    ['Oran Analizi',     'bu oranla açılan maçlar tarihte ne yaptı?'],
@@ -1409,7 +1437,7 @@ const BOLUM = {
   gecmis:  ['Geçmiş Maçlar',    'açılış oranlarıyla eski maç listesi'],
   btest:   ['Backtest',         'sistemin geçmiş sezonlardaki karnesi'],
 };
-const ALT_BARDA = ['hafta', 'tablo', 'surpriz', 'kupon'];
+const ALT_BARDA = ['hafta', 'tablo', 'sistem', 'kupon', 'rolling'];
 function sekmeAc(ad){
   document.querySelectorAll('.sekme').forEach(x => x.classList.toggle('aktif', x.dataset.s === ad));
   document.querySelectorAll('section').forEach(x => x.classList.toggle('aktif', x.id === 's-' + ad));
@@ -1425,6 +1453,11 @@ function sekmeAc(ad){
   window.scrollTo({top: 0, behavior: 'instant'});
   if(ad === 'kupon') kuponSekmesiCiz();
   if(ad === 'rolling') rollingYukle();
+  if(ad === 'sistem'){
+    const n = $('#sis-gun-not');
+    if(n) n.textContent = AKTIF_GUN ? `seçili gün: ${AKTIF_GUN} (Bülten sekmesinden değiştirilir)`
+                                    : 'önce Bülten sekmesinden bir gün seç';
+  }
   if(ad === 'tablo' && AKTIF_TABLO_GUN && !TABLOLAR[AKTIF_TABLO_GUN]) tabloOlustur();
 }
 
@@ -3613,6 +3646,160 @@ async function rollingSaglamEkle(ev, dep, pazar, oran, tarih, saat, lig, mod){
     bildir(`📈 ${ev} – ${dep} yeni adım olarak eklendi (${tl(plan.bakiye)}₺ yatırım).`);
     ROLLING_PLANLAR = [];   // sekme açılınca tazelensin
     if(document.querySelector('#s-rolling.aktif')) rollingYukle();
+  }catch(h){ bildir(h.message, true); }
+}
+
+// ───────────────────────────── Sistem Önerisi
+let SISTEM_SON = null;
+
+function sisRozet(k){
+  if(!k) return '<span class="chip" title="bu pazar için ölçüm yok">ölçülmedi</span>';
+  const s = k.guvenilir ? 'ev-poz' : 'ev-neg';
+  return `<span class="chip ${s}" title="${k.n} maçta ölçüldü: model %${(k.dedi*100).toFixed(1)} dedi, gerçekte %${(k.gercek*100).toFixed(1)} oldu">
+    karne %${(k.gercek*100).toFixed(0)} · n=${tl(k.n)}</span>`;
+}
+
+function sisBacakHTML(b, i){
+  const oranMetin = b.oran
+    ? `@ <b>${b.oran.toFixed(2)}</b>`
+    : `<span class="ipucu">adil ${b.adil.toFixed(2)} — bültendeki fiyatla kıyasla</span>`;
+  const ev = (b.ev === null || b.ev === undefined) ? '' :
+    `<span class="${b.ev >= 0 ? 'ev-poz' : 'ev-neg'}" title="beklenen değer">${b.ev >= 0 ? '+' : ''}%${(b.ev*100).toFixed(1)}</span>`;
+  return `<div class="one-cikan" style="align-items:flex-start;flex-wrap:wrap">
+    <span class="chip">${i + 1}</span>
+    <span style="flex:1;min-width:170px">
+      <b>${esc(b.ev_ad)} – ${esc(b.dep_ad)}</b>
+      <div class="ipucu">${esc(b.saat || '')}${b.lig ? ' · ' + esc(b.lig) : ''}</div>
+    </span>
+    <span style="min-width:120px"><b>${esc(b.pazar)}</b> ${oranMetin}</span>
+    <span class="buyukev" title="ölçüm düzeltmesi uygulanmış model olasılığı">%${(b.p*100).toFixed(0)}</span>
+    ${ev}
+    ${sisRozet(b.karne)}
+    ${b.gerekce && b.gerekce.length
+      ? `<span class="gerekce">${iks('gerekce')}<span>${b.gerekce.map(esc).join(' · ')}</span></span>` : ''}
+  </div>`;
+}
+
+function sistemCiz(d){
+  const kutu = $('#sistem-sonuc'); if(!kutu) return;
+  if(d.hata){ kutu.innerHTML = `<div class="kart bos-durum"><p>${esc(d.hata)}</p></div>`; return; }
+  const k = d.kupon;
+  const kuponHTML = k ? `
+    <div class="kart">
+      <h2>🎯 Önerilen kupon — toplam <b>${k.oran.toFixed(2)}</b></h2>
+      <div class="capraz-kutu">
+        <div class="capraz-satir" style="border-top:0"><span style="flex:1">Kuponun tutma olasılığı (bacakların çarpımı)</span>
+          <b class="${k.p >= 0.5 ? 'ev-poz' : ''}">%${(k.p*100).toFixed(1)}</b>
+          <span class="ipucu">${k.bacaklar.length} bacak</span></div>
+        <div class="capraz-satir"><span style="flex:1">Modelin <b>iddia ettiği</b> beklenen değer (100₺ için)</span>
+          <b class="${k.ev >= 0 ? 'ev-poz' : 'ev-neg'}">${(100*(1+k.ev)).toFixed(0)} ₺</b>
+          <span class="ipucu">${k.ev >= 0 ? 'model kendini kârda görüyor' : 'model bile eksi diyor'}</span></div>
+        <div class="capraz-satir"><span style="flex:1">Ölçümde <b>gerçekte</b> ne oldu (aynı kurallarla geçmiş kuponlar)</span>
+          <b>%43 tuttu</b>
+          <span class="ipucu">getiri %+2.5 ± 6.6 — yani sıfırdan ayırt edilemiyor</span></div>
+        ${k.basabas ? `<div class="capraz-satir"><span style="flex:1">Başabaş için gereken tutma şansı</span>
+          <b>%${(k.basabas*100).toFixed(1)}</b></div>` : ''}
+      </div>
+      ${k.bacaklar.map(sisBacakHTML).join('')}
+      ${k.uyari ? `<div class="not">${iks('dikkat')} ${esc(k.uyari)}</div>` : ''}
+      <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+        <button class="mini-btn" onclick="sistemKupona()">${iks('ekle')} Fişe ekle</button>
+        <button class="mini-btn" onclick="sistemRollinge()">📈 Rolling'e kombine adım olarak yaz</button>
+      </div>
+    </div>` : `<div class="kart bos-durum"><div class="dev">🎯</div>
+      <p>Bu ayarlarla hedefe ulaşan kupon kurulamadı.</p>
+      <p class="ipucu">Güven eşiğini düşür ya da hedef oranı azalt — sistem eşiği tutturmak için
+        <b>uydurma seçim eklemiyor</b>.</p></div>`;
+
+  const tekliHTML = d.tekliler && d.tekliler.length ? `
+    <div class="kart">
+      <h2>💎 Tek başına ${d.min_oran.toFixed(2)}+ oranlı değer seçimleri</h2>
+      <div class="alt-baslik">Modelin, piyasanın verdiği fiyattan <b>daha yüksek</b> şans tanıdığı seçimler.
+        Kombine kurmadan tek maça oynamak istersen buradakiler matematiksel olarak en mantıklıları.</div>
+      ${d.tekliler.map(sisBacakHTML).join('')}
+    </div>` : '';
+
+  const karneHTML = d.karne && d.karne.length ? `
+    <div class="kart">
+      <h2>📋 Pazar karnesi — neyin ne kadar güvenilir olduğu</h2>
+      <div class="alt-baslik">${esc(d.karne_not || '')}</div>
+      <div style="overflow-x:auto">
+      <table class="roll-tablo"><thead><tr>
+        <th>pazar</th><th>ölçüm</th><th>model dedi</th><th>gerçekte</th><th>sapma</th><th>ayırt gücü</th><th>durum</th>
+      </tr></thead><tbody>
+      ${d.karne.map(x => `<tr>
+        <td><b>${esc(x.pazar)}</b></td>
+        <td>${tl(x.n)} maç</td>
+        <td>%${(x.dedi*100).toFixed(1)}</td>
+        <td><b>%${(x.gercek*100).toFixed(1)}</b></td>
+        <td class="${Math.abs(x.fark) <= 0.01 ? 'ev-poz' : (Math.abs(x.fark) > 0.03 ? 'ev-neg' : '')}"
+            title="modelin dediği ile gerçekleşenin farkı; 3 puanı geçerse pazar elenir">
+          ${x.fark >= 0 ? '+' : ''}${(x.fark*100).toFixed(1)} puan</td>
+        <td class="${x.ayirt >= 0.08 ? 'ev-poz' : ''}">${x.ayirt >= 0 ? '+' : ''}${(x.ayirt*100).toFixed(1)}</td>
+        <td>${x.guvenilir ? '<span class="ev-poz">✅ kullanılıyor</span>'
+                          : '<span class="ev-neg">⛔ ' + esc(x.neden || 'elendi') + '</span>'}</td>
+      </tr>`).join('')}
+      </tbody></table></div>
+    </div>` : '';
+
+  kutu.innerHTML = `
+    <div class="kart">
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+        <span class="chip">${esc(d.tarih)}</span>
+        <span class="chip">${tl(d.mac_sayisi)} maç tarandı</span>
+        <span class="chip">${tl(d.aday_sayisi)} seçim değerlendirildi</span>
+        ${d.elenen ? `<span class="chip">${tl(d.elenen)} seçim ölçüm süzgecinde elendi</span>` : ''}
+      </div>
+    </div>
+    ${kuponHTML}${tekliHTML}${karneHTML}`;
+  $('#sis-dipnot').innerHTML = (d.notlar || []).map(n => `<div style="margin-bottom:6px">${n}</div>`).join('');
+}
+
+async function sistemTara(){
+  const kutu = $('#sistem-sonuc');
+  if(!AKTIF_GUN){ bildir('Önce Bülten sekmesinden bir gün seç.', true); return; }
+  kutu.innerHTML = '<div class="kart bos-durum"><p>🎯 Bütün maçlar ve pazarlar taranıyor…</p></div>';
+  try{
+    const d = await api('/api/sistem-onerisi', {
+      tarih: AKTIF_GUN,
+      hedef: +$('#sis-hedef').value,
+      maks_bacak: +$('#sis-bacak').value,
+      esik: (+$('#sis-esik').value) / 100
+    });
+    SISTEM_SON = d;
+    sistemCiz(d);
+  }catch(h){
+    kutu.innerHTML = `<div class="kart bos-durum"><p>${esc(h.message)}</p></div>`;
+  }
+}
+
+function sistemKupona(){
+  if(!SISTEM_SON || !SISTEM_SON.kupon){ bildir('Önce sistemi çalıştır.', true); return; }
+  let n = 0;
+  for(const b of SISTEM_SON.kupon.bacaklar){
+    if(b.mac_id === null || b.mac_id === undefined) continue;
+    oranSec(b.mac_id, b.pazar, b.oran || b.adil, b.ev_ad, b.dep_ad, b.saat || '', b.lig || '', SISTEM_SON.tarih);
+    n++;
+  }
+  bildir(n ? `${n} seçim fişe eklendi.` : 'Fişe eklenebilecek seçim yok.', !n);
+}
+
+async function sistemRollinge(){
+  if(!SISTEM_SON || !SISTEM_SON.kupon){ bildir('Önce sistemi çalıştır.', true); return; }
+  if(!ROLLING_PLANLAR.length){
+    try{ ROLLING_PLANLAR = (await api('/api/rolling')).planlar || []; }catch(h){}
+  }
+  const plan = rollingAktifPlan();
+  if(!plan){ bildir('Önce 📈 Rolling sekmesinden bir plan başlat.', true); sekmeAc('rolling'); return; }
+  const bacaklar = SISTEM_SON.kupon.bacaklar.map(b => ({
+    tarih: SISTEM_SON.tarih, saat: b.saat || '', lig: b.lig || '',
+    ev: b.ev_ad, dep: b.dep_ad, pazar: b.pazar, oran: b.oran || b.adil
+  }));
+  try{
+    await api('/api/rolling-adim', {id: plan.id,
+      secim: bacaklar.length > 1 ? {bacaklar} : bacaklar[0]});
+    bildir(`📈 ${bacaklar.length} bacaklı sistem kuponu Rolling'e adım olarak yazıldı.`);
+    ROLLING_PLANLAR = [];
   }catch(h){ bildir(h.message, true); }
 }
 
