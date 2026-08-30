@@ -21,7 +21,7 @@ import time
 import pandas as pd
 
 from . import __version__ as SURUM
-from . import analiz, backtest, kayit, kupon, rapor, rolling, veri, yorum
+from . import analiz, backtest, kayit, kupon, rapor, rolling, sistem, veri, yorum
 
 _DURUM: dict = {
     "df": None, "elo": None, "fikstur": None, "kitapcilar": [],
@@ -1423,6 +1423,123 @@ def uygulama_olustur():
             return maks[2] if maks else None
         kolon = "oran_ust25_maks" if secim.startswith("ÜST") else "oran_alt25_maks"
         return _num(r.get(kolon)) or _num(r.get("Max>2.5" if secim.startswith("ÜST") else "Max<2.5"))
+
+    @app.post("/api/sistem-onerisi")
+    def sistem_onerisi():
+        """Günün tüm maç ve pazarlarını ölçülmüş karneyle sıralar, kupon kurar.
+
+        Bülten taramasından ayrı bir uçtur: bülten maç başına TEK öneri döner,
+        burada her maçın fiyatlanabilen TÜM pazarları havuza girer. Mevcut
+        uçların davranışı değişmez.
+        """
+        try:
+            df = _df()
+        except FileNotFoundError:
+            return jsonify({"hata": "Önce veriyi güncelleyin."}), 503
+        govde = request.get_json(silent=True) or {}
+        tarih = str(govde.get("tarih", ""))
+        try:
+            hedef_oran = max(1.10, min(20.0, float(govde.get("hedef", 2.0))))
+            maks_bacak = max(1, min(6, int(govde.get("maks_bacak", 3))))
+            esik = max(0.40, min(0.90, float(govde.get("esik", 0.60))))
+        except (TypeError, ValueError):
+            return jsonify({"hata": "Geçersiz parametre."}), 400
+        try:
+            fik, _kitapcilar = _fikstur()
+        except Exception as hata:  # noqa: BLE001
+            return jsonify({"hata": f"Fikstür alınamadı: {hata}"}), 502
+
+        hedef = fik[fik["Tarih"].dt.strftime("%d.%m.%Y") == tarih]
+        simdi = veri.simdi_tr()
+        maclar, taranan, oransiz = [], 0, 0
+        butce = time.time() + 40.0
+        for idx, r in hedef.iterrows():
+            if r["Tarih"] <= simdi:        # başlamış maç öneriye girmez
+                continue
+            if time.time() > butce:
+                break
+            taranan += 1
+            oranlar, maks, ust_alt = _fikstur_oranlari(r)
+            if not oranlar:
+                oransiz += 1
+                continue
+            try:
+                if bool(r.get("analiz_yok", False) is True):
+                    a = analiz.kalip_analizi(
+                        df, tuple(oranlar),
+                        ust_alt=tuple(ust_alt) if ust_alt else None,
+                        lig_ipucu=r["Div"])
+                else:
+                    a = analiz.mac_analizi(
+                        df, r["HomeTeam"], r["AwayTeam"], oranlar=tuple(oranlar),
+                        elo=_DURUM["elo"],
+                        ust_alt=tuple(ust_alt) if ust_alt else None,
+                        lig_ipucu=r["Div"])
+            except Exception:  # noqa: BLE001
+                continue
+            if not a:
+                continue
+            en_iyi = _en_iyi_hepsi(r, maks)
+            secenekler = []
+            for s in analiz.guvenli_secimler(a, sinir=0.50):
+                gerekce = []
+                if a.get("kalip") and a["kalip"].get("n"):
+                    gerekce.append(f"benzer oranlı {a['kalip']['n']:,} geçmiş maç".replace(",", "."))
+                secenekler.append({
+                    "pazar": s["pazar"],
+                    "p": s["p"],
+                    "oran": en_iyi.get(s["pazar"]) or s.get("oran"),
+                    "gerekce": gerekce,
+                })
+            # Korner: guvenli_secimler kapsamında değil, ayrı motordan gelir.
+            # Poisson yaklaşımı deney22'de ölçüldü ve kalibrasyonu geçti; bültende
+            # korner fiyatı olmadığı için oran YOK (adil oranla kıyaslanır).
+            if not bool(r.get("analiz_yok", False) is True):
+                try:
+                    kb = analiz.korner_beklentisi(df, r["HomeTeam"], r["AwayTeam"], r["Div"])
+                except Exception:  # noqa: BLE001
+                    kb = None
+                if kb:
+                    kaynak = (f"beklenen korner {kb['toplam']} "
+                              f"(lig ortalaması {kb['lig_ort']})")
+                    for cizgi, p_ust in kb["ustler"].items():
+                        for yon, p in (("ÜST", p_ust), ("ALT", 1.0 - p_ust)):
+                            secenekler.append({
+                                "pazar": f"KORNER {yon} {float(cizgi)}",
+                                "p": float(p),
+                                "oran": None,
+                                "gerekce": [kaynak],
+                            })
+            if secenekler:
+                # DİKKAT: pandas'ta NaN "doğru" sayılır, bu yüzden `r.get("LigAdi") or
+                # r["Div"]` boş lig adında NaN döndürür ve jsonify geçersiz JSON yazar
+                # (Python NaN'ı okur, tarayıcının JSON.parse'ı reddeder → sayfa boş kalır).
+                lig_ad = r.get("LigAdi")
+                if lig_ad is None or pd.isna(lig_ad) or not str(lig_ad).strip():
+                    lig_ad = r["Div"]
+                maclar.append({
+                    "mac_id": int(idx),
+                    "ev_ad": r["HomeTeam"],
+                    "dep_ad": r["AwayTeam"],
+                    "saat": r["Tarih"].strftime("%H:%M"),
+                    "lig": str(lig_ad),
+                    "secenekler": secenekler,
+                })
+
+        havuz, elenen = sistem.havuz_kur(maclar)
+        return jsonify({
+            "tarih": tarih,
+            "mac_sayisi": taranan,
+            "aday_sayisi": len(havuz),
+            "elenen": elenen,
+            "min_oran": hedef_oran,
+            "kupon": sistem.kupon_kur(havuz, hedef=hedef_oran,
+                                      maks_bacak=maks_bacak, esik=esik),
+            "tekliler": sistem.tekli_degerler(havuz, min_oran=hedef_oran),
+            "karne": sistem.karne_tablosu(),
+            "karne_not": sistem.KARNE_NOT,
+            "notlar": sistem.notlar(oransiz),
+        })
 
     @app.post("/api/bulten-tara")
     def bulten_tara():
