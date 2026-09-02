@@ -1442,6 +1442,8 @@ def uygulama_olustur():
             hedef_oran = max(1.10, min(20.0, float(govde.get("hedef", 2.0))))
             maks_bacak = max(1, min(6, int(govde.get("maks_bacak", 3))))
             esik = max(0.40, min(0.90, float(govde.get("esik", 0.60))))
+            marj = max(sistem.MARJ_ALT, min(sistem.MARJ_UST,
+                                            float(govde.get("marj", sistem.MARJ_VARSAYILAN))))
             kapsam = str(govde.get("kapsam", "yaygin"))
             if kapsam not in ("temel", "yaygin", "genis"):
                 kapsam = "yaygin"
@@ -1554,8 +1556,9 @@ def uygulama_olustur():
             "derin_mac": derin_mac,
             "sig_mac": len(maclar) - derin_mac,
             "min_oran": hedef_oran,
-            "kupon": sistem.kupon_kur(havuz, hedef=hedef_oran,
-                                      maks_bacak=maks_bacak, esik=esik),
+            "kupon": sistem.kupon_kur(havuz, hedef=hedef_oran, maks_bacak=maks_bacak,
+                                      esik=esik, marj=marj),
+            "marj": marj,
             "tekliler": sistem.tekli_degerler(havuz, min_oran=hedef_oran),
             "karne": sistem.karne_tablosu() + sistem.fiyatlanamaz_satirlari(),
             "karne_not": sistem.KARNE_NOT,
