@@ -191,34 +191,34 @@ PAZAR_KARNE: dict[str, dict] = {
 # İlk kez ölçüldü ve kalibrasyonu iyi çıktı (sapma ≤1.8 puan, ayırt +9…+11).
 # Yani reddedilen kalıp yöntemi değil, bu yöntem kullanılıyor.
 
-# ÖLÇÜLEN STRATEJİ KARNESİ (deney24) — sekmedeki "gerçekte ne oldu" satırı buradan.
+# ÖLÇÜLEN STRATEJİ KARNESİ (deney24, marjlı sürüm) — "gerçekte ne oldu" satırı.
 #
 # Nasıl ölçüldü: 305 GÜN seçildi (üretimdeki gibi bütün bir günün bülteni),
-# 14.031 maç tarandı, her gün için ÜRETİMDEKİ havuz_kur + kupon_kur çağrıldı ve
-# kurulan kuponun gerçekten tutup tutmadığına bakıldı. 1.812 kupon simüle edildi.
+# 14.031 maç tarandı, her gün için ÜRETİMDEKİ havuz_kur + kupon_kur çağrıldı
+# (kapsam "yaygin", marj %9) ve kurulan kuponun tutup tutmadığına bakıldı.
+# 1.915 kupon simüle edildi.
 #
-# Ölçülen asıl soru "kâr var mı" değil — bacakların çoğunun gerçek fiyatı
-# bültende olmadığı için ROI ölçülemez. Ölçülebilen ve asıl önemli olan şu:
-# SİSTEMİN SÖYLEDİĞİ OLASILIK DOĞRU MU?
+# ÖNCEKİ TUR GEÇERSİZ KILINDI: ilk ölçüm ADİL oranlarla kupon kuruyordu
+# (2.00 hedefi marjsız fiyatla tutturuluyordu) ve %52.0 isabet vermişti. Artık
+# fiyatlar marj düşülerek tahmin edildiği için kupon farklı bacaklardan
+# kuruluyor; karne yeniden ölçüldü.
 #
-#   hedef 2.00 · eşik %55: 302 kupon · dedi %52.6 · gerçek %50.7  (-2.0 puan)
-#   hedef 2.00 · eşik %60: 298 kupon · dedi %51.6 · gerçek %52.0  (+0.4 puan) ← en iyi
-#   hedef 2.00 · eşik %65: 270 kupon · dedi %50.8 · gerçek %49.6  (-1.2 puan)
-#   hedef 2.00 · eşik %70: 241 kupon · dedi %50.5 · gerçek %44.8  (-5.7 puan)
-#   hedef 3.00 · eşik %55: 295 kupon · dedi %35.6 · gerçek %36.6  (+1.0 puan)
-#   hedef 3.00 · eşik %60: 241 kupon · dedi %34.8 · gerçek %34.0  (-0.7 puan)
+#   hedef 2.00 · eşik %55: 305 kupon · dedi %47.6 · gerçek %49.5  (+1.9 puan)
+#   hedef 2.00 · eşik %60: 305 kupon · dedi %46.9 · gerçek %49.8  (+2.9 puan) ← varsayılan
+#   hedef 2.00 · eşik %65: 305 kupon · dedi %44.4 · gerçek %44.9  (+0.5 puan)
+#   hedef 2.00 · eşik %70: 303 kupon · dedi %42.0 · gerçek %45.5  (+3.5 puan)
+#   hedef 3.00 · eşik %55: 305 kupon · dedi %32.7 · gerçek %34.8  (+2.0 puan)
+#   hedef 3.00 · eşik %60: 294 kupon · dedi %30.7 · gerçek %31.3  (+0.6 puan)
 #
-# ESKİ İDDİA ÇÜRÜDÜ: önceki (dar havuzlu) ölçüme dayanarak "eşiği yükseltmek
-# isabeti artırır" yazmıştık. Geniş havuzda TERSİ çıktı: %70 eşikte isabet
-# %44.8'e düşüyor. Sebebi anlaşılır — eşik yükseldikçe havuz daralıyor ve
-# kupon, ölçümü zayıf uç pazarlara kayıyor. Varsayılan %60'ta bırakıldı.
+# Sapmaların hepsi ARTI yönde: sistem söylediğinden biraz daha iyi tutuyor,
+# yani temkinli tarafta yanılıyor. Kullanıcı açısından güvenli yön budur.
 STRATEJI_KARNE = {
-    (2.0, 0.55): {"n": 302, "dedi": 0.526, "gercek": 0.507},
-    (2.0, 0.60): {"n": 298, "dedi": 0.516, "gercek": 0.520},
-    (2.0, 0.65): {"n": 270, "dedi": 0.508, "gercek": 0.496},
-    (2.0, 0.70): {"n": 241, "dedi": 0.505, "gercek": 0.448},
-    (3.0, 0.55): {"n": 295, "dedi": 0.356, "gercek": 0.366},
-    (3.0, 0.60): {"n": 241, "dedi": 0.348, "gercek": 0.340},
+    (2.0, 0.55): {"n": 305, "dedi": 0.476, "gercek": 0.495},
+    (2.0, 0.60): {"n": 305, "dedi": 0.469, "gercek": 0.498},
+    (2.0, 0.65): {"n": 305, "dedi": 0.444, "gercek": 0.449},
+    (2.0, 0.70): {"n": 303, "dedi": 0.420, "gercek": 0.455},
+    (3.0, 0.55): {"n": 305, "dedi": 0.327, "gercek": 0.348},
+    (3.0, 0.60): {"n": 294, "dedi": 0.307, "gercek": 0.313},
 }
 
 
@@ -246,6 +246,47 @@ FIYATLANAMAZ = {
     "asist / kart göreni": "aynı sebep — oyuncu bazlı olay verisi yok",
     "ilk golü atan": "aynı sebep; ayrıca dakika verisi de yok",
 }
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# TÜRKİYE FİYATI — adil oran ile sitede göreceğin oran aynı şey değil
+#
+# Fiyatı bilinmeyen bir bacakta "adil oran" (1/olasılık) gösteriyorduk. Adil
+# oran MARJSIZ fiyattır; hiçbir kitapçı onu vermez. Kullanıcı bunu bildirdi:
+# sistem "toplam 2.00" diyor, sitede oranlar daha düşük çıkıyor ve kupon
+# kurulamıyor. Artık gösterilen ve kupon hesabında kullanılan fiyat, marj
+# düşülmüş GERÇEKÇİ fiyattır.
+#
+# Marj nereden geliyor: kullanıcının kendi ekran görüntüsündeki Samsunspor–
+# Fenerbahçe maçı (5.07 / 4.11 / 1.54) → 1/5.07 + 1/4.11 + 1/1.54 = 1.090,
+# yani %9.0 marj. Tek maçlık bir gözlem olduğu için VARSAYILAN kabul edildi;
+# arayüzden değiştirilebiliyor ve kullanıcı kendi sitesinin oranlarını girip
+# marjı ölçtürebiliyor. Bu bir ÖLÇÜM DEĞİL, ayarlanabilir bir varsayımdır.
+MARJ_VARSAYILAN = 0.09
+MARJ_ALT, MARJ_UST = 0.0, 0.35
+
+
+def gercekci_fiyat(p: float, marj: float = MARJ_VARSAYILAN) -> float:
+    """Olasılıktan, marjı düşülmüş 'sitede beklenen' fiyat."""
+    p = max(1e-6, min(0.999999, float(p)))
+    marj = max(MARJ_ALT, min(MARJ_UST, float(marj)))
+    return (1.0 / p) / (1.0 + marj)
+
+
+def marj_olc(oranlar) -> float | None:
+    """Kullanıcının sitesinden girilen 1-X-2 oranlarından marjı ölçer.
+
+    Marj = (1/o1 + 1/oX + 1/o2) − 1. Kitapçının fiyata koyduğu pay budur.
+    """
+    try:
+        degerler = [float(o) for o in oranlar if o and float(o) > 1.0]
+    except (TypeError, ValueError):
+        return None
+    if len(degerler) < 2:
+        return None
+    toplam = sum(1.0 / o for o in degerler)
+    marj = toplam - 1.0
+    return marj if MARJ_ALT <= marj <= MARJ_UST else None
 
 
 def karne(pazar: str) -> dict | None:
@@ -307,7 +348,7 @@ def _karne_rozeti(k: dict | None) -> dict | None:
             "ayirt": k["ayirt"], "bolge": False, "guvenilir": True}
 
 
-def _bacak(aday: dict) -> dict:
+def _bacak(aday: dict, marj: float = MARJ_VARSAYILAN) -> dict:
     """Havuz kaydını arayüzün beklediği bacak sözlüğüne çevirir."""
     k = PAZAR_KARNE.get(aday["pazar"])
     p = aday["p"]
@@ -322,6 +363,8 @@ def _bacak(aday: dict) -> dict:
         "p": float(p),
         "adil": round(1.0 / max(p, 1e-6), 2),
         "oran": float(oran) if oran else None,
+        # fiyatı bilinmeyen bacakta sitede beklenen fiyat (marj düşülmüş)
+        "site_oran": None if oran else round(gercekci_fiyat(p, marj), 2),
         "ev": (float(p) * float(oran) - 1.0) if oran else None,
         # Rozette gösterilen karne, sistemin fiilen oynadığı bölgeye ait olmalı:
         # MS1'in tüm dağılımdaki oranı %43.8 (ev sahibi kazanma taban oranı),
@@ -491,13 +534,22 @@ def havuz_kur(maclar: list[dict], esik: float = TABAN_ESIK,
     return havuz, elenen, kapsam_disi
 
 
-def _fiyat(aday: dict) -> float:
-    """Bacağın hesapta kullanılan oranı: gerçek fiyat varsa o, yoksa adil oran."""
-    return float(aday.get("oran") or (1.0 / max(aday["p"], 1e-6)))
+def _fiyat(aday: dict, marj: float = MARJ_VARSAYILAN) -> float:
+    """Bacağın hesapta kullanılan oranı.
+
+    Gerçek piyasa fiyatı varsa o kullanılır. Yoksa ADİL oran değil, marjı
+    düşülmüş GERÇEKÇİ fiyat kullanılır — çünkü kupon toplamı kullanıcının
+    sitede kurabileceği toplam olmalı. Adil oranla hesaplayınca sistem 2.43
+    diyordu, kullanıcı sitede 1.88 buluyordu.
+    """
+    gercek = aday.get("oran")
+    if gercek:
+        return float(gercek)
+    return gercekci_fiyat(aday["p"], marj)
 
 
 def kupon_kur(havuz: list[dict], hedef: float = 2.0, maks_bacak: int = 3,
-              esik: float = 0.60) -> dict | None:
+              esik: float = 0.60, marj: float = MARJ_VARSAYILAN) -> dict | None:
     """Hedef toplam orana ulaşan EN YÜKSEK OLASILIKLI kuponu arar.
 
     Neden açgözlü seçim yetmiyor: "en yüksek olasılıklıyı sırayla ekle" üç
@@ -522,7 +574,7 @@ def kupon_kur(havuz: list[dict], hedef: float = 2.0, maks_bacak: int = 3,
     # verim = bir bacağın orana kattığı birim başına koruduğu olasılık;
     # adil fiyatlı bacakta tam olarak -1, değerli bacakta -1'den büyüktür.
     def verim(a: dict) -> float:
-        o = _fiyat(a)
+        o = _fiyat(a, marj)
         return math.log(a["p"]) / math.log(o) if o > 1.0001 else -99.0
 
     adaylar.sort(key=verim, reverse=True)
@@ -551,7 +603,7 @@ def kupon_kur(havuz: list[dict], hedef: float = 2.0, maks_bacak: int = 3,
             secili.append(a)
             if mid is not None:
                 maclar.add(mid)
-            dfs(i + 1, secili, maclar, oran * _fiyat(a), yeni_p)
+            dfs(i + 1, secili, maclar, oran * _fiyat(a, marj), yeni_p)
             secili.pop()
             if mid is not None:
                 maclar.discard(mid)
@@ -562,24 +614,15 @@ def kupon_kur(havuz: list[dict], hedef: float = 2.0, maks_bacak: int = 3,
     bacaklar, oran, p = en_iyi["bacaklar"], en_iyi["oran"], en_iyi["p"]
     fiyatsiz = sum(1 for b in bacaklar if not b.get("oran"))
     uyari = None
-    if fiyatsiz == len(bacaklar):
-        # Bu durumda %olasılık bir keşif değil, kimliktir: adil oran 1/p olduğu
-        # için çarpımları hedefe eşitlendiğinde olasılık 1/hedef çıkar. Kullanıcı
-        # bunu "sistem %50 hesapladı" sanmasın.
-        uyari = (f"Bu kupondaki bacakların hiçbirinin gerçek fiyatı bültende yok; hepsi "
-                 f"ADİL oranla (1/olasılık) hesaplandı. Bu yüzden tutma şansının "
-                 f"%{1/oran*100:.0f} çıkması bir tahmin değil, matematiksel zorunluluk: "
-                 f"adil oranlarla {oran:.2f}'ye ulaşan her kupon 1/{oran:.2f} olasılık verir. "
-                 "Buradaki gerçek katkı, bacakların ÖLÇÜLMÜŞ karnesi yüksek pazarlardan "
-                 "seçilmiş olması. Kâr edip etmeyeceğini ancak bahis sitesindeki gerçek "
-                 "fiyatlar belirler — adil orandan yüksek fiyat bulursan kârdasın.")
-    elif fiyatsiz:
-        uyari = (f"{fiyatsiz} bacağın gerçek fiyatı elimizde yok (bültende o pazarın oranı "
-                 "gelmiyor); toplam oran orada ADİL oranla hesaplandı. Bahis sitesindeki "
-                 "fiyat adil oranın altındaysa kuponun gerçek getirisi burada yazandan "
-                 "düşük olur — fiyatı sitede kontrol et.")
+    if fiyatsiz:
+        uyari = (f"{fiyatsiz} bacağın gerçek piyasa fiyatı elimizde yok; orada fiyat, "
+                 f"modelin olasılığından %{marj*100:.0f} marj düşülerek TAHMİN edildi "
+                 "(sitende göreceğin fiyata yakın olsun diye — adil oran kullansaydık "
+                 "kupon olduğundan yüksek görünürdü). Sitedeki gerçek oran tahminden "
+                 "yüksekse kârdasın, düşükse kupon bu toplama ulaşmaz; marjı sekmeden "
+                 "kendi sitene göre ayarlayabilirsin.")
     return {
-        "bacaklar": [_bacak(b) for b in bacaklar],
+        "bacaklar": [_bacak(b, marj) for b in bacaklar],
         "oran": round(oran, 2),
         "p": float(p),
         "ev": float(p * oran - 1.0),
@@ -621,24 +664,18 @@ KARNE_NOT = ("137 pazarın hepsi 8.000 maçta ölçüldü (876.040 tekil ölçü
 def _strateji_notu() -> str:
     """Bu stratejinin geçmişte gerçekte ne yaptığı — süslemesiz."""
     a = STRATEJI_KARNE[(2.0, 0.60)]
-    kotu = STRATEJI_KARNE[(2.0, 0.70)]
     uc = STRATEJI_KARNE[(3.0, 0.55)]
     basabas = 1.0 / a["gercek"]
     return (
         "📊 <b>Bu sekmenin stratejisi geçmişte ne yaptı:</b> 305 günün bülteni "
-        "üretimdeki kurallarla taranıp 1.812 kupon simüle edildi. Varsayılan ayarda "
-        f"(2.00 hedef, %60 eşik) sistem <b>%{a['dedi']*100:.1f}</b> demişti, gerçekte "
-        f"<b>%{a['gercek']*100:.1f}</b> tuttu ({a['n']} kupon) — yani söylediği olasılık "
-        f"{abs(a['gercek']-a['dedi'])*100:.1f} puan hatayla doğru çıktı. "
-        f"3.00 hedefte %{uc['dedi']*100:.1f} deyip %{uc['gercek']*100:.1f} tutmuş. "
-        "<b>Bu kâr demek değildir:</b> bacakların çoğunun gerçek fiyatı bültende yok, "
-        "o yüzden getiri ölçülemez. Ölçülebilen şey olasılığın dürüstlüğü — o da tamam. "
-        f"Pratik kural: bu kuponu bahis sitende <b>{basabas:.2f}</b> ve üstü toplam "
-        "orana kurabiliyorsan matematik senden yana, altındaysa değil."
-        f"<br>⚠️ <b>Eşiği yükseltmek işe yaramıyor:</b> %70 eşikte isabet "
-        f"%{kotu['gercek']*100:.1f}'e <b>düşüyor</b> ({kotu['n']} kupon) — eşik yükseldikçe "
-        "havuz daralıyor ve kupon ölçümü zayıf uç pazarlara kayıyor. Önceki sürümde "
-        "bunun tersini yazmıştık; geniş pazar havuzuyla ölçünce iddia çürüdü."
+        "üretimdeki kurallarla (aynı kapsam, aynı %9 marj) taranıp 1.915 kupon "
+        f"simüle edildi. Varsayılan ayarda sistem <b>%{a['dedi']*100:.1f}</b> demişti, "
+        f"gerçekte <b>%{a['gercek']*100:.1f}</b> tuttu ({a['n']} kupon) — yani söylediğinden "
+        f"{(a['gercek']-a['dedi'])*100:.1f} puan <b>daha iyi</b>; sistem temkinli tarafta "
+        f"yanılıyor. 3.00 hedefte %{uc['dedi']*100:.1f} deyip %{uc['gercek']*100:.1f} tutmuş. "
+        f"<b>Pratik kural:</b> bu kuponu sitende <b>{basabas:.2f}</b> ve üstü toplam orana "
+        "kurabiliyorsan matematik senden yana; altındaysa marjı ödüyorsun demektir. "
+        "Kâr garantisi yok — ölçülen şey olasılığın dürüstlüğü, o da tamam."
     )
 
 

@@ -960,12 +960,26 @@
           <input id="sis-bacak" type="number" value="3" min="1" max="6"></div>
         <div><label>Güven eşiği (model %)</label>
           <input id="sis-esik" type="number" value="60" min="40" max="90"></div>
+        <div><label>Kitapçı marjı %</label>
+          <input id="sis-marj" type="number" value="9" min="0" max="35" step="0.5"
+                 title="Sitendeki oranlar adil orandan ne kadar düşük? Aşağıdan ölçtürebilirsin."></div>
         <div><label>Pazar kapsamı</label>
           <select id="sis-kapsam">
             <option value="temel">Temel — her maçta açık olanlar</option>
             <option value="yaygin" selected>Yaygın — çoğu maçta açık (önerilen)</option>
             <option value="genis">Hepsi — açılmayanlar da çıkabilir</option>
           </select></div>
+      </div>
+      <div class="capraz-kutu" style="margin-top:10px">
+        <div class="capraz-satir" style="border-top:0;flex-wrap:wrap;gap:6px">
+          <span style="flex:1;min-width:200px"><b>Sitendeki oranlara göre ayarla:</b>
+            bir maçın <b>1 · X · 2</b> oranlarını sitenden kopyala, marjı ölçelim</span>
+          <input id="sis-k1" type="number" step="0.01" placeholder="1" style="width:78px">
+          <input id="sis-kx" type="number" step="0.01" placeholder="X" style="width:78px">
+          <input id="sis-k2" type="number" step="0.01" placeholder="2" style="width:78px">
+          <button class="mini-btn" onclick="sisMarjOlc()">Marjı ölç</button>
+          <span class="ipucu" id="sis-marj-sonuc"></span>
+        </div>
       </div>
       <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;align-items:center">
         <button class="btn" onclick="sistemTara()"><svg class="ic"><use href="#i-tara"/></svg> Sistemi çalıştır</button>
@@ -3681,8 +3695,10 @@ function sisKatman(b){
 
 function sisBacakHTML(b, i){
   const oranMetin = b.oran
-    ? `@ <b>${b.oran.toFixed(2)}</b>`
-    : `<span class="ipucu">adil ${b.adil.toFixed(2)} — bültendeki fiyatla kıyasla</span>`;
+    ? `@ <b>${b.oran.toFixed(2)}</b> <span class="ipucu">piyasa fiyatı</span>`
+    : `<b>~${(b.site_oran || b.adil).toFixed(2)}</b>
+       <span class="ipucu" title="marjsız adil oran ${b.adil.toFixed(2)}; sitende bunu değil, marj düşülmüş fiyatı görürsün">
+         sitede beklenen · adil ${b.adil.toFixed(2)}</span>`;
   const ev = (b.ev === null || b.ev === undefined) ? '' :
     `<span class="${b.ev >= 0 ? 'ev-poz' : 'ev-neg'}" title="beklenen değer">${b.ev >= 0 ? '+' : ''}%${(b.ev*100).toFixed(1)}</span>`;
   return `<div class="one-cikan" style="align-items:flex-start;flex-wrap:wrap">
@@ -3706,7 +3722,10 @@ function sistemCiz(d){
   const k = d.kupon;
   const kuponHTML = k ? `
     <div class="kart">
-      <h2>🎯 Önerilen kupon — toplam <b>${k.oran.toFixed(2)}</b></h2>
+      <h2>🎯 Önerilen kupon — sitede beklenen toplam <b>${k.oran.toFixed(2)}</b></h2>
+      <div class="alt-baslik">Fiyatı bilinmeyen bacaklarda oran, <b>%${((d.marj || 0.09)*100).toFixed(0)} marj
+        düşülerek</b> tahmin edildi — yani sitende göreceğine yakın olsun diye. Marjsız "adil" oranla
+        hesaplasaydık bu kupon olduğundan yüksek görünürdü.</div>
       <div class="capraz-kutu">
         <div class="capraz-satir" style="border-top:0"><span style="flex:1">Kuponun tutma olasılığı (bacakların çarpımı)</span>
           <b class="${k.p >= 0.5 ? 'ev-poz' : ''}">%${(k.p*100).toFixed(1)}</b>
@@ -3788,6 +3807,19 @@ function sistemCiz(d){
   $('#sis-dipnot').innerHTML = (d.notlar || []).map(n => `<div style="margin-bottom:6px">${n}</div>`).join('');
 }
 
+function sisMarjOlc(){
+  const o = ['1','x','2'].map(x => +$('#sis-k' + x).value).filter(v => v > 1);
+  const el = $('#sis-marj-sonuc');
+  if(o.length < 2){ el.textContent = 'En az iki oran gir (ör. 1 ve 2).'; return; }
+  const marj = o.reduce((t, v) => t + 1 / v, 0) - 1;
+  if(marj < 0 || marj > 0.35){
+    el.textContent = `Ölçülen marj %${(marj*100).toFixed(1)} — beklenen aralık dışında, oranları kontrol et.`;
+    return;
+  }
+  $('#sis-marj').value = (marj * 100).toFixed(1);
+  el.innerHTML = `Sitenin marjı <b>%${(marj*100).toFixed(1)}</b> ölçüldü ve ayarlandı. Sistemi tekrar çalıştır.`;
+}
+
 async function sistemTara(){
   const kutu = $('#sistem-sonuc');
   if(!AKTIF_GUN){ bildir('Önce Bülten sekmesinden bir gün seç.', true); return; }
@@ -3798,7 +3830,8 @@ async function sistemTara(){
       hedef: +$('#sis-hedef').value,
       maks_bacak: +$('#sis-bacak').value,
       esik: (+$('#sis-esik').value) / 100,
-      kapsam: $('#sis-kapsam').value
+      kapsam: $('#sis-kapsam').value,
+      marj: (+$('#sis-marj').value) / 100
     });
     SISTEM_SON = d;
     sistemCiz(d);
