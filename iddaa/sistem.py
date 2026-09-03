@@ -994,3 +994,91 @@ def beklenti(p: float, kupon: int = 10) -> dict:
         "uzun_kayip": max(1, round(math.log(max(kupon, 2)) / max(1e-6, -math.log(max(yatma, 1e-6))))),
     }
 
+# ─────────────────────────────────────────────────────────────────────────
+# KÂR BÖLGESİ — modelin gerçekten kenarı olduğu tek yer
+#
+# Ölçüldü (gerçek fiyatlı 33.816 seçim, eğitim/test ayrımıyla):
+#   oran 1.20-1.40 · model p>=%70 → %80.3 tuttu · ROI %+3.2 (±2.8)  ✅
+#   oran 1.40-1.60 · model p>=%60 → %68.8 tuttu · ROI %+2.3 (±2.1)  ✅
+#   oran 1.60-2.00 · model p>=%60 → %55.4 tuttu · ROI %-8.3 (±4.8)  ✘
+#   oran >= 2.00 (hepsi)          → %31.0 tuttu · ROI %-3.3 (±1.0)  ✘
+#
+# VE ÇOK ÖNEMLİ: yüksek oranda "değer avı" TERS tepiyor. Model ne kadar çok
+# değer iddia ederse ROI o kadar kötüleşiyor:
+#   değer >%0 → %-4.2 · >%5 → %-4.8 · >%10 → %-5.6 · >%20 → %-14.6
+# Yani modelin yüksek oranlı seçimlerdeki "kenar" iddiası gerçek değil.
+# Bu yüzden sistem yüksek oranlı değer avı YAPMAZ.
+#
+# "İki katı" isteğinin dürüst karşılığı: kâr bölgesindeki İKİ bacağı
+# birleştirmek (1.45 × 1.45 ≈ 2.10). Kenar çarpımla korunur, ama tutma
+# şansı da çarpılır — yani seyrek tutar. Karnesi KAZANC_KARNE'de.
+KAZANC_ALT_ORAN, KAZANC_UST_ORAN = 1.20, 1.60
+
+# Bu modun KENDİ karnesi (305 gün, 736 kupon, gerçek fiyatlarla):
+#   hedef 2.00 · eşik %60: 208 kupon · dedi %42.8 · gerçek %42.3 · ROI %-2.5 (±8.0)
+#   hedef 2.00 · eşik %65: 156 kupon · dedi %43.5 · gerçek %46.2 · ROI %+5.8 (±9.2)
+#   hedef 2.00 · eşik %70:  86 kupon · dedi %43.8 · gerçek %45.3 · ROI %+1.6 (±12.1)
+#   hedef 2.50 · eşik %65: 105 kupon · dedi %35.3 · gerçek %38.1 · ROI %+7.2 (±13.5)
+# DÜRÜST OKUMA: getirilerin hepsi kendi hata payı içinde — kâr KANITLANMADI.
+# Elde olan şey: olasılık dürüst (dedi ~%43, gerçek ~%42-46) ve bütün bacakların
+# gerçek piyasa fiyatı var, yani "sitede bulamıyorum" sorunu en aza iniyor.
+# Kupon her gün çıkmaz: 305 günün yaklaşık yarısında kurulabildi.
+KAZANC_KARNE = {
+    (2.0, 0.60): {"n": 208, "dedi": 0.428, "gercek": 0.423, "roi": -0.025, "hata": 0.080},
+    (2.0, 0.65): {"n": 156, "dedi": 0.435, "gercek": 0.462, "roi": +0.058, "hata": 0.092},
+    (2.0, 0.70): {"n": 86, "dedi": 0.438, "gercek": 0.453, "roi": +0.016, "hata": 0.121},
+    (2.5, 0.65): {"n": 105, "dedi": 0.353, "gercek": 0.381, "roi": +0.072, "hata": 0.135},
+}
+
+
+def kazanc_karne(hedef: float, esik: float) -> dict | None:
+    """Kâr bölgesi modunun, kullanıcının ayarına en yakın ölçülmüş hücresi."""
+    if not KAZANC_KARNE:
+        return None
+    en_yakin = min(KAZANC_KARNE, key=lambda a: (abs(a[0] - hedef), abs(a[1] - esik)))
+    return {**KAZANC_KARNE[en_yakin], "hedef": en_yakin[0], "esik": en_yakin[1],
+            "tam_eslesme": abs(en_yakin[0] - hedef) < 0.01 and abs(en_yakin[1] - esik) < 0.01}
+
+
+def kazanc_kuponu(havuz: list[dict], hedef: float = 2.0, esik: float = 0.60,
+                  maks_bacak: int = 3) -> dict | None:
+    """Yalnız ölçümde kârlı çıkan bantta duran, GERÇEK fiyatlı bacaklarla kupon.
+
+    Farkı: fiyatı tahmin edilen bacak kabul etmez (o zaman getiri ölçülemez),
+    ve yalnız 1.20-1.60 aralığındaki fiyatları kullanır. Beklenen değere göre
+    sıralar, hedefe ulaşınca durur.
+    """
+    adaylar = [a for a in havuz
+               if a.get("oran") and KAZANC_ALT_ORAN <= a["oran"] <= KAZANC_UST_ORAN
+               and a["p"] >= esik]
+    if not adaylar:
+        return None
+    adaylar.sort(key=lambda a: -(a["p"] * a["oran"]))
+    secili, kullanilan, oran = [], set(), 1.0
+    for a in adaylar:
+        if len(secili) >= maks_bacak:
+            break
+        mid = a.get("mac_id")
+        if mid is not None and mid in kullanilan:
+            continue
+        secili.append(a)
+        if mid is not None:
+            kullanilan.add(mid)
+        oran *= float(a["oran"])
+        if oran >= hedef:
+            break
+    if not secili or oran < hedef:
+        return None
+    p = math.prod(a["p"] for a in secili)
+    return {
+        "bacaklar": [_bacak(a) for a in secili],
+        "oran": round(oran, 2),
+        "p": float(p),
+        "ev": float(p * oran - 1.0),
+        "basabas": float(1.0 / oran),
+        "mod": "kazanc",
+        "uyari": ("Bu moddaki bacakların hepsinin GERÇEK piyasa fiyatı var — "
+                  "tahmin yok. Sistem yalnız ölçümde kârlı çıkan 1.20-1.60 "
+                  "bandından seçiyor; o yüzden bazı günler kupon çıkmayabilir."),
+    }
+
