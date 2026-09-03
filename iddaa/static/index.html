@@ -956,6 +956,7 @@
       <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
         <button class="mini-btn" id="sis-mod-oran" onclick="sisModSec('oran')">🎯 Hedef orana ulaş</button>
         <button class="mini-btn" id="sis-mod-sans" onclick="sisModSec('sans')">🛡 En yüksek tutma şansı</button>
+        <button class="mini-btn" id="sis-mod-kazanc" onclick="sisModSec('kazanc')">💰 2x kâr bölgesi</button>
         <span class="ipucu" id="sis-mod-not" style="align-self:center"></span>
       </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px">
@@ -3749,6 +3750,11 @@ function sistemCiz(d){
           <span class="ipucu">sistem %${(d.strateji.dedi*100).toFixed(1)} demişti —
             ${Math.abs(d.strateji.gercek - d.strateji.dedi) <= 0.02
               ? 'söylediği olasılık doğru çıkmış' : 'sapma var, ayarı değiştir'}</span></div>
+        ${d.strateji && d.strateji.roi !== undefined ? `<div class="capraz-satir">
+          <span style="flex:1">Ölçülen <b>getiri</b> (aynı kurallarla ${tl(d.strateji.n)} kupon)</span>
+          <b class="${d.strateji.roi > d.strateji.hata ? 'ev-poz' : ''}">%${(d.strateji.roi*100).toFixed(1)}</b>
+          <span class="ipucu">± ${(d.strateji.hata*100).toFixed(1)} puan —
+            ${Math.abs(d.strateji.roi) > d.strateji.hata ? 'anlamlı olabilir' : '<b>kâr kanıtlanmadı</b>, zarar da yok'}</span></div>` : ''}
         <div class="capraz-satir"><span style="flex:1">Bu kuponun <b>kâra geçme sınırı</b></span>
           <b>${(1 / Math.max(d.strateji.gercek, 0.01)).toFixed(2)}</b>
           <span class="ipucu">sitende bu toplam oranın üstünü bulabilirsen matematik senden yana</span></div>` : ''}
@@ -3830,15 +3836,19 @@ function sistemCiz(d){
 let SIS_MOD = 'oran';
 function sisModSec(mod){
   SIS_MOD = mod;
-  const o = $('#sis-mod-oran'), s = $('#sis-mod-sans');
-  if(o) o.style.borderColor = mod === 'oran' ? '#22c55e' : '';
-  if(s) s.style.borderColor = mod === 'sans' ? '#22c55e' : '';
+  for(const [ad, dugme] of [['oran','#sis-mod-oran'], ['sans','#sis-mod-sans'], ['kazanc','#sis-mod-kazanc']]){
+    const el = $(dugme);
+    if(el) el.style.borderColor = mod === ad ? '#22c55e' : '';
+  }
   const bacakAlan = $('#sis-alan-bacak');
   if(bacakAlan) bacakAlan.hidden = mod !== 'sans';
   const not = $('#sis-mod-not');
-  if(not) not.innerHTML = mod === 'sans'
-    ? 'Oran hedefi yok: en çok tutan seçimler gelir, oran ne çıkarsa o.'
-    : 'Önce oran hedefi tutturulur; tutma şansı ne çıkarsa o.';
+  const metin = {
+    sans: 'Oran hedefi yok: en çok tutan seçimler gelir, oran ne çıkarsa o.',
+    kazanc: 'Yalnız ölçümde kârlı çıkan 1.20–1.60 bandından, <b>gerçek fiyatlı</b> bacaklarla kurar. Bazı günler kupon çıkmaz.',
+    oran: 'Önce oran hedefi tutturulur; tutma şansı ne çıkarsa o.'
+  };
+  if(not) not.innerHTML = metin[mod] || metin.oran;
 }
 
 function sisMarjOlc(){

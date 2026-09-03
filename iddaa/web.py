@@ -1445,7 +1445,7 @@ def uygulama_olustur():
             marj = max(sistem.MARJ_ALT, min(sistem.MARJ_UST,
                                             float(govde.get("marj", sistem.MARJ_VARSAYILAN))))
             oncelik = str(govde.get("oncelik", "oran"))
-            if oncelik not in ("oran", "sans"):
+            if oncelik not in ("oran", "sans", "kazanc"):
                 oncelik = "oran"
             sans_bacak = max(1, min(6, int(govde.get("sans_bacak", 2))))
             kapsam = str(govde.get("kapsam", "yaygin"))
@@ -1548,10 +1548,15 @@ def uygulama_olustur():
                 })
 
         havuz, elenen, kapsam_disi = sistem.havuz_kur(maclar, kapsam=kapsam)
-        kupon = (sistem.en_yuksek_sans(havuz, bacak_sayisi=sans_bacak, esik=esik, marj=marj)
-                 if oncelik == "sans"
-                 else sistem.kupon_kur(havuz, hedef=hedef_oran, maks_bacak=maks_bacak,
-                                       esik=esik, marj=marj))
+        if oncelik == "sans":
+            kupon = sistem.en_yuksek_sans(havuz, bacak_sayisi=sans_bacak,
+                                          esik=esik, marj=marj)
+        elif oncelik == "kazanc":
+            kupon = sistem.kazanc_kuponu(havuz, hedef=hedef_oran, esik=esik,
+                                         maks_bacak=maks_bacak)
+        else:
+            kupon = sistem.kupon_kur(havuz, hedef=hedef_oran, maks_bacak=maks_bacak,
+                                     esik=esik, marj=marj)
         derin_mac = sum(1 for m in maclar
                         if sistem.lig_derinligi(m.get("lig"), m.get("lig_kodu")) == "derin")
         return jsonify({
@@ -1570,8 +1575,9 @@ def uygulama_olustur():
             "tekliler": sistem.tekli_degerler(havuz, min_oran=hedef_oran),
             "karne": sistem.karne_tablosu() + sistem.fiyatlanamaz_satirlari(),
             "karne_not": sistem.KARNE_NOT,
-            "strateji": (None if oncelik == "sans"
-                         else sistem.strateji_karne(hedef_oran, esik)),
+            "strateji": (sistem.kazanc_karne(hedef_oran, esik) if oncelik == "kazanc"
+                         else (None if oncelik == "sans"
+                               else sistem.strateji_karne(hedef_oran, esik))),
             # "tutmuyor" şikâyetinin panzehiri: bu şansla ne beklenmeli
             "beklenti": sistem.beklenti(kupon["p"], 10) if kupon else None,
             "notlar": sistem.notlar(oransiz, kapsam=kapsam,
