@@ -264,13 +264,16 @@ FIYATLANAMAZ = {
 # marjı ölçtürebiliyor. Bu bir ÖLÇÜM DEĞİL, ayarlanabilir bir varsayımdır.
 MARJ_VARSAYILAN = 0.09
 MARJ_ALT, MARJ_UST = 0.0, 0.35
+MIN_OYNANABILIR_ORAN = 1.05   # bunun altını kitapçı listelemez
 
 
 def gercekci_fiyat(p: float, marj: float = MARJ_VARSAYILAN) -> float:
     """Olasılıktan, marjı düşülmüş 'sitede beklenen' fiyat."""
     p = max(1e-6, min(0.999999, float(p)))
     marj = max(MARJ_ALT, min(MARJ_UST, float(marj)))
-    return (1.0 / p) / (1.0 + marj)
+    # 1.01 tabanı: hiçbir kitapçı bunun altında fiyat listelemez. Tabansız
+    # bırakınca %97'lik bir seçim için 0.94 gibi anlamsız bir oran çıkıyordu.
+    return max(1.01, (1.0 / p) / (1.0 + marj))
 
 
 def marj_olc(oranlar) -> float | None:
@@ -336,16 +339,29 @@ def duzeltilmis(pazar: str, p: float) -> float:
     return max(0.01, min(0.99, float(p)))
 
 
-def _karne_rozeti(k: dict | None) -> dict | None:
-    """Bacak rozeti: öneri bölgesi karnesi varsa o, yoksa tüm dağılım."""
+def _karne_rozeti(k: dict | None, pazar: str = "", p: float | None = None) -> dict | None:
+    """Bacak rozeti — seçimin KENDİ olasılık bandındaki karne, varsa.
+
+    Önce %60+ bölgesinin ortalamasını gösteriyorduk; %87'lik bir seçimin
+    yanında "karne %73" yazınca çelişkili görünüyordu. Artık seçim hangi
+    bantta ise o bandın ölçümü gösteriliyor (ör. %80-90 bandı), yoksa
+    bölge ortalaması, o da yoksa tüm dağılım.
+    """
     if not k:
         return None
+    if pazar and p is not None:
+        bant = bant_karnesi(pazar, p)
+        if bant:
+            n, dedi, gercek = bant
+            alt = next((s for s in BANT_SINIRLARI if p >= s / 100.0), 50)
+            return {"n": n, "dedi": dedi, "gercek": gercek, "ayirt": k["ayirt"],
+                    "bolge": True, "bant": alt, "guvenilir": True}
     ku = _kullanim(k)
     if ku:
         return {"n": ku["n"], "dedi": ku["dedi"], "gercek": ku["gercek"],
-                "ayirt": k["ayirt"], "bolge": True, "guvenilir": True}
+                "ayirt": k["ayirt"], "bolge": True, "bant": None, "guvenilir": True}
     return {"n": k["n"], "dedi": k["dedi"], "gercek": k["gercek"],
-            "ayirt": k["ayirt"], "bolge": False, "guvenilir": True}
+            "ayirt": k["ayirt"], "bolge": False, "bant": None, "guvenilir": True}
 
 
 def _bacak(aday: dict, marj: float = MARJ_VARSAYILAN) -> dict:
@@ -369,7 +385,9 @@ def _bacak(aday: dict, marj: float = MARJ_VARSAYILAN) -> dict:
         # Rozette gösterilen karne, sistemin fiilen oynadığı bölgeye ait olmalı:
         # MS1'in tüm dağılımdaki oranı %43.8 (ev sahibi kazanma taban oranı),
         # ama model %60+ dediğinde %71.5. Kullanıcıyı ilgilendiren ikincisi.
-        "karne": _karne_rozeti(k),
+        # Bant araması HAM model çıktısıyla yapılır: bantlar modelin dediğine
+        # göre indekslenmiştir, kalibre edilmiş değere göre değil.
+        "karne": _karne_rozeti(k, aday["pazar"], aday.get("ham_p", p)),
         "katman": aday.get("katman", "temel"),
         "lig_derin": bool(aday.get("lig_derin")),
         "gerekce": aday.get("gerekce", []),
@@ -484,6 +502,123 @@ def kapsama_uygun(pazar: str, kapsam: str, lig_derin: bool) -> bool:
     return katman <= tavan
 
 
+# ─────────────────────────────────────────────────────────────────────────
+# BANT KARNESİ — modelin her olasılık bandında gerçekte ne tutturduğu
+#
+# pazar → {"bant alt sınırı %": (örneklem, modelin dediği, gerçekleşen)}
+#
+# NEDEN GEREKLİ: model uçlarda aşırı özgüvenli olabiliyor. Örnek: ÇŞ 1X
+# %90+ bandında %93.2 diyor, gerçekte %84.0 tutuyor (-9.2 puan). Genel
+# ortalaması iyi olduğu için bu, tek bir "sapma" sayısıyla yakalanamıyor.
+#
+# DAHA ÖNCE REDDEDİLEN DÜZELTMEDEN FARKI: pazar başına TEK bir sapma eklemeyi
+# sınamış ve reddetmiştik (35 pazarda düzeltti, 26'sında bozdu — yazı-tura).
+# Bant bazlı düzeltme AYRI bir şey ve ayrıca sınandı: test dönemi ikiye
+# bölünüp düzeltme ilk yarıda öğrenildi, ikinci yarıda uygulandı → 160 bandın
+# 125'inde daha iyi, ortalama hata 4.73 puandan 2.55 puana indi. Bu yüzden
+# uygulanıyor.
+PAZAR_BANT: dict[str, dict] = {
+    "1 ve ÜST 1.5": {"50": (650, 0.5427, 0.4908), "60": (301, 0.6436, 0.5449)},
+    "2Y 0.5 ÜST": {"60": (855, 0.6679, 0.7556), "70": (3059, 0.7536, 0.7869), "80": (1146, 0.8296, 0.8159)},
+    "2Y 1": {"50": (411, 0.5417, 0.5158)},
+    "2Y 1.5 ALT": {"50": (2194, 0.5518, 0.5442), "60": (1522, 0.6412, 0.5854)},
+    "2Y 1.5 ÜST": {"50": (949, 0.5385, 0.4795)},
+    "2Y 2.5 ALT": {"70": (1616, 0.7617, 0.7822), "80": (2900, 0.8455, 0.8266), "90": (341, 0.9165, 0.7889)},
+    "2Y GOL VAR": {"70": (4237, 0.7703, 0.7803), "80": (882, 0.8108, 0.8311)},
+    "2Y KG YOK": {"60": (1093, 0.6679, 0.7338), "70": (3086, 0.7496, 0.7353), "80": (890, 0.8270, 0.7315)},
+    "ALT 2.5": {"50": (3078, 0.5441, 0.5403), "60": (865, 0.6352, 0.5387)},
+    "ALT 3.5": {"50": (660, 0.5610, 0.6470), "60": (2043, 0.6561, 0.6745), "70": (3182, 0.7493, 0.7272), "80": (1790, 0.8389, 0.7447)},
+    "ALT 4.5": {"70": (1059, 0.7641, 0.8178), "80": (3959, 0.8576, 0.8593), "90": (2776, 0.9304, 0.8847)},
+    "ALT 5.5": {"80": (918, 0.8719, 0.9129), "90": (6976, 0.9530, 0.9454)},
+    "DEP ALT 0.5": {"50": (475, 0.5406, 0.3789)},
+    "DEP ALT 1.5": {"50": (1286, 0.5563, 0.6166), "60": (2241, 0.6526, 0.6488), "70": (2440, 0.7492, 0.7008), "80": (1178, 0.8399, 0.7275)},
+    "DEP ALT 2.5": {"70": (834, 0.7622, 0.8225), "80": (3015, 0.8584, 0.8650), "90": (3832, 0.9400, 0.9032)},
+    "DEP ALT 3.5": {"80": (467, 0.8675, 0.9036), "90": (7441, 0.9691, 0.9643)},
+    "DEP KORNER ALT 4.5": {"50": (1816, 0.5477, 0.5430), "60": (943, 0.6382, 0.6267)},
+    "DEP KORNER ALT 5.5": {"50": (382, 0.5707, 0.5812), "60": (1593, 0.6582, 0.6748), "70": (1916, 0.7408, 0.7072), "80": (569, 0.8275, 0.8172)},
+    "DEP KORNER ALT 6.5": {"70": (1085, 0.7646, 0.7521), "80": (2913, 0.8473, 0.8150), "90": (429, 0.9250, 0.9068)},
+    "DEP KORNER ÜST 3.5": {"50": (943, 0.5567, 0.5376), "60": (2206, 0.6516, 0.6011), "70": (1118, 0.7333, 0.6673)},
+    "DEP KORNER ÜST 4.5": {"50": (1373, 0.5366, 0.4909)},
+    "DEP ÜST 0.5": {"50": (1518, 0.5587, 0.6449), "60": (2621, 0.6523, 0.6837), "70": (2366, 0.7460, 0.7122), "80": (789, 0.8371, 0.7719)},
+    "DEP ÜST 1.5": {"50": (467, 0.5429, 0.4754)},
+    "EV ALT 1.5": {"50": (2046, 0.5545, 0.5733), "60": (2155, 0.6490, 0.6009), "70": (1283, 0.7426, 0.6461), "80": (311, 0.8384, 0.6720)},
+    "EV ALT 2.5": {"60": (753, 0.6570, 0.7158), "70": (1741, 0.7562, 0.7789), "80": (3357, 0.8519, 0.8275), "90": (1669, 0.9311, 0.8718)},
+    "EV ALT 3.5": {"70": (324, 0.7616, 0.8117), "80": (1385, 0.8622, 0.8939), "90": (6151, 0.9553, 0.9454)},
+    "EV KORNER ALT 4.5": {"50": (302, 0.5365, 0.6026)},
+    "EV KORNER ALT 5.5": {"50": (2252, 0.5559, 0.5493), "60": (994, 0.6430, 0.6419)},
+    "EV KORNER ALT 6.5": {"60": (1418, 0.6568, 0.6319), "70": (2272, 0.7399, 0.7060), "80": (501, 0.8298, 0.8124)},
+    "EV KORNER ÜST 3.5": {"60": (453, 0.6657, 0.5916), "70": (2653, 0.7604, 0.7090), "80": (1316, 0.8346, 0.7766)},
+    "EV KORNER ÜST 4.5": {"50": (1613, 0.5598, 0.5332), "60": (1963, 0.6434, 0.6103), "70": (556, 0.7306, 0.6547)},
+    "EV KORNER ÜST 5.5": {"50": (868, 0.5339, 0.4885)},
+    "EV ÜST 0.5": {"50": (495, 0.5643, 0.6990), "60": (1780, 0.6574, 0.7225), "70": (3041, 0.7511, 0.7613), "80": (2070, 0.8434, 0.8246), "90": (463, 0.9279, 0.8790)},
+    "EV ÜST 1.5": {"50": (1219, 0.5450, 0.5086), "60": (644, 0.6436, 0.5885)},
+    "HER İKİ YARI GOL VAR": {"50": (4312, 0.5485, 0.5677), "60": (312, 0.6164, 0.6795)},
+    "HER İKİ YARI GOL YOK": {"50": (504, 0.5158, 0.4762)},
+    "HND 0:1 2": {"50": (2061, 0.5521, 0.5696), "60": (1882, 0.6463, 0.5951), "70": (1157, 0.7418, 0.6655), "80": (372, 0.8407, 0.7554)},
+    "HND 0:2 2": {"50": (476, 0.5564, 0.6408), "60": (1050, 0.6542, 0.7219), "70": (2229, 0.7572, 0.7829), "80": (2844, 0.8481, 0.8231), "90": (1045, 0.9313, 0.8679)},
+    "HND 1:0 1": {"50": (1074, 0.5570, 0.6266), "60": (2006, 0.6542, 0.6934), "70": (2325, 0.7483, 0.7110), "80": (1465, 0.8438, 0.7939), "90": (412, 0.9322, 0.8398)},
+    "HND 2:0 1": {"60": (331, 0.6580, 0.7130), "70": (1081, 0.7595, 0.8085), "80": (3107, 0.8563, 0.8729), "90": (3329, 0.9394, 0.9090)},
+    "KART ALT 3.5": {"50": (1613, 0.5510, 0.4588), "60": (690, 0.6349, 0.5101)},
+    "KART ALT 4.5": {"50": (620, 0.5477, 0.5532), "60": (915, 0.6563, 0.6350), "70": (1824, 0.7487, 0.6584), "80": (449, 0.8274, 0.7305)},
+    "KART ALT 5.5": {"50": (398, 0.5634, 0.5829), "60": (848, 0.6487, 0.6804), "70": (792, 0.7540, 0.7487), "80": (2208, 0.8581, 0.8021), "90": (620, 0.9177, 0.8452)},
+    "KART ÜST 2.5": {"50": (445, 0.5664, 0.6674), "60": (1724, 0.6531, 0.7320), "70": (1116, 0.7431, 0.7437), "80": (1386, 0.8540, 0.8218)},
+    "KART ÜST 3.5": {"50": (859, 0.5438, 0.5576), "60": (733, 0.6542, 0.6303), "70": (870, 0.7417, 0.7138)},
+    "KART ÜST 4.5": {"50": (818, 0.5463, 0.4976)},
+    "KG VAR": {"50": (3100, 0.5461, 0.5410), "60": (925, 0.6327, 0.5849)},
+    "KG YOK": {"50": (2922, 0.5436, 0.4856), "60": (884, 0.6377, 0.5045)},
+    "KORNER ALT 10.5": {"50": (2059, 0.5587, 0.5580), "60": (1835, 0.6405, 0.6256), "70": (432, 0.7361, 0.7245)},
+    "KORNER ALT 11.5": {"60": (1807, 0.6646, 0.6464), "70": (2210, 0.7413, 0.7195), "80": (429, 0.8309, 0.8182)},
+    "KORNER ALT 9.5": {"50": (1363, 0.5375, 0.5209), "60": (304, 0.6355, 0.6053)},
+    "KORNER ÜST 8.5": {"50": (864, 0.5629, 0.5903), "60": (2646, 0.6528, 0.6391), "70": (848, 0.7233, 0.6781)},
+    "KORNER ÜST 9.5": {"50": (2427, 0.5475, 0.5406), "60": (444, 0.6232, 0.5676)},
+    "MS1": {"50": (1446, 0.5450, 0.5650), "60": (654, 0.6422, 0.6560)},
+    "MS2": {"50": (390, 0.5415, 0.5667)},
+    "ÇŞ 12": {"60": (1293, 0.6797, 0.7169), "70": (5957, 0.7398, 0.7343), "80": (687, 0.8329, 0.8137)},
+    "ÇŞ 1X": {"50": (1074, 0.5570, 0.6266), "60": (2006, 0.6542, 0.6934), "70": (2325, 0.7483, 0.7110), "80": (1465, 0.8438, 0.7939), "90": (412, 0.9322, 0.8398)},
+    "ÇŞ X2": {"50": (2061, 0.5521, 0.5696), "60": (1882, 0.6463, 0.5951), "70": (1157, 0.7418, 0.6655), "80": (372, 0.8407, 0.7554)},
+    "ÜST 0.5": {"80": (2359, 0.8724, 0.9084), "90": (5565, 0.9330, 0.9348)},
+    "ÜST 1.5": {"50": (511, 0.5631, 0.7025), "60": (1997, 0.6588, 0.7021), "70": (3583, 0.7505, 0.7572), "80": (1707, 0.8355, 0.8073)},
+    "ÜST 2.5": {"50": (2914, 0.5417, 0.5484), "60": (831, 0.6370, 0.6522)},
+    "İY 0": {"50": (463, 0.5228, 0.4384)},
+    "İY 0.5 ÜST": {"60": (2905, 0.6721, 0.6947), "70": (2203, 0.7211, 0.7426)},
+    "İY 1.5 ALT": {"50": (655, 0.5669, 0.5695), "60": (2494, 0.6546, 0.6576), "70": (1719, 0.7391, 0.6987)},
+    "İY 2.5 ALT": {"80": (2828, 0.8659, 0.8656), "90": (2103, 0.9241, 0.8944)},
+    "İY KG YOK": {"70": (1756, 0.7708, 0.7876), "80": (3223, 0.8396, 0.8200)},
+}
+
+BANT_SINIRLARI = (90, 80, 70, 60, 50)
+
+
+def bant_karnesi(pazar: str, p: float) -> tuple | None:
+    """Bu olasılık için ölçülmüş bant kaydı: (n, model_dedi, gercek)."""
+    bantlar = PAZAR_BANT.get(pazar)
+    if not bantlar:
+        return None
+    for sinir in BANT_SINIRLARI:
+        if p >= sinir / 100.0:
+            kayit = bantlar.get(str(sinir))
+            if kayit:
+                return kayit
+            break
+    return None
+
+
+def kalibre_p(pazar: str, p: float) -> float:
+    """Modelin olasılığını, o bantta ÖLÇÜLEN sapmayla düzeltir.
+
+    KULLANIM UYARISI: bu fonksiyon kupon SEÇİMİNDE kullanılmaz, yalnız
+    referans/gösterim içindir. Ölçüldü: tek başına daha isabetli (bant
+    sınamasında ortalama hata 4.73 → 2.55 puan), ama optimizasyona girdi
+    olarak verilince kupon karnesi bozuluyor (%49.8 → %43.9 gerçek isabet),
+    çünkü maksimizasyon, düzeltmesi yukarı sapmış tahminleri seçiyor.
+    """
+    kayit = bant_karnesi(pazar, p)
+    if not kayit:
+        return p
+    _n, dedi, gercek = kayit
+    return max(0.02, min(0.985, float(p) + (gercek - dedi)))
+
+
 TABAN_ESIK = 0.40     # havuz tabanı; kupon eşiği bunun üstünde ayrıca uygulanır
 TEKLI_MIN_P = 0.45    # ölçümde (bölüm E) bu tabanla %49.3 isabet / %+1.6 getiri çıktı
 
@@ -512,7 +647,16 @@ def havuz_kur(maclar: list[dict], esik: float = TABAN_ESIK,
             if not gecer:
                 elenen += 1
                 continue
-            p = duzeltilmis(s["pazar"], float(s["p"]))
+            # SEÇİMDE HAM MODEL OLASILIĞI KULLANILIR — bant düzeltmesi DEĞİL.
+            # Ölçüldü: bant düzeltmesi tek başına daha isabetli (ortalama hata
+            # 4.73 → 2.55 puan), AMA kupon kurucuya girdi olarak verilince
+            # karne bozuldu: 2.00/%60 ayarında düzeltmesiz kupon %49.8 tutup
+            # %46.9 diyordu (temkinli), düzeltmeli kupon %43.9 tutup %47.9
+            # dedi (abartılı). Sebep "optimizasyon laneti": olasılığı
+            # maksimize eden seçim, düzeltmesi yukarı sapmış tahminleri
+            # tercih ediyor. Düzeltme bu yüzden yalnız GÖSTERİMDE kalıyor.
+            ham = float(s["p"])
+            p = ham
             if p < esik:
                 continue
             k = PAZAR_KARNE[s["pazar"]]
@@ -527,7 +671,15 @@ def havuz_kur(maclar: list[dict], esik: float = TABAN_ESIK,
                     f"bu pazar {k['n']:,} maçta ölçüldü, sapması "
                     f"{k['fark']*100:+.1f} puan".replace(",", "."))
             gerekce.append(f"ayırt gücü {k['ayirt']*100:+.1f} puan")
-            havuz.append({**m, **s, "p": p, "katman": pazar_katmani(s["pazar"]),
+            bant = bant_karnesi(s["pazar"], ham)
+            if bant and abs(bant[2] - ham) >= 0.03:
+                yon = "ALTINDA" if bant[2] < ham else "ÜSTÜNDE"
+                gerekce.append(
+                    f"dikkat: bu pazarın %{int(ham*100)//10*10}+ bandında model ortalama "
+                    f"%{bant[1]*100:.0f} deyip gerçekte %{bant[2]*100:.0f} tutturmuş "
+                    f"({bant[0]:,} maç) — beklenti bu değerin {yon} olabilir".replace(",", "."))
+            havuz.append({**m, **s, "p": p, "ham_p": ham,
+                          "katman": pazar_katmani(s["pazar"]),
                           "lig_derin": derin, "gerekce": gerekce})
     # en güvenilirden başla; eşitlikte fiyatı olan (dolayısıyla EV'si ölçülebilen) önde
     havuz.sort(key=lambda x: (-x["p"], -(x.get("oran") or 0)))
@@ -763,3 +915,82 @@ def fiyatlanamaz_satirlari() -> list[dict]:
              "ayirt": None, "bolge": False, "guvenilir": False, "neden": sebep,
              "veri_yok": True}
             for ad, sebep in FIYATLANAMAZ.items()]
+
+def en_yuksek_sans(havuz: list[dict], bacak_sayisi: int = 1,
+                   esik: float = 0.60, marj: float = MARJ_VARSAYILAN) -> dict | None:
+    """Oran hedefi YOK: verilen bacak sayısıyla tutma şansı en yüksek kupon.
+
+    Neden gerekli: "en az 2.00 oran" istemek, matematiksel olarak "yarı yarıya
+    yatsın" istemektir (ölçüm: %49.8). Kullanıcı bunu yaşayınca haklı olarak
+    "tutmuyor" diyor. Bu mod ters yönden bakar — önce en çok tutanı seçer,
+    oran ne çıkarsa o olur. Tek bacakta ölçülen tutma oranı %90'ı geçebiliyor;
+    karşılığında oran 1.05-1.15 civarındadır. İkisi aynı anda olmaz.
+    """
+    # OYNANABİLİRLİK: fiyatı ~1.05'in altına düşen seçim pratikte kupona
+    # yazılamaz (kitapçı listelemez, minimum oran kuralına takılır).
+    adaylar = [a for a in havuz
+               if a["p"] >= esik and _fiyat(a, marj) >= MIN_OYNANABILIR_ORAN]
+    if not adaylar:
+        return None
+    bacak_sayisi = max(1, min(6, int(bacak_sayisi)))
+    secili, kullanilan = [], set()
+    for a in sorted(adaylar, key=lambda x: -x["p"]):     # p'ye göre sırala: çarpımı en büyük yapan budur
+        mid = a.get("mac_id")
+        if mid is not None and mid in kullanilan:
+            continue
+        secili.append(a)
+        if mid is not None:
+            kullanilan.add(mid)
+        if len(secili) >= bacak_sayisi:
+            break
+    if not secili:
+        return None
+    oran = 1.0
+    for a in secili:
+        oran *= _fiyat(a, marj)
+    p = math.prod(a["p"] for a in secili)
+    fiyatsiz = sum(1 for a in secili if not a.get("oran"))
+    return {
+        "bacaklar": [_bacak(a, marj) for a in secili],
+        "oran": round(oran, 2),
+        "p": float(p),
+        "ev": float(p * oran - 1.0),
+        "basabas": float(1.0 / oran) if oran else None,
+        "mod": "sans",
+        "uyari": (f"{fiyatsiz} bacağın fiyatı tahmin edildi (%{marj*100:.0f} marj düşülerek)."
+                  if fiyatsiz else None),
+    }
+
+
+def beklenti(p: float, kupon: int = 10) -> dict:
+    """Bu tutma şansıyla N kupon oynarsan gerçekte ne olur.
+
+    "Tutmuyor" şikâyetinin çoğu, %50'lik bir kuponun yarı yarıya yattığını
+    hesaba katmamaktan geliyor. Burada üst üste kaybetme ihtimalleri ve
+    beklenen tutan sayısı açıkça yazılır — sürpriz olmasın.
+    """
+    p = max(0.01, min(0.99, float(p)))
+    kupon = max(1, min(100, int(kupon)))
+    yatma = 1.0 - p
+
+    def _comb(n, r):
+        ust = 1
+        for i in range(r):
+            ust = ust * (n - i) // (i + 1)
+        return ust
+
+    def en_fazla(k):
+        return sum(_comb(kupon, i) * p ** i * yatma ** (kupon - i) for i in range(k + 1))
+
+    return {
+        "p": p,
+        "kupon": kupon,
+        "beklenen_tutan": round(kupon * p, 1),
+        "hicbiri": yatma ** kupon,
+        "ust_uste_3": yatma ** 3,
+        "ust_uste_5": yatma ** 5,
+        "yarisindan_az": en_fazla((kupon - 1) // 2),
+        # kabaca beklenen en uzun kayıp serisi (log tabanlı yaklaşıklık)
+        "uzun_kayip": max(1, round(math.log(max(kupon, 2)) / max(1e-6, -math.log(max(yatma, 1e-6))))),
+    }
+

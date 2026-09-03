@@ -1444,6 +1444,10 @@ def uygulama_olustur():
             esik = max(0.40, min(0.90, float(govde.get("esik", 0.60))))
             marj = max(sistem.MARJ_ALT, min(sistem.MARJ_UST,
                                             float(govde.get("marj", sistem.MARJ_VARSAYILAN))))
+            oncelik = str(govde.get("oncelik", "oran"))
+            if oncelik not in ("oran", "sans"):
+                oncelik = "oran"
+            sans_bacak = max(1, min(6, int(govde.get("sans_bacak", 2))))
             kapsam = str(govde.get("kapsam", "yaygin"))
             if kapsam not in ("temel", "yaygin", "genis"):
                 kapsam = "yaygin"
@@ -1544,6 +1548,10 @@ def uygulama_olustur():
                 })
 
         havuz, elenen, kapsam_disi = sistem.havuz_kur(maclar, kapsam=kapsam)
+        kupon = (sistem.en_yuksek_sans(havuz, bacak_sayisi=sans_bacak, esik=esik, marj=marj)
+                 if oncelik == "sans"
+                 else sistem.kupon_kur(havuz, hedef=hedef_oran, maks_bacak=maks_bacak,
+                                       esik=esik, marj=marj))
         derin_mac = sum(1 for m in maclar
                         if sistem.lig_derinligi(m.get("lig"), m.get("lig_kodu")) == "derin")
         return jsonify({
@@ -1556,13 +1564,16 @@ def uygulama_olustur():
             "derin_mac": derin_mac,
             "sig_mac": len(maclar) - derin_mac,
             "min_oran": hedef_oran,
-            "kupon": sistem.kupon_kur(havuz, hedef=hedef_oran, maks_bacak=maks_bacak,
-                                      esik=esik, marj=marj),
+            "kupon": kupon,
             "marj": marj,
+            "oncelik": oncelik,
             "tekliler": sistem.tekli_degerler(havuz, min_oran=hedef_oran),
             "karne": sistem.karne_tablosu() + sistem.fiyatlanamaz_satirlari(),
             "karne_not": sistem.KARNE_NOT,
-            "strateji": sistem.strateji_karne(hedef_oran, esik),
+            "strateji": (None if oncelik == "sans"
+                         else sistem.strateji_karne(hedef_oran, esik)),
+            # "tutmuyor" şikâyetinin panzehiri: bu şansla ne beklenmeli
+            "beklenti": sistem.beklenti(kupon["p"], 10) if kupon else None,
             "notlar": sistem.notlar(oransiz, kapsam=kapsam,
                                      sig_mac=len(maclar) - derin_mac),
         })

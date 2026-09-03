@@ -953,7 +953,14 @@
       <div class="alt-baslik">Günün <b>bütün maçlarını</b> ve fiyatlanabilen <b>bütün pazarlarını</b> tarar,
         her seçimi <b>ölçülmüş karnesiyle</b> sıralar ve hedef orana ulaşan kuponu kurar.
         Sıralama ölçüme dayanır: aşağıdaki "pazar karnesi" 10.000 maçlık eğitim/test ayrımından çıktı.</div>
+      <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+        <button class="mini-btn" id="sis-mod-oran" onclick="sisModSec('oran')">🎯 Hedef orana ulaş</button>
+        <button class="mini-btn" id="sis-mod-sans" onclick="sisModSec('sans')">🛡 En yüksek tutma şansı</button>
+        <span class="ipucu" id="sis-mod-not" style="align-self:center"></span>
+      </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px">
+        <div id="sis-alan-bacak" hidden><label>Kaç bacak</label>
+          <input id="sis-sans-bacak" type="number" value="2" min="1" max="6"></div>
         <div><label>Hedef toplam oran</label>
           <input id="sis-hedef" type="number" value="2.00" step="0.05" min="1.10" max="20"></div>
         <div><label>En fazla bacak</label>
@@ -1474,6 +1481,7 @@ function sekmeAc(ad){
   if(ad === 'kupon') kuponSekmesiCiz();
   if(ad === 'rolling') rollingYukle();
   if(ad === 'sistem'){
+    sisModSec(SIS_MOD);
     const n = $('#sis-gun-not');
     if(n) n.textContent = AKTIF_GUN ? `seçili gün: ${AKTIF_GUN} (Bülten sekmesinden değiştirilir)`
                                     : 'önce Bülten sekmesinden bir gün seç';
@@ -3680,7 +3688,8 @@ let SISTEM_SON = null;
 
 function sisRozet(k){
   if(!k) return '<span class="chip" title="bu pazar için ölçüm yok">ölçülmedi</span>';
-  const kapsam = k.bolge ? 'model %60+ dediği maçlarda' : 'tüm maçlarda';
+  const kapsam = k.bant ? `model %${k.bant}+ dediği maçlarda`
+                        : (k.bolge ? 'model %60+ dediği maçlarda' : 'tüm maçlarda');
   return `<span class="chip ev-poz" title="${kapsam} ${k.n} maçta ölçüldü: model %${(k.dedi*100).toFixed(1)} dedi, gerçekte %${(k.gercek*100).toFixed(1)} oldu">
     karne %${(k.gercek*100).toFixed(0)} · n=${tl(k.n)}</span>`;
 }
@@ -3748,6 +3757,17 @@ function sistemCiz(d){
       </div>
       ${k.bacaklar.map(sisBacakHTML).join('')}
       ${k.uyari ? `<div class="not">${iks('dikkat')} ${esc(k.uyari)}</div>` : ''}
+      ${d.beklenti ? `<div class="capraz-kutu" style="margin-top:8px">
+        <div class="capraz-satir" style="border-top:0"><span style="flex:1"><b>Bu şansla 10 kupon oynarsan</b></span>
+          <b>${d.beklenti.beklenen_tutan} tanesi tutar</b>
+          <span class="ipucu">${10 - Math.round(d.beklenti.beklenen_tutan)} tanesi yatar — bu normaldir</span></div>
+        <div class="capraz-satir"><span style="flex:1">Üst üste 3 kupon yatma ihtimali</span>
+          <b class="${d.beklenti.ust_uste_3 > 0.10 ? 'ev-neg' : ''}">%${(d.beklenti.ust_uste_3*100).toFixed(1)}</b>
+          <span class="ipucu">10 kuponluk seride en uzun kayıp serisi tipik olarak ${d.beklenti.uzun_kayip}</span></div>
+        <div class="capraz-satir"><span style="flex:1">10 kuponun yarısından azının tutma ihtimali</span>
+          <b>%${(d.beklenti.yarisindan_az*100).toFixed(0)}</b>
+          <span class="ipucu">kötü gitmesi sistemin bozulduğu anlamına gelmez</span></div>
+      </div>` : ''}
       <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
         <button class="mini-btn" onclick="sistemKupona()">${iks('ekle')} Fişe ekle</button>
         <button class="mini-btn" onclick="sistemRollinge()">📈 Rolling'e kombine adım olarak yaz</button>
@@ -3807,6 +3827,20 @@ function sistemCiz(d){
   $('#sis-dipnot').innerHTML = (d.notlar || []).map(n => `<div style="margin-bottom:6px">${n}</div>`).join('');
 }
 
+let SIS_MOD = 'oran';
+function sisModSec(mod){
+  SIS_MOD = mod;
+  const o = $('#sis-mod-oran'), s = $('#sis-mod-sans');
+  if(o) o.style.borderColor = mod === 'oran' ? '#22c55e' : '';
+  if(s) s.style.borderColor = mod === 'sans' ? '#22c55e' : '';
+  const bacakAlan = $('#sis-alan-bacak');
+  if(bacakAlan) bacakAlan.hidden = mod !== 'sans';
+  const not = $('#sis-mod-not');
+  if(not) not.innerHTML = mod === 'sans'
+    ? 'Oran hedefi yok: en çok tutan seçimler gelir, oran ne çıkarsa o.'
+    : 'Önce oran hedefi tutturulur; tutma şansı ne çıkarsa o.';
+}
+
 function sisMarjOlc(){
   const o = ['1','x','2'].map(x => +$('#sis-k' + x).value).filter(v => v > 1);
   const el = $('#sis-marj-sonuc');
@@ -3831,7 +3865,9 @@ async function sistemTara(){
       maks_bacak: +$('#sis-bacak').value,
       esik: (+$('#sis-esik').value) / 100,
       kapsam: $('#sis-kapsam').value,
-      marj: (+$('#sis-marj').value) / 100
+      marj: (+$('#sis-marj').value) / 100,
+      oncelik: SIS_MOD,
+      sans_bacak: +$('#sis-sans-bacak').value
     });
     SISTEM_SON = d;
     sistemCiz(d);
