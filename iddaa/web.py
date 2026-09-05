@@ -1462,6 +1462,15 @@ def uygulama_olustur():
         simdi = veri.simdi_tr()
         maclar, taranan, oransiz = [], 0, 0
         butce = time.time() + 40.0
+        # Pinnacle'ın BÜTÜN pazarları (30'a kadar): gerçek fiyat + marjsız olasılık.
+        # Bülten katmanı yalnız 1X2 ve 2.5'i satıra yazıyor; burada geniş harita
+        # doğrudan kullanılır ki Alt/Üst 1.5-4.5, takım golleri ve ilk yarı
+        # pazarları da GERÇEK fiyatla kupona girebilsin.
+        try:
+            pin_indeks = veri.pinnacle_indeksi(veri.pinnacle_oranlari())
+        except Exception:  # noqa: BLE001
+            pin_indeks = {}
+        keskin_sayisi = 0
         for idx, r in hedef.iterrows():
             if r["Tarih"] <= simdi:        # başlamış maç öneriye girmez
                 continue
@@ -1489,6 +1498,11 @@ def uygulama_olustur():
             if not a:
                 continue
             en_iyi = _en_iyi_hepsi(r, maks)
+            pin = veri.pinnacle_esle(pin_indeks, r["HomeTeam"], r["AwayTeam"], r["Tarih"]) if pin_indeks else None
+            pin_fiyat = (pin or {}).get("pazarlar") or {}
+            pin_adil = (pin or {}).get("adil") or {}
+            if pin_fiyat:
+                keskin_sayisi += 1
             ortak = []
             if a.get("kalip") and a["kalip"].get("n"):
                 ortak.append(f"benzer oranlı {a['kalip']['n']:,} geçmiş maç".replace(",", "."))
@@ -1524,10 +1538,12 @@ def uygulama_olustur():
                 elif pazar.startswith("KART"):
                     gerekce.append(f"beklenen sarı kart {kart['toplam']} "
                                    f"(lig ortalaması {kart['lig_ort']})")
+                oran_gercek = en_iyi.get(pazar) or pin_fiyat.get(pazar)
                 secenekler.append({
                     "pazar": pazar,
                     "p": float(p),
-                    "oran": en_iyi.get(pazar),   # yalnız MS ve Ü/A 2.5'te gerçek fiyat var
+                    "oran": oran_gercek,                  # bülten ya da Pinnacle fiyatı
+                    "keskin_adil": pin_adil.get(pazar),   # Pinnacle marjsız olasılık
                     "gerekce": gerekce,
                 })
             if secenekler:
@@ -1568,6 +1584,7 @@ def uygulama_olustur():
             "kapsam_disi": kapsam_disi,
             "derin_mac": derin_mac,
             "sig_mac": len(maclar) - derin_mac,
+            "keskin_mac": keskin_sayisi,
             "min_oran": hedef_oran,
             "kupon": kupon,
             "marj": marj,
@@ -2358,7 +2375,8 @@ def uygulama_olustur():
             plan = rolling.olustur(str(govde.get("ad", "")),
                                    float(govde.get("baslangic", 0)),
                                    float(govde.get("hedef_oran", 2.0) or 2.0),
-                                   int(govde.get("hedef_gun", 15) or 15))
+                                   int(govde.get("hedef_gun", 15) or 15),
+                                   float(govde.get("kesir", 1.0) or 1.0))
         except (ValueError, TypeError) as hata:
             return jsonify({"hata": str(hata)}), 400
         return jsonify({"tamam": True, "plan": rolling.hesapla(plan)})

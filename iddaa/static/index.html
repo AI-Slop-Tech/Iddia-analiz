@@ -967,7 +967,7 @@
         <div><label>En fazla bacak</label>
           <input id="sis-bacak" type="number" value="3" min="1" max="6"></div>
         <div><label>Güven eşiği (model %)</label>
-          <input id="sis-esik" type="number" value="60" min="40" max="90"></div>
+          <input id="sis-esik" type="number" value="65" min="40" max="90"></div>
         <div><label>Kitapçı marjı %</label>
           <input id="sis-marj" type="number" value="9" min="0" max="35" step="0.5"
                  title="Sitendeki oranlar adil orandan ne kadar düşük? Aşağıdan ölçtürebilirsin."></div>
@@ -1018,6 +1018,9 @@
       <div id="rp-sonuc" class="capraz-kutu"></div>
       <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
         <input id="rp-ad" placeholder="plan adı (ör. Eylül 2x denemesi)" style="flex:1;min-width:180px">
+        <span style="white-space:nowrap" title="Her adımda bakiyenin yüzde kaçı yatırılır. 100 = tüm bakiye (klasik rolling, tek yatışta biter). ¼ Kelly düğmesi bunu ölçülü doldurur.">
+          <label style="display:inline">Yatırım payı %</label>
+          <input id="rp-kesir" type="number" value="100" min="1" max="100" style="width:70px"></span>
         <button class="btn" onclick="rollingOlustur()">🚀 Bu ayarlarla plan başlat</button>
       </div>
     </div>
@@ -2351,7 +2354,10 @@ function kuponKartHTML(k){
         <span class="ipucu">${esc(s.tarih)} ${esc(s.saat)} · ${esc(s.lig)}</span>
         <span style="flex:1;min-width:150px">${esc(s.ev)} – ${esc(s.dep)}
           ${s.skor ? `<span class="ipucu">(${esc(s.skor)}${s.iy_skor ? ' · İY ' + esc(s.iy_skor) : ''})</span>` : ''}</span>
-        <span><b>${esc(s.pazar)}</b> @ ${s.oran.toFixed(2)}</span>
+        <span><b>${esc(s.pazar)}</b> @ ${s.oran.toFixed(2)}
+          ${typeof s.clv === 'number' ? `<span class="chip ${s.clv > 0.01 ? 'ev-poz' : (s.clv < -0.01 ? 'ev-neg' : '')}"
+              title="Kapanış çizgisi değeri: aldığın ${s.oran.toFixed(2)} vs Pinnacle kapanışı ${(s.kapanis||0).toFixed(2)}. Kapanışı düzenli yenen süreç uzun vadede kârdadır — tutup tutmamasından bağımsız.">
+              CLV ${s.clv >= 0 ? '+' : ''}${(s.clv*100).toFixed(1)}%</span>` : ''}</span>
         ${s.durum === 'bekliyor'
           ? `<span style="white-space:nowrap"><button class="mini-btn" onclick="bacakIsaretle(${k.id}, ${i}, 'tuttu')" title="Tuttu">${iks('tik')}</button>
              <button class="mini-btn" onclick="bacakIsaretle(${k.id}, ${i}, 'yatti')" title="Yattı">${iks('carpi')}</button></span>`
@@ -3634,7 +3640,24 @@ function rpHesapla(){
     <div class="capraz-satir"><span style="flex:1">Paranın beklenen değeri (matematiksel)</span>
       <b class="${ev >= B ? 'ev-poz' : 'ev-neg'}">${tl(ev)} ₺</b>
       <span class="ipucu">${ev < B ? 'başlangıcın altında — marjın bedeli' : 'başlangıcın üstünde'}</span></div>
-    <div class="capraz-satir" style="flex-wrap:wrap">${adimlar}</div>`;
+    <div class="capraz-satir" style="flex-wrap:wrap">${adimlar}</div>
+    ${(() => {
+      // Kesirli Kelly: (p·o−1)/(o−1) / 4. Kenar yoksa 0 → oynama.
+      const tam = (p * o - 1) / (o - 1), ceyrek = Math.max(0, tam / 4);
+      const kellyEv = ceyrek > 0 ? B * Math.pow(1 + ceyrek * (p * o - 1), N) : B;
+      return `<div class="capraz-satir" style="flex-wrap:wrap;gap:6px">
+        <span style="flex:1"><b>¼ Kelly önerisi</b> — her adımda bakiyenin
+          <b>%${(ceyrek*100).toFixed(1)}</b>'i (ilk adım ${tl(B*ceyrek)}₺)</span>
+        <span class="ipucu">${ceyrek > 0
+          ? `seri asla sıfırlanmaz; ${N} adımda beklenen bakiye ~${tl(kellyEv)}₺ — tüm-bakiye zincirinde ise seriyi bitirme şansı %${(seri*100).toFixed(1)}`
+          : 'p·o ≤ 1: bu oranda kenar yok, Kelly "oynama" diyor'}</span>
+        <button class="mini-btn" onclick="rpKesirUygula(${ceyrek.toFixed(4)})">Bu payı plana yaz</button>
+      </div>`;
+    })()}`;
+}
+function rpKesirUygula(kesir){
+  const el = $('#rp-kesir');
+  if(el){ el.value = Math.max(1, Math.round(kesir * 100)); bildir(`Yatırım payı %${el.value} olarak ayarlandı — plan başlatınca bu payla oynanır.`); }
 }
 
 async function rollingYukle(){
@@ -3649,7 +3672,8 @@ async function rollingYukle(){
 async function rollingOlustur(){
   try{
     await api('/api/rolling', {ad: $('#rp-ad').value, baslangic: +$('#rp-b').value,
-      hedef_oran: +$('#rp-o').value, hedef_gun: +$('#rp-n').value});
+      hedef_oran: +$('#rp-o').value, hedef_gun: +$('#rp-n').value,
+      kesir: Math.max(0.01, Math.min(1, (+$('#rp-kesir').value || 100) / 100))});
     $('#rp-ad').value = '';
     bildir('Plan oluşturuldu — ilk adımı ekle.');
     rollingYukle();
@@ -3703,6 +3727,18 @@ function sisKatman(b){
   return `<span class="chip" title="${yazi}">${b.katman === 'yaygin' ? '◇ yaygın pazar' : '◈ dar pazar'}</span>`;
 }
 
+function sisKeskin(el, pKeskin){
+  // sitedeki oran × Pinnacle marjsız olasılık − 1 = keskin fiyata göre beklenen değer
+  const o = +el.value, hedef = el.parentElement.querySelector('[data-keskin]');
+  if(!hedef) return;
+  if(!(o > 1)){ hedef.textContent = ''; return; }
+  const deger = o * pKeskin - 1;
+  hedef.className = 'ipucu ' + (deger >= 0.02 ? 'ev-poz' : (deger <= -0.02 ? 'ev-neg' : ''));
+  hedef.textContent = deger >= 0.02 ? `değer %${(deger*100).toFixed(1)} — keskin fiyattan iyi ✔`
+    : deger <= -0.02 ? `%${(deger*100).toFixed(1)} — keskin fiyattan kötü, pas`
+    : 'keskin fiyatla başa baş';
+}
+
 function sisBacakHTML(b, i){
   const oranMetin = b.oran
     ? `@ <b>${b.oran.toFixed(2)}</b> <span class="ipucu">piyasa fiyatı</span>`
@@ -3721,6 +3757,11 @@ function sisBacakHTML(b, i){
     <span class="buyukev" title="ölçüm düzeltmesi uygulanmış model olasılığı">%${(b.p*100).toFixed(0)}</span>
     ${ev}
     ${sisRozet(b.karne)}${sisKatman(b)}
+    ${b.keskin_sinir ? `<span class="chip" title="Pinnacle'ın marjsız olasılığı %${(b.keskin_adil*100).toFixed(1)}; sitendeki oran bu sınırın ÜSTÜNDEYSE dünyanın en keskin kitapçısına göre değer var">
+        ⚡ keskin sınır ${b.keskin_sinir.toFixed(2)}</span>
+      <span style="white-space:nowrap"><input type="number" step="0.01" min="1.01" placeholder="sitendeki oran"
+        style="width:110px;padding:3px" oninput="sisKeskin(this, ${b.keskin_adil})">
+        <span class="ipucu" data-keskin></span></span>` : ''}
     ${b.gerekce && b.gerekce.length
       ? `<span class="gerekce">${iks('gerekce')}<span>${b.gerekce.map(esc).join(' · ')}</span></span>` : ''}
   </div>`;
@@ -3827,13 +3868,14 @@ function sistemCiz(d){
         ${d.elenen ? `<span class="chip">${tl(d.elenen)} seçim ölçüm süzgecinde elendi</span>` : ''}
         ${d.kapsam_disi ? `<span class="chip" title="kitapçının bu maçlarda açmadığı pazarlar">${tl(d.kapsam_disi)} seçim kapsam dışı</span>` : ''}
         ${d.sig_mac ? `<span class="chip" title="küçük liglerde yalnız temel pazarlar önerilir">${tl(d.sig_mac)} maç küçük ligde</span>` : ''}
+        ${d.keskin_mac ? `<span class="chip ev-poz" title="Pinnacle'da fiyatı bulunan maçlar: gerçek fiyat + keskin değer kontrolü">${tl(d.keskin_mac)} maçta keskin fiyat var</span>` : ''}
       </div>
     </div>
     ${kuponHTML}${tekliHTML}${karneHTML}`;
   $('#sis-dipnot').innerHTML = (d.notlar || []).map(n => `<div style="margin-bottom:6px">${n}</div>`).join('');
 }
 
-let SIS_MOD = 'oran';
+let SIS_MOD = 'kazanc';   // ölçümde en iyi 2x yolu (305 gün + son hafta kontrolü)
 function sisModSec(mod){
   SIS_MOD = mod;
   for(const [ad, dugme] of [['oran','#sis-mod-oran'], ['sans','#sis-mod-sans'], ['kazanc','#sis-mod-kazanc']]){
@@ -4010,6 +4052,7 @@ function rollingCiz(){
         <h2 style="margin:0">${esc(pl.ad)}</h2>${rozet}
         <span class="chip">${tl(pl.baslangic)}₺ → <b>${tl(pl.bakiye)}₺</b> (${pl.kat}×)</span>
         <span class="chip">${pl.tamamlanan}/${pl.hedef_gun} adım</span>
+        ${pl.kesir && pl.kesir < 0.999 ? `<span class="chip" title="her adımda bakiyenin bu payı yatırılır; yatınca seri bitmez, bakiye azalır">🛡 pay %${Math.round(pl.kesir*100)}</span>` : ''}
         <span style="flex:1"></span>
         <button class="mini-btn" onclick="rollingSil(${pl.id})">🗑 Planı sil</button>
       </div>
