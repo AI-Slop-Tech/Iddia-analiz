@@ -3824,14 +3824,10 @@ function sistemCiz(d){
       <p class="ipucu">Güven eşiğini düşür ya da hedef oranı azalt — sistem eşiği tutturmak için
         <b>uydurma seçim eklemiyor</b>.</p></div>`;
 
-  const tekliHTML = d.tekliler && d.tekliler.length ? `
-    <div class="kart">
-      <h2>💎 Tek başına ${d.min_oran.toFixed(2)}+ oranlı değer seçimleri</h2>
-      <div class="alt-baslik">Modelin, piyasanın verdiği fiyattan <b>daha yüksek</b> şans tanıdığı seçimler.
-        Kombine kurmadan tek maça oynamak istersen buradakiler matematiksel olarak en mantıklıları.</div>
-      ${d.tekliler.map(sisBacakHTML).join('')}
-    </div>` : '';
-
+  // "Tek başına 2.00+ değer" listesi KALDIRILDI: modelin yüksek oranda değer
+  // iddiası ölçümde ters çıktı (değer iddiası >%20 → ROI −%14.6). Aynı maça
+  // kuponda ÜST 1.5, listede ÜST 3.5 gösterip kullanıcıyı da karıştırıyordu.
+  const tekliHTML = '';
   const karneHTML = d.karne && d.karne.length ? `
     <div class="kart">
       <h2>📋 Pazar karnesi — neyin ne kadar güvenilir olduğu</h2>
