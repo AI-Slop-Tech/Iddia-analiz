@@ -1589,7 +1589,9 @@ def uygulama_olustur():
             "kupon": kupon,
             "marj": marj,
             "oncelik": oncelik,
-            "tekliler": sistem.tekli_degerler(havuz, min_oran=hedef_oran),
+            # "tek başına 2.00+ değer" listesi ölçümde zararlı çıktı (bkz. sistem.py);
+            # alan uyumluluk için duruyor, içerik boş.
+            "tekliler": [],
             "karne": sistem.karne_tablosu() + sistem.fiyatlanamaz_satirlari(),
             "karne_not": sistem.KARNE_NOT,
             "strateji": (sistem.kazanc_karne(hedef_oran, esik) if oncelik == "kazanc"

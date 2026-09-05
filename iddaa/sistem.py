@@ -625,6 +625,21 @@ def kalibre_p(pazar: str, p: float) -> float:
     return max(0.02, min(0.985, float(p) + (gercek - dedi)))
 
 
+import re as _re
+
+def _mac_anahtari(a: dict) -> str:
+    """Aynı maçı iki farklı kaynak iki satırla getirebiliyor ("Belgium Belgian
+    Pro League" ve "B1" etiketiyle, farklı mac_id). Kullanıcının ekranında
+    Standard–Antwerp ALT 3.5 aynı kupona İKİ KEZ girmişti — %100 bağımlı iki
+    bacak, olasılık ve oran sahte şişer. Tekillik bu yüzden mac_id ile değil,
+    normalize edilmiş takım adlarıyla sağlanır."""
+    def _n(s):
+        return _re.sub(r"[^a-z0-9]", "", str(s or "").lower()
+                       .replace("ı", "i").replace("ş", "s").replace("ç", "c")
+                       .replace("ğ", "g").replace("ü", "u").replace("ö", "o"))
+    return f"{_n(a.get('ev_ad'))}|{_n(a.get('dep_ad'))}"
+
+
 TABAN_ESIK = 0.40     # havuz tabanı; kupon eşiği bunun üstünde ayrıca uygulanır
 TEKLI_MIN_P = 0.45    # ölçümde (bölüm E) bu tabanla %49.3 isabet / %+1.6 getiri çıktı
 
@@ -689,7 +704,17 @@ def havuz_kur(maclar: list[dict], esik: float = TABAN_ESIK,
                           "lig_derin": derin, "gerekce": gerekce})
     # en güvenilirden başla; eşitlikte fiyatı olan (dolayısıyla EV'si ölçülebilen) önde
     havuz.sort(key=lambda x: (-x["p"], -(x.get("oran") or 0)))
-    return havuz, elenen, kapsam_disi
+    # Aynı maç iki kaynaktan geldiyse aynı pazar iki kez havuzda olur; gerçek
+    # fiyatlı olanı tut, kopyayı at.
+    gorulen, tekil = set(), []
+    for a in sorted(havuz, key=lambda x: 0 if x.get("oran") else 1):
+        anahtar = (_mac_anahtari(a), a["pazar"])
+        if anahtar in gorulen:
+            continue
+        gorulen.add(anahtar)
+        tekil.append(a)
+    tekil.sort(key=lambda x: (-x["p"], -(x.get("oran") or 0)))
+    return tekil, elenen, kapsam_disi
 
 
 def _fiyat(aday: dict, marj: float = MARJ_VARSAYILAN) -> float:
@@ -752,19 +777,17 @@ def kupon_kur(havuz: list[dict], hedef: float = 2.0, maks_bacak: int = 3,
             return
         for i in range(basla, len(adaylar)):
             a = adaylar[i]
-            mid = a.get("mac_id")
-            if mid is not None and mid in maclar:
+            mid = _mac_anahtari(a)
+            if mid in maclar:
                 continue
             yeni_p = olasilik * a["p"]
             if en_iyi is not None and yeni_p <= en_iyi["p"]:
                 continue    # buradan daha iyi bir sonuç çıkamaz (olasılık yalnız azalır)
             secili.append(a)
-            if mid is not None:
-                maclar.add(mid)
+            maclar.add(mid)
             dfs(i + 1, secili, maclar, oran * _fiyat(a, marj), yeni_p)
             secili.pop()
-            if mid is not None:
-                maclar.discard(mid)
+            maclar.discard(mid)
 
     dfs(0, [], set(), 1.0, 1.0)
     if not en_iyi:
@@ -857,6 +880,11 @@ def notlar(oransiz: int = 0, kapsam: str = "yaygin", sig_mac: int = 0) -> list[s
         "kuponu olduğundan güvenli gösterir.",
         _kapsam_notu(kapsam, sig_mac),
         _strateji_notu(),
+        "🧹 <b>Önceki sürümdeki 'tek başına 2.00+ değer' listesi kaldırıldı.</b> Modelin "
+        "yüksek oranda 'kitapçı fazla ödüyor' iddiası ölçümde ters çıktı: iddia büyüdükçe "
+        "zarar büyüdü (%20+ iddiada −%14.6). Aynı maça kuponda ÜST 1.5, listede ÜST 3.5 "
+        "gösterip kafa karıştırıyordu. Yüksek oranda değer aramanın dürüst yolu artık tek: "
+        "sitendeki oranı ⚡ keskin sınırla kıyaslamak.",
     ]
     eksik = " · ".join(f"<b>{ad}</b>: {sebep}" for ad, sebep in FIYATLANAMAZ.items())
     n.append("🚫 Fiyatlanamayan pazarlar (istense de eklenemez): " + eksik +
@@ -941,12 +969,11 @@ def en_yuksek_sans(havuz: list[dict], bacak_sayisi: int = 1,
     bacak_sayisi = max(1, min(6, int(bacak_sayisi)))
     secili, kullanilan = [], set()
     for a in sorted(adaylar, key=lambda x: -x["p"]):     # p'ye göre sırala: çarpımı en büyük yapan budur
-        mid = a.get("mac_id")
-        if mid is not None and mid in kullanilan:
+        mid = _mac_anahtari(a)
+        if mid in kullanilan:
             continue
         secili.append(a)
-        if mid is not None:
-            kullanilan.add(mid)
+        kullanilan.add(mid)
         if len(secili) >= bacak_sayisi:
             break
     if not secili:
@@ -1098,12 +1125,11 @@ def kazanc_kuponu(havuz: list[dict], hedef: float = 2.0, esik: float = 0.60,
     for a in adaylar:
         if len(secili) >= maks_bacak:
             break
-        mid = a.get("mac_id")
-        if mid is not None and mid in kullanilan:
+        mid = _mac_anahtari(a)
+        if mid in kullanilan:
             continue
         secili.append(a)
-        if mid is not None:
-            kullanilan.add(mid)
+        kullanilan.add(mid)
         oran *= float(a["oran"])
         if oran >= hedef:
             break
