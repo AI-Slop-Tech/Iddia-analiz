@@ -190,6 +190,18 @@ def sonuclandir(df: pd.DataFrame | None) -> list[dict]:
 
     for k in kuponlar:
         for b in k["secimler"]:
+            # CLV: aldığın fiyat vs Pinnacle kapanışı — durumdan bağımsız, bir kez
+            if "clv" not in b and b.get("oran"):
+                try:
+                    # saat şart: kapanış eşlemesi başlama saatine 3 saat pencere uygular
+                    t_clv = pd.to_datetime(f"{b['tarih']} {b.get('saat') or '12:00'}", dayfirst=True)
+                    kap = veri.kapanis_fiyati(b["ev"], b["dep"], t_clv, b["pazar"])
+                except Exception:  # noqa: BLE001
+                    kap = None
+                if kap:
+                    b["kapanis"] = round(float(kap), 3)
+                    b["clv"] = round(float(b["oran"]) / float(kap) - 1.0, 4)
+                    degisti = True
             if b["durum"] != "bekliyor" or b.get("elle"):
                 continue
             try:

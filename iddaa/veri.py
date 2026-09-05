@@ -3224,31 +3224,101 @@ def _pin_getir(yol: str) -> list:
     return govde if isinstance(govde, list) else []
 
 
-def _pin_coz(maclar: list, pazarlar: list) -> list:
-    """Pinnacle gövdelerini ince oran kayıtlarına çevirir."""
-    ms, ua = {}, {}
-    for m in pazarlar:
-        if m.get("period") != 0 or m.get("status") not in (None, "open"):
+def _pin_yarim(points) -> float | None:
+    """Yalnız .5 çizgileri: uygulamanın pazarları 0.5/1.5/2.5… üzerine kurulu.
+    Çeyrek çizgiler (0.75, 1.25) Asya usulü yarım-iade içerir, karşılığı yok."""
+    try:
+        p = float(points)
+    except (TypeError, ValueError):
+        return None
+    return p if abs(p - int(p) - 0.5) < 1e-9 else None
+
+
+def _pin_pazar_haritasi(satirlar: list) -> tuple[dict, dict]:
+    """Bir maçın Pinnacle satırlarını uygulamanın pazar adlarına çevirir.
+
+    Döner: (fiyatlar {pazar: ondalık oran}, adil {pazar: marjsız olasılık}).
+    Adil olasılık, aynı pazarın karşıt taraflarının 1/oran toplamına
+    bölünerek bulunur — Pinnacle'ın kendi marjı böyle düşülür. Bu, "keskin
+    fiyata göre değer" hesabının temelidir: kullanıcının sitesindeki oran,
+    bu adil olasılığın tersinden yüksekse gerçek değer vardır.
+
+    Kapsanan Pinnacle türleri: moneyline (maç ve İY), total (maç ve İY, .5
+    çizgileri), team_total (maç, .5 çizgileri). spread Asya handikapıdır,
+    uygulamadaki 3 yollu handikapla aynı şey değildir — alınmaz.
+    """
+    fiyat: dict[str, float] = {}
+    adil: dict[str, float] = {}
+
+    def ekle_ikili(ad_a: str, o_a, ad_b: str, o_b) -> None:
+        if not o_a or not o_b or ad_a in fiyat:
+            return
+        fiyat[ad_a], fiyat[ad_b] = o_a, o_b
+        t = 1.0 / o_a + 1.0 / o_b
+        adil[ad_a], adil[ad_b] = (1.0 / o_a) / t, (1.0 / o_b) / t
+
+    for m in satirlar:
+        if m.get("status") not in (None, "open"):
             continue
-        tur = m.get("type")
-        if tur == "moneyline" and len(m.get("prices") or []) == 3:
-            f = {p.get("designation"): _amerikan_ondalik(p.get("price"))
-                 for p in m["prices"]}
-            if all(f.get(k) for k in ("home", "draw", "away")):
-                ms[m["matchupId"]] = [f["home"], f["draw"], f["away"]]
-        elif tur == "total":
-            fiyat = {p.get("designation"): p for p in (m.get("prices") or [])}
-            ust, alt = fiyat.get("over"), fiyat.get("under")
-            if not (ust and alt) or float(ust.get("points") or 0) != 2.5:
-                continue        # uygulama Alt/Üst'ü 2.5 çizgisinde hesaplıyor
-            u, a = _amerikan_ondalik(ust.get("price")), _amerikan_ondalik(alt.get("price"))
-            if u and a:
-                ua[m["matchupId"]] = [u, a]
+        tur, period = m.get("type"), m.get("period")
+        fiy = {p.get("designation"): p for p in (m.get("prices") or [])}
+        if tur == "moneyline" and period in (0, 1) and len(fiy) == 3:
+            o = {k: _amerikan_ondalik(v.get("price")) for k, v in fiy.items()}
+            if not all(o.get(k) for k in ("home", "draw", "away")):
+                continue
+            on_ek = "MS" if period == 0 else "İY "
+            adlar = {"home": f"{on_ek}1", "draw": f"{on_ek}0", "away": f"{on_ek}2"}
+            if adlar["home"] in fiyat:
+                continue
+            t = sum(1.0 / o[k] for k in ("home", "draw", "away"))
+            for k, ad in adlar.items():
+                fiyat[ad], adil[ad] = o[k], (1.0 / o[k]) / t
+        elif tur == "total" and period in (0, 1):
+            ust, alt = fiy.get("over"), fiy.get("under")
+            if not (ust and alt):
+                continue
+            c = _pin_yarim(ust.get("points"))
+            if c is None:
+                continue
+            ou, oa = _amerikan_ondalik(ust.get("price")), _amerikan_ondalik(alt.get("price"))
+            if period == 0:
+                ekle_ikili(f"ÜST {c}", ou, f"ALT {c}", oa)
+            else:
+                ekle_ikili(f"İY {c} ÜST", ou, f"İY {c} ALT", oa)
+        elif tur == "team_total" and period == 0:
+            ust, alt = fiy.get("over"), fiy.get("under")
+            if not (ust and alt):
+                continue
+            c = _pin_yarim(ust.get("points"))
+            if c is None:
+                continue
+            taraf = "EV" if m.get("side") == "home" else ("DEP" if m.get("side") == "away" else None)
+            if not taraf:
+                continue
+            ou, oa = _amerikan_ondalik(ust.get("price")), _amerikan_ondalik(alt.get("price"))
+            ekle_ikili(f"{taraf} ÜST {c}", ou, f"{taraf} ALT {c}", oa)
+    return fiyat, adil
+
+
+def _pin_coz(maclar: list, pazarlar: list) -> list:
+    """Pinnacle gövdelerini ince oran kayıtlarına çevirir.
+
+    Eski alanlar ("ms", "ust_alt") aynen korunur — bülten onlara bağlı.
+    Yeni: "pazarlar" (uygulama adlarıyla TÜM fiyatlar) ve "adil" (marjsız
+    olasılıklar). Sistem Önerisi bu iki alanı kullanır.
+    """
+    grup: dict = {}
+    for m in pazarlar:
+        grup.setdefault(m.get("matchupId"), []).append(m)
 
     kayitlar = []
     for m in maclar:
         mid = m.get("id")
-        if mid not in ms or m.get("isLive"):
+        satirlar = grup.get(mid) or []
+        if not satirlar or m.get("isLive"):
+            continue
+        fiyat, adil = _pin_pazar_haritasi(satirlar)
+        if not all(k in fiyat for k in ("MS1", "MS0", "MS2")):
             continue
         katilim = {p.get("alignment"): p.get("name") for p in (m.get("participants") or [])}
         ev, dep = katilim.get("home"), katilim.get("away")
@@ -3258,11 +3328,15 @@ def _pin_coz(maclar: list, pazarlar: list) -> list:
             t = pd.Timestamp(m["startTime"]).tz_convert("Europe/Istanbul").tz_localize(None)
         except Exception:  # noqa: BLE001
             continue
+        ua = [fiyat["ÜST 2.5"], fiyat["ALT 2.5"]] if "ÜST 2.5" in fiyat else None
         kayitlar.append({
             "ts": t.strftime("%Y%m%d%H%M"),
             "lig": ((m.get("league") or {}).get("name") or ""),
             "ev": str(ev), "dep": str(dep),
-            "ms": ms[mid], "ust_alt": ua.get(mid),
+            "ms": [fiyat["MS1"], fiyat["MS0"], fiyat["MS2"]],
+            "ust_alt": ua,
+            "pazarlar": {k: round(v, 3) for k, v in fiyat.items()},
+            "adil": {k: round(v, 4) for k, v in adil.items()},
         })
     return kayitlar
 
@@ -3296,7 +3370,65 @@ def pinnacle_oranlari(yenile: bool = False) -> list:
             return bayat
         _json_yaz(PINNACLE_DOSYA, {"zaman": time.time(), "veri": kayitlar})
         PINNACLE_SON_DURUM.update({"mac": len(maclar), "oranli": len(kayitlar)})
+        try:
+            _kapanis_kaydet(kayitlar)
+        except Exception as hata:  # noqa: BLE001 — CLV kaydı bülteni asla düşürmesin
+            PINNACLE_SON_DURUM["kapanis_hata"] = str(hata)[:120]
         return kayitlar
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# KAPANIŞ ÇİZGİSİ (CLV) KAYDI
+#
+# Profesyonel ölçüt: aldığın fiyat, maç başlamadan önceki son fiyatı (kapanış)
+# yeniyor mu? Kapanışı düzenli yenen süreç uzun vadede kârdadır, kısa vadede
+# tutmasa bile. Pinnacle her 30 dk'da tazelenir; başlamasına 2 saatten az kalan
+# maçların fiyatı burada "kapanış" olarak dondurulur (son tazeleme kazanır).
+# Kupon defteri, kayıtlı seçimin fiyatını bu kapanışla kıyaslar.
+KAPANIS_DOSYASI = os.path.join(VERI_KLASORU, "pinnacle_kapanis.json")
+_KAPANIS_PENCERE_SN = 2 * 3600
+_KAPANIS_SAKLA_GUN = 45
+
+
+def _kapanis_kaydet(kayitlar: list) -> int:
+    simdi = simdi_tr()
+    eski = _json_oku(KAPANIS_DOSYASI)
+    depo = eski.get("veri") or {}
+    yazilan = 0
+    for r in kayitlar:
+        try:
+            t = pd.Timestamp(r["ts"][:8] + " " + r["ts"][8:10] + ":" + r["ts"][10:12])
+        except Exception:  # noqa: BLE001
+            continue
+        kalan = (t - simdi).total_seconds()
+        if not (0 <= kalan <= _KAPANIS_PENCERE_SN):
+            continue
+        anahtar = f"{r['ts']}|{r['ev']}|{r['dep']}"
+        depo[anahtar] = {"ts": r["ts"], "ev": r["ev"], "dep": r["dep"], "lig": r.get("lig", ""),
+                         "pazarlar": r.get("pazarlar") or {}, "kayit": simdi.strftime("%Y%m%d%H%M")}
+        yazilan += 1
+    # 45 günden eski kayıtları temizle
+    sinir = (simdi - pd.Timedelta(days=_KAPANIS_SAKLA_GUN)).strftime("%Y%m%d%H%M")
+    depo = {a: v for a, v in depo.items() if v.get("ts", "") >= sinir}
+    _json_yaz(KAPANIS_DOSYASI, {"zaman": time.time(), "veri": depo})
+    return yazilan
+
+
+def kapanis_indeksi() -> dict:
+    """Kayıtlı kapanışlar: pinnacle_indeksi ile aynı eşleme yapısında."""
+    depo = (_json_oku(KAPANIS_DOSYASI).get("veri") or {})
+    return pinnacle_indeksi(list(depo.values()))
+
+
+def kapanis_fiyati(ev: str, dep: str, tarih, pazar: str) -> float | None:
+    """Bu maç ve pazar için dondurulmuş kapanış fiyatı (yoksa None)."""
+    try:
+        k = pinnacle_esle(kapanis_indeksi(), ev, dep, tarih)
+    except Exception:  # noqa: BLE001
+        return None
+    if not k:
+        return None
+    return (k.get("pazarlar") or {}).get(pazar)
 
 
 # Ülke etiketi ("Rangers (HKG)") eşleştirmede kullanılmaz: Pinnacle sade adı yazar.

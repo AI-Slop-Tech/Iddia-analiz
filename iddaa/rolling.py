@@ -91,8 +91,25 @@ def _yaz(planlar: list[dict]) -> None:
     os.replace(gecici, ROLLING_DOSYASI)
 
 
+def kelly_kesri(p: float, oran: float, bolen: float = 4.0) -> float:
+    """Kesirli Kelly: bakiyenin hangi payı yatırılmalı.
+
+    Tam Kelly f = (p·o − 1)/(o − 1) uzun vadede bakiyeyi en hızlı büyütür ama
+    varyansı yaşanmazdır; profesyoneller çeyrek Kelly (bolen=4) kullanır.
+    Kenar yoksa (p·o ≤ 1) sonuç 0 — yani OYNAMA. Ölçülmüş olasılıklar dürüst
+    olduğu için bu formülün girdisi hazır; formül kazandırmaz, BATMAYI önler:
+    tüm bakiyeyi basan zincirde tek yatış her şeyi götürür, kesirli Kelly'de
+    bakiye hiç sıfırlanmaz.
+    """
+    p, oran = float(p), float(oran)
+    if oran <= 1.0 or not (0.0 < p < 1.0):
+        return 0.0
+    f = (p * oran - 1.0) / (oran - 1.0)
+    return max(0.0, min(1.0, f / max(1.0, bolen)))
+
+
 def olustur(ad: str, baslangic: float, hedef_oran: float = 2.0,
-            hedef_gun: int = 15) -> dict:
+            hedef_gun: int = 15, kesir: float = 1.0) -> dict:
     baslangic = float(baslangic)
     if not (1 <= baslangic <= 10_000_000):
         raise ValueError("Başlangıç kasası 1 ile 10 milyon TL arasında olmalı.")
@@ -101,6 +118,7 @@ def olustur(ad: str, baslangic: float, hedef_oran: float = 2.0,
         "ad": str(ad or "Rolling")[:40],
         "baslangic": baslangic,
         "hedef_oran": max(1.01, min(100.0, float(hedef_oran or 2.0))),
+        "kesir": max(0.01, min(1.0, float(kesir or 1.0))),   # bakiyenin yatırılan payı; 1.0 = tümü
         "hedef_gun": max(1, min(MAKS_ADIM, int(hedef_gun or 15))),
         "olusturma": time.strftime("%d.%m.%Y %H:%M"),
         "adimlar": [],
@@ -289,21 +307,24 @@ def sonuclandir(df: pd.DataFrame | None) -> list[dict]:
 
 
 def hesapla(plan: dict) -> dict:
-    """Bakiye zinciri: her adımın yatırımı bir önceki bakiyenin TAMAMIDIR."""
+    """Bakiye zinciri. kesir=1.0 → her adımda bakiyenin TAMAMI (eski davranış);
+    kesir<1.0 → yalnız o pay yatırılır, yatınca bakiye sıfırlanmaz, azalır."""
     bakiye = float(plan["baslangic"])
+    kesir = max(0.01, min(1.0, float(plan.get("kesir", 1.0) or 1.0)))
     adimlar = []
     plan_durum = "aktif"
     for a in plan["adimlar"]:
         durum = _adim_durumu(a)
         oran = _adim_orani(a)
-        yatirim = round(bakiye, 2)
+        yatirim = round(bakiye * kesir, 2)
         if durum == "tuttu":
-            bakiye = bakiye * oran
+            bakiye = bakiye + yatirim * (oran - 1.0)
             sonra = round(bakiye, 2)
         elif durum == "yatti":
-            bakiye = 0.0
-            sonra = 0.0
-            plan_durum = "yatti"
+            bakiye = round(bakiye - yatirim, 2)
+            sonra = bakiye
+            if kesir >= 0.999 or bakiye <= 0.0:
+                plan_durum = "yatti"
         else:
             sonra = None  # bekliyor: zincir burada duruyor
         adimlar.append({"bacaklar": a["bacaklar"], "durum": durum,

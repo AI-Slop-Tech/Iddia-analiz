@@ -381,6 +381,12 @@ def _bacak(aday: dict, marj: float = MARJ_VARSAYILAN) -> dict:
         "oran": float(oran) if oran else None,
         # fiyatı bilinmeyen bacakta sitede beklenen fiyat (marj düşülmüş)
         "site_oran": None if oran else round(gercekci_fiyat(p, marj), 2),
+        # Keskin fiyata göre değer: Pinnacle'ın marjsız olasılığı. Sitedeki oran
+        # 1/keskin_adil'in üstündeyse, dünyanın en keskin kitapçısına göre
+        # gerçek değer var demektir — perakende bahisçinin en güvenilir kenarı.
+        "keskin_adil": (float(aday["keskin_adil"]) if aday.get("keskin_adil") else None),
+        "keskin_sinir": (round(1.0 / float(aday["keskin_adil"]), 2)
+                         if aday.get("keskin_adil") else None),
         "ev": (float(p) * float(oran) - 1.0) if oran else None,
         # Rozette gösterilen karne, sistemin fiilen oynadığı bölgeye ait olmalı:
         # MS1'in tüm dağılımdaki oranı %43.8 (ev sahibi kazanma taban oranı),
@@ -1013,6 +1019,14 @@ def beklenti(p: float, kupon: int = 10) -> dict:
 # birleştirmek (1.45 × 1.45 ≈ 2.10). Kenar çarpımla korunur, ama tutma
 # şansı da çarpılır — yani seyrek tutar. Karnesi KAZANC_KARNE'de.
 KAZANC_ALT_ORAN, KAZANC_UST_ORAN = 1.20, 1.60
+# YALNIZ ÖLÇÜLMÜŞ PAZARLAR: kâr bölgesi ROI'si (+%2.3 / +%3.2) arşivdeki GERÇEK
+# fiyatlarla, yani MS ve 2.5 Alt/Üst'te ölçüldü. Pinnacle artık ÜST 1.5, ALT
+# 3.5, takım golleri gibi pazarlara da gerçek fiyat veriyor; ama o pazarların
+# 1.20-1.60 bandındaki getirisi ÖLÇÜLMEDİ (arşivde tarihsel fiyatları yok).
+# Ölçülmemiş pazarı "kâr bölgesi" diye satmak dürüst olmaz — bu mod onlara
+# kapalı. Diğer modlar Pinnacle fiyatlarını serbestçe kullanır (orada iddia
+# "kâr" değil, "gerçek fiyat").
+KAZANC_PAZARLAR = {"MS1", "MS0", "MS2", "ÜST 2.5", "ALT 2.5"}
 
 # Bu modun KENDİ karnesi (305 gün, 736 kupon, gerçek fiyatlarla):
 #   hedef 2.00 · eşik %60: 208 kupon · dedi %42.8 · gerçek %42.3 · ROI %-2.5 (±8.0)
@@ -1029,6 +1043,31 @@ KAZANC_KARNE = {
     (2.0, 0.70): {"n": 86, "dedi": 0.438, "gercek": 0.453, "roi": +0.016, "hata": 0.121},
     (2.5, 0.65): {"n": 105, "dedi": 0.353, "gercek": 0.381, "roi": +0.072, "hata": 0.135},
 }
+
+
+# SON HAFTA KONTROLÜ (deney29): kesim 18.08.2026, test 18-25.08.2026, 300 oranlı
+# maç, 8 gün — üretimdeki modlar gün gün koşuldu. Pazar karnesi son haftada da
+# tuttu (EV ALT 3.5 dedi %91.6 → %91.3, ÜST 1.5 %76.1 → %77.4, ÇŞ 1X %75.7 →
+# %72.8). Modlar: kazanç 4/4 (%100), oran-%60 4/7 (%57), şans-1 bacak 5/7 (%71).
+# BU SAYILAR AYAR SEÇMEK İÇİN KÜÇÜKTÜR (4-7 kupon). Ayar 305 günlük ölçümden
+# seçildi; son hafta yalnız "çelişmiyor" kontrolüdür. Varsayılan: kazanç · %65.
+SON_HAFTA_KONTROL = {
+    "aralik": "18-25.08.2026", "mac": 300, "gun": 8,
+    "kazanc": {"kupon": 4, "gecti": 4}, "oran60": {"kupon": 7, "gecti": 4},
+    "sans1": {"kupon": 7, "gecti": 5},
+}
+VARSAYILAN_MOD, VARSAYILAN_ESIK = "kazanc", 0.65
+
+# KAPANIŞ ÇİZGİSİ (CLV) — deney26, 8.057 maç:
+#   sistem seçimi (p>=%60, fiyatlı): kapanışı yenme %70.6 · ROI +%1.8 (±1.5)
+#   kâr bölgesi (1.20-1.60, p>=%60):  kapanışı yenme %70.3 · ROI +%2.9 (±1.6)
+#   KONTROL (rastgele taraf):          kapanışı yenme %66.4 · ROI -%2.7 (±0.8)
+# DİKKAT: arşivde "en iyi fiyat vs ORTALAMA kapanış" kıyaslandığı için ham CLV
+# herkes için artı çıkıyor (kontrol bile +%2.7) — o sayı kenar kanıtı DEĞİL.
+# Kanıt ROI farkında: sistem +1.8 / kâr bölgesi +2.9 vs rastgele -2.7.
+# İleriye dönük CLV (Pinnacle fiyatı vs Pinnacle kapanışı, aynı kitapçı)
+# veri.kapanis_fiyati ile kaydediliyor; kupon defterinde rozet olarak görünür.
+# Bu kıyas adil olduğu için asıl güvenilir CLV ölçümü o olacak.
 
 
 def kazanc_karne(hedef: float, esik: float) -> dict | None:
@@ -1049,7 +1088,8 @@ def kazanc_kuponu(havuz: list[dict], hedef: float = 2.0, esik: float = 0.60,
     sıralar, hedefe ulaşınca durur.
     """
     adaylar = [a for a in havuz
-               if a.get("oran") and KAZANC_ALT_ORAN <= a["oran"] <= KAZANC_UST_ORAN
+               if a["pazar"] in KAZANC_PAZARLAR
+               and a.get("oran") and KAZANC_ALT_ORAN <= a["oran"] <= KAZANC_UST_ORAN
                and a["p"] >= esik]
     if not adaylar:
         return None
@@ -1077,8 +1117,9 @@ def kazanc_kuponu(havuz: list[dict], hedef: float = 2.0, esik: float = 0.60,
         "ev": float(p * oran - 1.0),
         "basabas": float(1.0 / oran),
         "mod": "kazanc",
-        "uyari": ("Bu moddaki bacakların hepsinin GERÇEK piyasa fiyatı var — "
-                  "tahmin yok. Sistem yalnız ölçümde kârlı çıkan 1.20-1.60 "
-                  "bandından seçiyor; o yüzden bazı günler kupon çıkmayabilir."),
+        "uyari": ("Bu moddaki bacakların hepsinin GERÇEK piyasa fiyatı var — tahmin "
+                  "yok. Sistem yalnız ölçümde kârlı çıkan 1.20-1.60 bandından ve yalnız "
+                  "getirisi ÖLÇÜLMÜŞ pazarlardan (MS, 2.5 Alt/Üst) seçiyor; o yüzden bazı "
+                  "günler kupon çıkmayabilir."),
     }
 

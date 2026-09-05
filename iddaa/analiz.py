@@ -1794,6 +1794,17 @@ def elo_hesapla(df: pd.DataFrame, k: float = 20.0, ev_avantaji: float = 60.0) ->
 # Pazar-bazlı ayrı W de aynı gerekçeyle reddedildi: Brier her pazarda aynı
 # yönü gösteriyor, kârlılık kanıtı olmadan W oynamak kalibre sistemi bozar.
 W_PIYASA = 0.50      # model karışımında piyasa (marj arındırılmış oran) payı
+# ORANA GÖRE DEĞİŞKEN W — ÖLÇÜLDÜ, REDDEDİLDİ (deney26, 8.057 maç / 167 gün):
+#   Yüksek oranda daha çok piyasa ağırlığı Brier'i her bantta İYİLEŞTİRİYOR ama
+#   fark ihmal edilebilir (0.0002-0.0011). ROI etkisi ise yarı-yarıya sınamada
+#   genelleşmiyor: 2.0-3.0 bandında ilk yarıda seçilen W=0.8, ikinci yarıda
+#   -%5.8 (W=0.5 ise +%5.2); 3.0+ bandında W=0.8 +%11.1 ama ±11.1 hata payıyla.
+#   Sonuç: gürültü. W sabit kalıyor. (deney21'deki "Brier tek ölçüt olamaz"
+#   hükmüyle tutarlı.)
+# İSABETLİ ŞUT (HST/AST) TABANLI POISSON — ÖLÇÜLDÜ, REDDEDİLDİ (deney26):
+#   gol/isabetli-şut dönüşümüyle kurulan vekil-gol modeli, gol modeline MS'de
+#   açık kaybediyor (Brier MS1 0.2196 → 0.2375, ÜST 2.5 0.2459 → 0.2554).
+#   50/50 karma yalnız birkaç pazarda binde birlik iyileşme veriyor. Kurulmadı.
 MAKS_AYRISMA = 0.05  # model, piyasadan sonuç başına en çok bu kadar ayrışabilir
                      # (backtest kanıtı: serbest ayrışma her eşikte zarar yazdı)
 
