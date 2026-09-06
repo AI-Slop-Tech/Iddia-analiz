@@ -10,6 +10,8 @@ Uç noktalar:
   POST /api/oran-analiz    {"oranlar":[1,X,2], "tolerans":0.02} -> oran kalıbı
   POST /api/takim-analiz   {"ev":..,"dep":..,"oranlar":[..]?} -> tam maç analizi
   GET  /api/gecmis-maclar  ?takim=&lig=&limit=  -> oranlarıyla eski maçlar
+  GET  /api/sistem-defteri        sistemin kendi ileriye dönük defteri + mod karnesi
+  POST /api/sistem-defteri/simdi  {"mod":"hepsi","tarih":?} günün kuponlarını hemen yaz
 """
 
 from __future__ import annotations
@@ -21,7 +23,7 @@ import time
 import pandas as pd
 
 from . import __version__ as SURUM
-from . import analiz, backtest, kayit, kupon, oneri, rapor, rolling, sistem, veri, yorum
+from . import analiz, backtest, kayit, kupon, oneri, rapor, rolling, sistem, sistem_defteri, veri, yorum
 
 _DURUM: dict = {
     "df": None, "elo": None, "fikstur": None, "kitapcilar": [],
@@ -116,6 +118,14 @@ def _bakim_dongusu() -> None:
                 else:
                     _DURUM["fikstur_zaman"] = 0.0
         except Exception:  # noqa: BLE001
+            pass
+        try:
+            # Sistemin kendi ileriye dönük defteri: günün kuponları maçlar başlamadan
+            # yazılır (sistem_defteri.isle saat/idempotens kurallarını kendisi uygular).
+            isle = _BAKIM.get("sistem_defteri_isle")
+            if isle and _DURUM["df"] is not None and _DURUM["fikstur"] is not None:
+                isle()
+        except Exception:  # noqa: BLE001 — defterleme hatası servisi düşürmesin
             pass
 
 
@@ -291,6 +301,9 @@ def uygulama_olustur():
                         isit()
                         break
                     time.sleep(0.5)
+                isle = _BAKIM.get("sistem_defteri_isle")
+                if isle:
+                    isle()                   # açılışta günün sistem kuponları (slot kuralı içeride)
             except Exception:  # noqa: BLE001 — veri henüz yoksa panel zaten yönlendirir
                 pass
 
@@ -1405,6 +1418,53 @@ def uygulama_olustur():
 
     _BAKIM["fikstur_isit"] = lambda: _fikstur()
     _BAKIM["fikstur_tazele"] = lambda yenile=False: _fikstur_arka_planda(yenile, beklet=True)
+
+    def _sistem_defteri_isle(zorla: bool = False, mod: str | None = None, gun: str | None = None):
+        df = _df()
+        fik, _k = _fikstur()
+        return sistem_defteri.isle(df, fik, _DURUM["elo"], zorla=zorla, mod=mod, gun=gun,
+                                   fikstur_surum=int(_DURUM.get("fikstur_surum", 0)))
+
+    _BAKIM["sistem_defteri_isle"] = _sistem_defteri_isle
+
+    @app.get("/api/sistem-defteri")
+    def sistem_defteri_oku():
+        """Sistemin kendi ileriye dönük defteri: okurken bekleyenleri sonuçlandırır."""
+        try:
+            df = _df()
+        except FileNotFoundError:
+            df = None
+        defter = sistem_defteri.sonuclandir(df)
+        return jsonify({
+            "kuponlar": [sistem_defteri.degerlendir(k) for k in defter if not k.get("kupon_yok")],
+            "taslaklar": [k for k in defter if k.get("kupon_yok")],
+            "karne": sistem_defteri.karne(defter),
+            "ayarlar": {"saatler": list(sistem_defteri.SAATLER),
+                        "modlar": {m: {"ad": v["ad"], "ayarlar": v.get("ayarlar")} for m, v in sistem_defteri.MODLAR.items()}},
+            "son_calisma": sistem_defteri.son_calisma(),
+            "bugun": veri.simdi_tr().strftime("%d.%m.%Y"),
+        })
+
+    @app.post("/api/sistem-defteri/simdi")
+    def sistem_defteri_simdi():
+        """Elle tetikleme: bugün ya da gelecek bir gün için sistem kuponlarını hemen yaz."""
+        govde = request.get_json(silent=True) or {}
+        mod = str(govde.get("mod") or "hepsi")
+        gun = str(govde.get("tarih") or "") or None
+        try:
+            df = _df()
+        except FileNotFoundError:
+            return jsonify({"hata": "Önce veriyi güncelleyin."}), 503
+        try:
+            fik, _k = _fikstur()
+        except Exception as hata:  # noqa: BLE001
+            return jsonify({"hata": f"Fikstür alınamadı: {hata}"}), 502
+        try:
+            sonuc = sistem_defteri.isle(df, fik, _DURUM["elo"], zorla=True, mod=mod, gun=gun,
+                                        fikstur_surum=int(_DURUM.get("fikstur_surum", 0)))
+        except ValueError as hata:
+            return jsonify({"hata": str(hata)}), 400
+        return jsonify(sonuc)
 
 
     _gercek_sonuc = oneri.gercek_sonuc          # oneri.py'ye taşındı (defterleme işi de kullanır)
