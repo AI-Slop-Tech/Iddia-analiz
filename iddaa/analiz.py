@@ -1386,33 +1386,22 @@ def guvenli_secimler(a: dict, sinir: float = 0.70) -> list[dict]:
     return adaylar
 
 
-def _skor_matrisi(lam_ev: float, lam_dep: float, n: int = MAKS_GOL) -> list[list[float]]:
+def _skor_matrisi(lam_ev: float, lam_dep: float, n: int = MAKS_GOL,
+                  rho: float = DC_RHO) -> list[list[float]]:
     """Normalize edilmiş skor olasılık matrisi (Dixon-Coles düzeltmeli)."""
     pe = [_poisson_pmf(i, lam_ev) for i in range(n + 1)]
     pd_ = [_poisson_pmf(j, lam_dep) for j in range(n + 1)]
-    m = [[pe[i] * pd_[j] * dc_tau(i, j, lam_ev, lam_dep, DC_RHO)
+    m = [[pe[i] * pd_[j] * dc_tau(i, j, lam_ev, lam_dep, rho)
           for j in range(n + 1)] for i in range(n + 1)]
     t = sum(sum(s) for s in m)
     return [[x / t for x in s] for s in m]
 
 
-def tum_pazarlar(poisson: dict, korner: dict | None = None,
-                 kart: dict | None = None) -> dict[str, float]:
-    """Skor matrisinden türetilebilen BÜTÜN pazarların olasılıkları.
-
-    guvenli_secimler() dar bir çekirdek küme döndürür ve öyle kalmalıdır
-    (bülten/tahmin tablosu ona bağlı). Bu fonksiyon AYRI ve geniştir: toplam
-    ve takım bazlı alt/üst çizgileri, handikaplar, MS+Alt/Üst birleşimleri,
-    yarı sonuçları, İY/MS, iki yarı kombinasyonları, korner ve kart pazarları.
-
-    Sistem Önerisi sekmesi bu havuzu kullanır; hangi pazarın gerçekten
-    kullanılacağına ÖLÇÜM karar verir (bkz. sistem.PAZAR_KARNE).
-    """
+def _ft_pazarlari(hucre: list[tuple[int, int, float]]) -> dict[str, float]:
+    """Maç sonu skor hücrelerinden (i, j, olasılık) türeyen pazarlar — tum_pazarlar'ın
+    1-6. bölümleri. Ayrı fonksiyon: devre arası modeli aynı pazarları İY skoruyla
+    kaydırılmış hücrelerden türetir (adlar birebir aynı kalır)."""
     p: dict[str, float] = {}
-    le, ld = float(poisson["lambda_ev"]), float(poisson["lambda_dep"])
-    m = _skor_matrisi(le, ld)
-    N = len(m)
-    hucre = [(i, j, m[i][j]) for i in range(N) for j in range(N)]
 
     def topla(kosul) -> float:
         return sum(v for i, j, v in hucre if kosul(i, j))
@@ -1456,29 +1445,51 @@ def tum_pazarlar(poisson: dict, korner: dict | None = None,
                           ("2", lambda i, j: i < j)):
             p[f"{ad} ve ÜST {c}"] = topla(lambda i, j, k=kosul, c=c: k(i, j) and i + j > c)
             p[f"{ad} ve ALT {c}"] = topla(lambda i, j, k=kosul, c=c: k(i, j) and i + j < c)
+    return p
+
+
+def _yari_pazarlari(mat: list[list[float]], on_ek: str) -> dict[str, float]:
+    """Bir yarının skor matrisinden yarı pazarları ("İY " / "2Y " ön ekiyle)."""
+    h = [(i, j, mat[i][j]) for i in range(len(mat)) for j in range(len(mat))]
+    d = {}
+    d[f"{on_ek}1"] = sum(v for i, j, v in h if i > j)
+    d[f"{on_ek}0"] = sum(v for i, j, v in h if i == j)
+    d[f"{on_ek}2"] = sum(v for i, j, v in h if i < j)
+    for c in (0.5, 1.5, 2.5):
+        ust = sum(v for i, j, v in h if i + j > c)
+        d[f"{on_ek}{c} ÜST"] = ust
+        d[f"{on_ek}{c} ALT"] = 1.0 - ust
+    kgy = sum(v for i, j, v in h if i >= 1 and j >= 1)
+    d[f"{on_ek}KG VAR"] = kgy
+    d[f"{on_ek}KG YOK"] = 1.0 - kgy
+    return d
+
+
+def tum_pazarlar(poisson: dict, korner: dict | None = None,
+                 kart: dict | None = None) -> dict[str, float]:
+    """Skor matrisinden türetilebilen BÜTÜN pazarların olasılıkları.
+
+    guvenli_secimler() dar bir çekirdek küme döndürür ve öyle kalmalıdır
+    (bülten/tahmin tablosu ona bağlı). Bu fonksiyon AYRI ve geniştir: toplam
+    ve takım bazlı alt/üst çizgileri, handikaplar, MS+Alt/Üst birleşimleri,
+    yarı sonuçları, İY/MS, iki yarı kombinasyonları, korner ve kart pazarları.
+
+    Sistem Önerisi sekmesi bu havuzu kullanır; hangi pazarın gerçekten
+    kullanılacağına ÖLÇÜM karar verir (bkz. sistem.PAZAR_KARNE).
+    """
+    le, ld = float(poisson["lambda_ev"]), float(poisson["lambda_dep"])
+    m = _skor_matrisi(le, ld)
+    N = len(m)
+    hucre = [(i, j, m[i][j]) for i in range(N) for j in range(N)]
+    p: dict[str, float] = _ft_pazarlari(hucre)     # 1-6) MS/ÇŞ, alt/üst, takım gol, KG, HND, "ve"
 
     # 7) Yarı bazlı pazarlar — yarı payı ligin gerçek İY verisinden geliyor
     pay = float(poisson.get("iy_pay", 0.45))
     iy_m = _skor_matrisi(le * pay, ld * pay, n=6)
     y2_m = _skor_matrisi(le * (1 - pay), ld * (1 - pay), n=6)
 
-    def yari(mat, on_ek):
-        h = [(i, j, mat[i][j]) for i in range(len(mat)) for j in range(len(mat))]
-        d = {}
-        d[f"{on_ek}1"] = sum(v for i, j, v in h if i > j)
-        d[f"{on_ek}0"] = sum(v for i, j, v in h if i == j)
-        d[f"{on_ek}2"] = sum(v for i, j, v in h if i < j)
-        for c in (0.5, 1.5, 2.5):
-            ust = sum(v for i, j, v in h if i + j > c)
-            d[f"{on_ek}{c} ÜST"] = ust
-            d[f"{on_ek}{c} ALT"] = 1.0 - ust
-        kgy = sum(v for i, j, v in h if i >= 1 and j >= 1)
-        d[f"{on_ek}KG VAR"] = kgy
-        d[f"{on_ek}KG YOK"] = 1.0 - kgy
-        return d
-
-    p.update(yari(iy_m, "İY "))
-    p.update(yari(y2_m, "2Y "))
+    p.update(_yari_pazarlari(iy_m, "İY "))
+    p.update(_yari_pazarlari(y2_m, "2Y "))
     # ölçülmüş yarı kalibrasyonu varsa modelin ham değerinin yerine o geçer
     iy_blok, y2_blok = poisson.get("iy") or {}, poisson.get("y2") or {}
     if "ust05" in iy_blok:
@@ -1526,6 +1537,123 @@ def tum_pazarlar(poisson: dict, korner: dict | None = None,
             p[f"KART ALT {float(cizgi)}"] = 1.0 - float(ust)
 
     return {k: max(0.0, min(1.0, float(v))) for k, v in p.items()}
+
+
+# ─────────────────────────────────────────────── DEVRE ARASI MODELİ (deney32)
+#
+# İY skoru biliniyorken maç sonu / 2. yarı pazarları. Ölçüm ve sabitler
+# devre_olcum.py'de (eğitim < 2023-07-01, test ≥; 12.184 test maçı). Seçilen
+# varyant: λ, 1X2 oranından geri çözülür (piyasa); ligin ölçülmüş iy_pay'ı ile
+# ikinci yarıya bölünür; İY gol farkı kovasına göre ölçülmüş çarpanla düzeltilir;
+# rho'lu 2Y skor matrisi İY skoruyla kaydırılır. 2 kat 1X2 log-loss 0.818
+# (çarpansız 0.831, yalnız ampirik İY tablosu 0.859). Oyun içi (dakika bazlı)
+# olasılık ÜRETİLMEZ: arşivde gol dakikası yok, ölçülemez.
+
+DEVRE_N2 = 6      # 2. yarı skor matrisi 0..6 gol
+
+
+def _devre_kova(fark: int) -> int:
+    return max(-2, min(2, int(fark)))
+
+
+def devre_arasi_pazarlar(poisson: dict, hthg: int, htag: int,
+                         oranlar: tuple[float, float, float] | None = None) -> dict:
+    """İY skoru verildiğinde tüm pazarların olasılığı (tum_pazarlar adlarıyla).
+
+    Dönen: {"pazarlar": {...}, "lambda2": (ev, dep), "lam_kaynak": "piyasa"|"takim"}.
+    lam_kaynak "takim" ölçülen varyant değildir (oran yoksa yedek) — arayüz belirtir.
+    """
+    from . import devre_olcum as D
+    hthg, htag = int(hthg), int(htag)
+    le = ld = None
+    kaynak = "takim"
+    if oranlar and all(oranlar) and D.DEVRE_VARYANT[1] in ("piyasa", "karma"):
+        try:
+            le, ld = _oranlardan_lambdalar(tuple(float(x) for x in oranlar))
+            kaynak = "piyasa"
+        except Exception:  # noqa: BLE001
+            le = ld = None
+    if le is None:
+        le, ld = float(poisson["lambda_ev"]), float(poisson["lambda_dep"])
+    elif D.DEVRE_VARYANT[1] == "karma":
+        le, ld = (le + float(poisson["lambda_ev"])) / 2.0, (ld + float(poisson["lambda_dep"])) / 2.0
+    pay = float(poisson.get("iy_pay", 0.45))
+    ce = D.DEVRE_CARPAN["ev"].get(_devre_kova(hthg - htag), 1.0)
+    cd = D.DEVRE_CARPAN["dep"].get(_devre_kova(htag - hthg), 1.0)
+    le2 = max(0.05, min(4.0, le * (1 - pay) * ce))
+    ld2 = max(0.05, min(4.0, ld * (1 - pay) * cd))
+    m2 = _skor_matrisi(le2, ld2, n=DEVRE_N2, rho=D.DEVRE_RHO)
+    n2 = len(m2)
+    hucre = [(hthg + i, htag + j, m2[i][j]) for i in range(n2) for j in range(n2)]
+    p = _ft_pazarlari(hucre)
+    p.update(_yari_pazarlari(m2, "2Y "))
+    p["2Y GOL VAR"], p["2Y GOL YOK"] = p["2Y 0.5 ÜST"], p["2Y 0.5 ALT"]
+    # İY pazarları: devre arasında kesin (0/1)
+    iy = "1" if hthg > htag else ("0" if hthg == htag else "2")
+    iy_toplam = hthg + htag
+    for a in ("1", "0", "2"):
+        p[f"İY {a}"] = 1.0 if iy == a else 0.0
+    for c in (0.5, 1.5, 2.5):
+        p[f"İY {c} ÜST"] = 1.0 if iy_toplam > c else 0.0
+        p[f"İY {c} ALT"] = 1.0 - p[f"İY {c} ÜST"]
+    p["İY KG VAR"] = 1.0 if (hthg > 0 and htag > 0) else 0.0
+    p["İY KG YOK"] = 1.0 - p["İY KG VAR"]
+    for a in ("1", "0", "2"):
+        for b in ("1", "0", "2"):
+            p[f"İY/MS {a}/{b}"] = p[f"MS{b}"] if iy == a else 0.0
+    p["HER İKİ YARI GOL VAR"] = p["2Y GOL VAR"] if iy_toplam > 0 else 0.0
+    p["HER İKİ YARI GOL YOK"] = 1.0 - p["HER İKİ YARI GOL VAR"]
+    p["EV HER İKİ YARIYI KAZANIR"] = p["2Y 1"] if iy == "1" else 0.0
+    p["DEP HER İKİ YARIYI KAZANIR"] = p["2Y 2"] if iy == "2" else 0.0
+    ev_2y_gol = 1.0 - sum(m2[0][j] for j in range(n2))
+    dep_2y_gol = 1.0 - sum(m2[i][0] for i in range(n2))
+    p["EV HER İKİ YARIDA GOL ATAR"] = ev_2y_gol if hthg > 0 else 0.0
+    p["DEP HER İKİ YARIDA GOL ATAR"] = dep_2y_gol if htag > 0 else 0.0
+    return {"pazarlar": {k: max(0.0, min(1.0, float(v))) for k, v in p.items()},
+            "lambda2": (le2, ld2), "lam_kaynak": kaynak, "iy_skor": f"{hthg}-{htag}"}
+
+
+def pazar_kesinlesti(pazar: str, ev_gol, dep_gol, iy_ev=None, iy_dep=None,
+                     durum: str = "canli") -> str | None:
+    """Oyun sürerken skordan KESİNLEŞMİŞ pazar: "tuttu" / "yatti" / None (henüz belli değil).
+
+    Olasılık değil, deterministik: ÜST çizgisi geçildiyse tuttu, ALT çizgisi
+    geçildiyse yattı, iki takım da attıysa KG VAR tuttu; İY pazarları devreden
+    sonra kesin; MS/ÇŞ/HND/"ve" pazarları maç bitmeden asla kesinleşmez.
+    Bitmiş maçta (durum "bitti") her pazar pazar_gerceklesti ile çözülür."""
+    try:
+        e, d = int(ev_gol), int(dep_gol)
+    except (TypeError, ValueError):
+        return None
+    if durum == "bitti":
+        satir = {"FTHG": e, "FTAG": d, "HTHG": iy_ev, "HTAG": iy_dep}
+        g = pazar_gerceklesti(pazar, satir)
+        return None if g is None else ("tuttu" if g else "yatti")
+    pz = str(pazar).strip()
+    top = e + d
+    import re as _re
+    m = _re.fullmatch(r"(ÜST|ALT) (\d+\.5)", pz)
+    if m:
+        c = float(m.group(2))
+        if m.group(1) == "ÜST":
+            return "tuttu" if top > c else None
+        return "yatti" if top > c else None
+    m = _re.fullmatch(r"(EV|DEP) (ÜST|ALT) (\d+\.5)", pz)
+    if m:
+        g = e if m.group(1) == "EV" else d
+        c = float(m.group(3))
+        if m.group(2) == "ÜST":
+            return "tuttu" if g > c else None
+        return "yatti" if g > c else None
+    if pz == "KG VAR":
+        return "tuttu" if (e > 0 and d > 0) else None
+    if pz == "KG YOK":
+        return "yatti" if (e > 0 and d > 0) else None
+    devre_gecti = durum in ("devre", "canli2", "2y") or (iy_ev is not None and iy_dep is not None and durum != "canli1")
+    if pz.startswith("İY ") and iy_ev is not None and iy_dep is not None and devre_gecti:
+        g = pazar_gerceklesti(pz, {"FTHG": e, "FTAG": d, "HTHG": iy_ev, "HTAG": iy_dep})
+        return None if g is None else ("tuttu" if g else "yatti")
+    return None
 
 
 def pazar_gerceklesti(pazar: str, satir) -> bool | None:

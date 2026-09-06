@@ -12,6 +12,8 @@ Uç noktalar:
   GET  /api/gecmis-maclar  ?takim=&lig=&limit=  -> oranlarıyla eski maçlar
   GET  /api/sistem-defteri        sistemin kendi ileriye dönük defteri + mod karnesi
   POST /api/sistem-defteri/simdi  {"mod":"hepsi","tarih":?} günün kuponlarını hemen yaz
+  POST /api/devre-arasi     {tarih?,esik?,marj?,site_oranlari?} devredeki maçların ölçülmüş 2. yarı olasılıkları
+  POST /api/bacak-sans      {} | {maclar:[..]} bekleyen bacakların kesinleşmesi / devre arası olasılığı
 """
 
 from __future__ import annotations
@@ -1613,6 +1615,315 @@ def uygulama_olustur():
                 "uzatma": bool(k.get("uzatma")), "lig": k.get("lig"),
             })
         return jsonify({"maclar": cikti, "zaman": veri.simdi_tr().strftime("%H:%M")})
+
+    # ───────────────────────────── Devre arası (deney32 / 32b; sabitler sistem.DEVRE_*)
+    # Maç başına ön-maç poisson + 1X2 oranı önbelleği: 60 sn'lik her yenilemede
+    # takım dilimleri yeniden kurulmasın. (ev, dep, gün) → (zaman, poisson, oranlar)
+    _DEVRE_ONBELLEK: dict = {}
+    DEVRE_ONBELLEK_TTL = 6 * 3600
+
+    def _devre_on_mac(df, r):
+        anahtar = (str(r["HomeTeam"]), str(r["AwayTeam"]), r["Tarih"].strftime("%d.%m.%Y"))
+        kayit = _DEVRE_ONBELLEK.get(anahtar)
+        if kayit and time.time() - kayit[0] < DEVRE_ONBELLEK_TTL:
+            return kayit[1], kayit[2]
+        oranlar, _maks, _ust_alt = oneri.fikstur_oranlari(r)
+        oranlar = tuple(float(x) for x in oranlar) if oranlar else None
+        poi = None
+        if not bool(r.get("analiz_yok", False) is True):
+            try:
+                poi = analiz.poisson_tahmini(df, r["HomeTeam"], r["AwayTeam"], lig_ipucu=r["Div"])
+            except Exception:  # noqa: BLE001 — arşivde takım yoksa kapsam dışı
+                poi = None
+        if len(_DEVRE_ONBELLEK) > 500:
+            _DEVRE_ONBELLEK.clear()
+        _DEVRE_ONBELLEK[anahtar] = (time.time(), poi, oranlar)
+        return poi, oranlar
+
+    def _canli_gun_indeksi(indeksler: dict, gun_iso: str) -> dict:
+        if gun_iso not in indeksler:
+            try:
+                indeksler[gun_iso] = veri.canli_indeksi(veri.canli_skorlar(gun_iso))
+            except Exception:  # noqa: BLE001
+                indeksler[gun_iso] = {}
+        return indeksler[gun_iso]
+
+    def _devre_skoru(cs: dict):
+        """Devredeki maçın İY skoru; besleme İY alanını geç yazabiliyor, o zaman anlık skor."""
+        iy_ev, iy_dep = cs.get("iy_ev"), cs.get("iy_dep")
+        if iy_ev is None or iy_dep is None:
+            iy_ev, iy_dep = cs.get("ev_gol"), cs.get("dep_gol")
+        if iy_ev is None or iy_dep is None:
+            return None
+        return int(iy_ev), int(iy_dep)
+
+    def _devre_lig(r) -> str:
+        lig = r.get("LigAdi") if "LigAdi" in r.index else None
+        return str(lig if isinstance(lig, str) and lig else (r.get("Div") or ""))
+
+    def _devreye_kalan(dakika):
+        """'37'' → 8, '45+2'' → 0, 2. yarı (>45) → None."""
+        s = str(dakika or "").strip().rstrip("'")
+        if not s:
+            return None
+        if "+" in s:
+            s = s.split("+", 1)[0]
+        try:
+            dk = int(s)
+        except ValueError:
+            return None
+        return None if dk > 45 else max(0, 45 - dk)
+
+    def _devre_mac(df, r, cs: dict, marj: float, site_oranlari: dict) -> dict:
+        ev, dep = str(r["HomeTeam"]), str(r["AwayTeam"])
+        iy = _devre_skoru(cs)
+        iy_skor = f"{iy[0]}-{iy[1]}" if iy else None
+        temel = {"id": r.get("id") if "id" in r.index else None, "ev": ev, "dep": dep, "lig": _devre_lig(r),
+                 "saat": r["Tarih"].strftime("%H:%M"), "tarih": r["Tarih"].strftime("%d.%m.%Y"),
+                 "iy_skor": iy_skor, "dakika": cs.get("dakika"), "skor": veri.canli_skor_metni(cs),
+                 "tablo": sistem.DEVRE_TABLO.get(iy_skor) if iy_skor else None,
+                 "on_mac": None, "pazarlar": [], "kapsam_disi": None}
+        if iy is None:
+            return {**temel, "kapsam_disi": "besleme İY skorunu vermedi"}
+        poi, oranlar = _devre_on_mac(df, r)
+        if poi is None:
+            return {**temel, "kapsam_disi": "arşivde takım verisi yok (kalıp modu) — devre arası modeli kurulamaz"}
+        try:
+            sonuc = analiz.devre_arasi_pazarlar(poi, iy[0], iy[1], oranlar)
+        except Exception as hata:  # noqa: BLE001
+            return {**temel, "kapsam_disi": f"model kurulamadı: {hata}"}
+        pazarlar = []
+        for pazar, p in sonuc["pazarlar"].items():
+            if pazar not in sistem.DEVRE_KARNE:   # İY pazarları (devrede kesin) ve ölçülmeyenler listelenmez
+                continue
+            pazarlar.append(sistem.devre_pazar_satiri(pazar, p, marj, site_oranlari.get(f"{ev}|{dep}|{pazar}")))
+        pazarlar.sort(key=lambda x: (sistem.devre_pazar_grubu(x["pazar"]), -x["guven_p"], x["pazar"]))
+        return {**temel, "pazarlar": pazarlar, "on_mac": {
+            "ms1": round(float(poi["ms1"]), 4), "ms0": round(float(poi["ms0"]), 4), "ms2": round(float(poi["ms2"]), 4),
+            "lambda_ev": round(float(poi["lambda_ev"]), 3), "lambda_dep": round(float(poi["lambda_dep"]), 3),
+            "lambda2_ev": round(float(sonuc["lambda2"][0]), 3), "lambda2_dep": round(float(sonuc["lambda2"][1]), 3),
+            "lam_kaynak": sonuc["lam_kaynak"], "oranlar": list(oranlar) if oranlar else None}}
+
+    @app.post("/api/devre-arasi")
+    def devre_arasi():
+        """Devredeki maçlar için ÖLÇÜLMÜŞ 2. yarı olasılıkları (deney32 / 32b).
+
+        {tarih?, esik?, marj?, adet?, min_oran?, site_oranlari?} → {devrede[...], oneriler[...],
+        canli[...], karne, not, notlar}. İY skoru canlı beslemeden; ön-maç λ 1X2
+        oranından (ölçülen varyant); pazar başına bant düzeltmeli güven ve rozet.
+        Kâr ölçülmedi; kullanıcının girdiği canlı oran yalnız EV gösterimi içindir."""
+        govde = request.get_json(silent=True) or {}
+        simdi = veri.simdi_tr()
+        tarih = str(govde.get("tarih") or simdi.strftime("%d.%m.%Y"))
+        try:
+            esik = max(0.40, min(0.95, float(govde.get("esik", sistem.DEVRE_ESIK))))
+            marj = max(sistem.MARJ_ALT, min(sistem.MARJ_UST, float(govde.get("marj", sistem.MARJ_VARSAYILAN))))
+            adet = max(1, min(10, int(govde.get("adet", sistem.DEVRE_ADET))))
+            min_oran = max(1.01, min(10.0, float(govde.get("min_oran", sistem.DEVRE_MIN_ORAN))))
+            gun_iso = pd.to_datetime(tarih, dayfirst=True).strftime("%Y-%m-%d")
+        except (TypeError, ValueError):
+            return jsonify({"hata": "Geçersiz parametre."}), 400
+        site_oranlari = oneri.site_oranlari_ayikla(govde.get("site_oranlari"))
+        try:
+            df = _df()
+        except FileNotFoundError:
+            return jsonify({"hata": "Önce veriyi güncelleyin."}), 503
+        try:
+            fik, _kitapcilar = _fikstur()
+        except Exception as hata:  # noqa: BLE001
+            return jsonify({"hata": f"Fikstür alınamadı: {hata}"}), 502
+        hedef = oneri.gun_satirlari(fik, tarih)
+        try:
+            kayitlar = veri.canli_skorlar(gun_iso)
+        except Exception:  # noqa: BLE001
+            kayitlar = []
+        indeks = veri.canli_indeksi(kayitlar) if kayitlar else {}
+        try:
+            cozucu = veri.takim_cozucu(df, hizli=True)
+        except Exception:  # noqa: BLE001
+            cozucu = None
+        devrede, canli, notlar = [], [], []
+        butce = time.time() + 40.0
+        for _idx, r in hedef.iterrows():
+            cs = veri.canli_esle(indeks, r["HomeTeam"], r["AwayTeam"], r["Tarih"], cozucu=cozucu,
+                                 pencere_saat=3.0) if indeks else None
+            if not cs:
+                continue
+            if cs["durum"] == "devre":
+                if time.time() > butce:
+                    notlar.append("süre bütçesi doldu: devredeki bazı maçlar bu turda kurulamadı")
+                    break
+                devrede.append(_devre_mac(df, r, cs, marj, site_oranlari))
+            elif cs["durum"] == "canli":
+                kalan = _devreye_kalan(cs.get("dakika"))
+                canli.append({"ev": str(r["HomeTeam"]), "dep": str(r["AwayTeam"]), "lig": _devre_lig(r),
+                              "saat": r["Tarih"].strftime("%H:%M"), "dakika": cs.get("dakika"),
+                              "skor": veri.canli_skor_metni(cs), "devreye": kalan,
+                              "yari": 1 if kalan is not None else 2})
+        canli.sort(key=lambda m: (m["devreye"] if m["devreye"] is not None else 999, m["saat"]))
+        devrede.sort(key=lambda m: (m["saat"], m["ev"]))
+        kapsam_disi = sum(1 for m in devrede if m.get("kapsam_disi"))
+        if kapsam_disi:
+            notlar.append(f"{kapsam_disi} devredeki maç kapsam dışı (arşivde takım verisi yok)")
+        takim_lam = sum(1 for m in devrede if (m.get("on_mac") or {}).get("lam_kaynak") == "takim")
+        if takim_lam:
+            notlar.append(f"{takim_lam} maçta 1X2 oranı yok: λ takım modelinden (ölçülen varyant piyasa λ'sıdır)")
+        if not kayitlar:
+            notlar.append("canlı besleme bu gün için kayıt vermedi (kapalı ya da erişilemiyor)")
+        return jsonify({
+            "zaman": simdi.strftime("%H:%M"), "tarih": tarih, "esik": esik, "marj": marj, "min_oran": min_oran,
+            "devrede": devrede, "oneriler": sistem.devre_secimleri(devrede, esik, adet, marj, min_oran),
+            "canli": canli, "besleme": bool(kayitlar), "besleme_mac": len(kayitlar),
+            "gun_mac": int(len(hedef)), "karne": sistem.DEVRE_OZET, "not": sistem.DEVRE_NOT, "notlar": notlar,
+        })
+
+    def _fikstur_satiri(fik, ev: str, dep: str, tarih: str, cozucu=None):
+        """Defter bacağının fikstür satırı (aynı gün, aynı adlar; olmazsa arşiv adıyla)."""
+        try:
+            gun = fik[fik["Tarih"].dt.strftime("%d.%m.%Y") == tarih]
+        except Exception:  # noqa: BLE001
+            return None
+        if gun.empty:
+            return None
+        tam = gun[(gun["HomeTeam"] == ev) & (gun["AwayTeam"] == dep)]
+        if not tam.empty:
+            return tam.iloc[0]
+        if cozucu is None:
+            return None
+
+        def _coz(ad):
+            try:
+                return str(cozucu(str(ad))).strip().lower()
+            except Exception:  # noqa: BLE001
+                return str(ad).strip().lower()
+
+        ce, cd = _coz(ev), _coz(dep)
+        for _i, r in gun.iterrows():
+            if _coz(r["HomeTeam"]) == ce and _coz(r["AwayTeam"]) == cd:
+                return r
+        return None
+
+    @app.post("/api/bacak-sans")
+    def bacak_sans():
+        """Kupon Defteri'ndeki bekleyen bacakların canlı durumu.
+
+        {} → defterdeki bugün/dün bekleyenler; {maclar:[{ev, dep, tarih, saat, pazar}]}
+        → verilen liste. Bacak başına: skorla KESİNLEŞEN sonuç (deterministik,
+        analiz.pazar_kesinlesti) ve maç devredeyse ÖLÇÜLMÜŞ olasılık (devre arası
+        modeli). Oyun içi dakika bazlı olasılık yok: ölçülmedi. Kupon başına çarpım."""
+        govde = request.get_json(silent=True) or {}
+        simdi = veri.simdi_tr()
+        bugun = simdi.strftime("%d.%m.%Y")
+        dun = (simdi - pd.Timedelta(days=1)).strftime("%d.%m.%Y")
+        verilen = bool(govde.get("maclar"))
+        if verilen:
+            bacaklar = [dict(m) for m in list(govde["maclar"])[:200]
+                        if isinstance(m, dict) and m.get("ev") and m.get("dep")]
+            acik_toplam: dict = {}
+        else:
+            bacaklar = kupon.acik_bacaklar({bugun, dun})
+            acik_toplam = {}
+            for b in kupon.acik_bacaklar():
+                acik_toplam[str(b.get("kupon_id"))] = acik_toplam.get(str(b.get("kupon_id")), 0) + 1
+        if not bacaklar:
+            return jsonify({"bacaklar": [], "kuponlar": {}, "zaman": simdi.strftime("%H:%M")})
+        try:
+            df = _df()
+        except FileNotFoundError:
+            df = None
+        try:
+            fik, _kitapcilar = _fikstur()
+        except Exception:  # noqa: BLE001
+            fik = None
+        try:
+            cozucu = veri.takim_cozucu(df, hizli=True) if df is not None else None
+        except Exception:  # noqa: BLE001
+            cozucu = None
+        indeksler: dict = {}
+        cikti = []
+        for b in bacaklar:
+            tarih = str(b.get("tarih") or bugun)
+            saat = str(b.get("saat") or "").strip()
+            pazar = str(b.get("pazar") or "")
+            try:
+                t = pd.to_datetime(f"{tarih} {saat or '12:00'}", dayfirst=True)
+            except (ValueError, TypeError):
+                continue
+            kayit = {"kupon_id": b.get("kupon_id"), "indeks": b.get("indeks"), "ev": str(b["ev"]), "dep": str(b["dep"]),
+                     "tarih": tarih, "pazar": pazar, "durum_canli": None, "dakika": None, "skor": None, "iy_skor": None,
+                     "p": None, "model_p": None, "bant_n": 0, "olculdu": False, "kesin": None, "neden": None}
+            indeks = _canli_gun_indeksi(indeksler, t.strftime("%Y-%m-%d"))
+            cs = veri.canli_esle(indeks, b["ev"], b["dep"], t, cozucu=cozucu,
+                                 pencere_saat=3.0 if saat else 24.0) if indeks else None
+            if not cs:
+                kayit["neden"] = "canlı beslemede bulunamadı"
+                cikti.append(kayit)
+                continue
+            kayit.update({"durum_canli": cs["durum"], "dakika": cs.get("dakika"), "skor": veri.canli_skor_metni(cs),
+                          "iy_skor": (f"{cs['iy_ev']}-{cs['iy_dep']}"
+                                      if cs.get("iy_ev") is not None and cs.get("iy_dep") is not None else None)})
+            if cs["durum"] == "baslamadi":
+                kayit["neden"] = "başlamadı"
+            elif cs["durum"] == "iptal":
+                kayit["neden"] = "ertelendi / iptal"
+            elif cs["durum"] == "bitti" and cs.get("uzatma"):
+                kayit["neden"] = "uzatmalı bitti: 90 dk skoru beslemede yok"
+            elif cs["durum"] in ("canli", "devre", "bitti"):
+                kayit["kesin"] = analiz.pazar_kesinlesti(pazar, cs.get("ev_gol"), cs.get("dep_gol"),
+                                                         cs.get("iy_ev"), cs.get("iy_dep"), cs["durum"])
+                if kayit["kesin"] is None and cs["durum"] == "devre":
+                    uygun, neden = sistem.devre_guvenilir(pazar)
+                    kayit["olculdu"] = bool(uygun)
+                    iy = _devre_skoru(cs)
+                    r = _fikstur_satiri(fik, b["ev"], b["dep"], tarih, cozucu) if fik is not None else None
+                    if not uygun:
+                        kayit["neden"] = neden
+                    elif iy is None:
+                        kayit["neden"] = "besleme İY skorunu vermedi"
+                    elif r is None:
+                        kayit["neden"] = "fikstürde bulunamadı"
+                    else:
+                        poi, oranlar = _devre_on_mac(df, r)
+                        if poi is None:
+                            kayit["neden"] = "arşivde takım verisi yok"
+                        else:
+                            try:
+                                p = analiz.devre_arasi_pazarlar(poi, iy[0], iy[1], oranlar)["pazarlar"].get(pazar)
+                            except Exception:  # noqa: BLE001
+                                p = None
+                            if p is None:
+                                kayit["neden"] = "pazar devre arası modelinde yok"
+                            else:
+                                g = sistem.devre_guven_olasiligi(pazar, p)
+                                kayit.update({"p": round(float(g["guven"]), 4), "model_p": round(float(p), 4),
+                                              "bant_n": int(g["bant_n"])})
+                elif kayit["kesin"] is None and cs["durum"] == "canli":
+                    kayit["neden"] = "oyun içi olasılık ölçülmedi (arşivde dakika verisi yok)"
+            cikti.append(kayit)
+        kuponlar: dict = {}
+        for kayit in cikti:
+            kid = kayit.get("kupon_id")
+            if kid is None:
+                continue
+            k = kuponlar.setdefault(str(kid), {"p": 1.0, "acik": 0, "belirsiz": False, "yatti": False,
+                                               "kesin_tutan": 0, "degerlendirilen": 0})
+            k["degerlendirilen"] += 1
+            if kayit["kesin"] == "yatti":
+                k["yatti"] = True
+            elif kayit["kesin"] == "tuttu":
+                k["kesin_tutan"] += 1
+            elif kayit["p"] is not None:
+                k["p"] *= float(kayit["p"])
+                k["acik"] += 1
+            else:
+                k["belirsiz"] = True
+                k["acik"] += 1
+        for kid, k in kuponlar.items():
+            if not verilen and acik_toplam.get(kid, 0) > k["degerlendirilen"]:
+                k["belirsiz"] = True       # başka günlere bacağı var: çarpım eksik kalır
+                k["acik"] += acik_toplam[kid] - k["degerlendirilen"]
+            k["p"] = 0.0 if k["yatti"] else (None if k["belirsiz"] else round(k["p"], 4))
+        return jsonify({"bacaklar": cikti, "kuponlar": kuponlar, "zaman": simdi.strftime("%H:%M")})
 
     @app.post("/api/oranlar")
     def oranlar_tablosu():
