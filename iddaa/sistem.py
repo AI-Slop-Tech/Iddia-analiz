@@ -951,6 +951,70 @@ def fiyatlanamaz_satirlari() -> list[dict]:
              "veri_yok": True}
             for ad, sebep in FIYATLANAMAZ.items()]
 
+# ─────────────────────────────────────────────────────────────────────────
+# "EN YÜKSEK TUTMA ŞANSI" NASIL SEÇMELİ — deney30 (06.09.2026)
+#
+# Kullanıcı şikâyeti: "en garanti" diye seçilenler bile tutmuyor. Ölçtük:
+# 8.057 maç / 167 gün (kesim sonrası test dönemi), gün başına en iyi 1/2/3
+# seçim (maç başına bir), 2 kat çapraz doğrulama — bant tablosu günlerin bir
+# yarısından öğrenilir, öbür yarısında sınanır. "Tuttu" = kupondaki HER bacak.
+#
+#   sıralama anahtarı                   1 bacak            2 bacak            3 bacak
+#   model p (eski üretim)               %82.0 (dedi 91.3)  %65.3 (dedi 81.6)  %53.3 (dedi 72.4)
+#   ölçülen bant düzeltmesi             %90.4 (dedi 87.6)  %82.0 (dedi 76.1)  %72.5 (dedi 65.8)
+#   bant + keskin piyasa ort.  SEÇİLDİ  %92.8 (dedi 92.3)  %83.2 (dedi 84.5)  %75.4 (dedi 76.8)
+#
+# Eski sıralama modelin EN ÇOK ABARTTIĞI pazarları seçiyordu (ÇŞ 1X: %90+
+# deyip %78 tutturdu; günlerin 97'sinde ilk seçim buydu). Yeni anahtar:
+# bandın ölçülmüş sapmasıyla düzeltilmiş olasılık; keskin piyasanın
+# (Pinnacle, marjsız) olasılığı biliniyorsa ikisinin ortalaması.
+# Teşhis: model %60+ derken piyasa 10+ puan düşük diyorsa gerçek tutma %56
+# (model %75 demişti, n=2.713) — böyle bacaklar "piyasa uyumsuz" uyarısı alır.
+#
+# DÜRÜSTLÜK: bu mod para KAZANDIRMAZ. Ölçülen getiri −1.9 / −6.6 / −9.9%
+# (1/2/3 bacak), fiyatlar 1.06 / 1.12 / 1.19. Tutturur, kâr etmez.
+# kalibre_p'nin "optimizasyona girdi verme" uyarısı burada geçerli değil:
+# oran hedefi yok, yalnız sıralama var ve sonuç holdout'ta ölçüldü.
+SANS_KARNE = {
+    1: {"n": 167, "dedi": 0.923, "gercek": 0.928, "roi": -0.019, "hata": 0.020, "fiyat": 1.06, "eski": 0.820},
+    2: {"n": 167, "dedi": 0.845, "gercek": 0.832, "roi": -0.066, "hata": 0.029, "fiyat": 1.12, "eski": 0.653},
+    3: {"n": 167, "dedi": 0.768, "gercek": 0.754, "roi": -0.099, "hata": 0.033, "fiyat": 1.19, "eski": 0.533},
+}
+SANS_BUZME = 50            # bant düzeltmesi n/(n+50) ile büzülür: az örnekli bant az söz sahibi
+SANS_UYUMSUZ_FARK = 0.10   # keskin piyasa modelden bu kadar düşükse uyarı
+
+
+def sans_karne(bacak: int) -> dict | None:
+    """Şans modunun ölçülmüş karnesi (bacak sayısına göre; 3+ için 3 bacak satırı)."""
+    k = SANS_KARNE.get(max(1, min(3, int(bacak))))
+    if not k:
+        return None
+    return {**k, "hedef": 0.0, "esik": 0.0, "tam_eslesme": True, "bacak": int(bacak)}
+
+
+def guven_olasiligi(aday: dict) -> dict:
+    """Seçimin ÖLÇÜLMÜŞ tutma olasılığı — deney30'un seçtiği sıralama anahtarı.
+
+    bant_p : model p, o pazar-bandında ölçülen (gerçek − dedi) sapmasıyla
+             düzeltilir; düzeltme n/(n+SANS_BUZME) ile büzülür.
+    guven  : keskin piyasa olasılığı varsa (bant_p + keskin)/2, yoksa bant_p.
+    uyumsuz: keskin piyasa, modelin ham p'sinden SANS_UYUMSUZ_FARK kadar düşük.
+    """
+    p = float(aday["p"])
+    ham = float(aday.get("ham_p", p))
+    kayit = bant_karnesi(aday["pazar"], ham)
+    bant_p, bant_n = p, 0
+    if kayit:
+        n, dedi, gercek = kayit
+        bant_n = int(n)
+        bant_p = max(0.02, min(0.985, p + (gercek - dedi) * n / (n + SANS_BUZME)))
+    keskin = aday.get("keskin_adil")
+    keskin = float(keskin) if keskin else None
+    guven = (bant_p + keskin) / 2.0 if keskin is not None else bant_p
+    return {"guven": float(guven), "bant_p": float(bant_p), "bant_n": bant_n, "keskin": keskin,
+            "uyumsuz": bool(keskin is not None and keskin < ham - SANS_UYUMSUZ_FARK)}
+
+
 def en_yuksek_sans(havuz: list[dict], bacak_sayisi: int = 1,
                    esik: float = 0.60, marj: float = MARJ_VARSAYILAN) -> dict | None:
     """Oran hedefi YOK: verilen bacak sayısıyla tutma şansı en yüksek kupon.
@@ -958,8 +1022,11 @@ def en_yuksek_sans(havuz: list[dict], bacak_sayisi: int = 1,
     Neden gerekli: "en az 2.00 oran" istemek, matematiksel olarak "yarı yarıya
     yatsın" istemektir (ölçüm: %49.8). Kullanıcı bunu yaşayınca haklı olarak
     "tutmuyor" diyor. Bu mod ters yönden bakar — önce en çok tutanı seçer,
-    oran ne çıkarsa o olur. Tek bacakta ölçülen tutma oranı %90'ı geçebiliyor;
-    karşılığında oran 1.05-1.15 civarındadır. İkisi aynı anda olmaz.
+    oran ne çıkarsa o olur. İkisi aynı anda olmaz.
+
+    Sıralama (deney30, yukarıdaki tablo): modelin dediği p DEĞİL, ölçülmüş
+    güven — bant düzeltmesi + keskin piyasa ortalaması. Eski sıralama 3
+    bacakta %53 tutuyordu, bu %75 (holdout).
     """
     # OYNANABİLİRLİK: fiyatı ~1.05'in altına düşen seçim pratikte kupona
     # yazılamaz (kitapçı listelemez, minimum oran kuralına takılır).
@@ -968,24 +1035,52 @@ def en_yuksek_sans(havuz: list[dict], bacak_sayisi: int = 1,
     if not adaylar:
         return None
     bacak_sayisi = max(1, min(6, int(bacak_sayisi)))
+    puanli = [(guven_olasiligi(a), a) for a in adaylar]
     secili, kullanilan = [], set()
-    for a in sorted(adaylar, key=lambda x: -x["p"]):     # p'ye göre sırala: çarpımı en büyük yapan budur
+    # ölçülmüş güvene göre sırala; eşitlikte gerçek fiyatı olan önde
+    for g, a in sorted(puanli, key=lambda x: (-x[0]["guven"], 0 if x[1].get("oran") else 1)):
         mid = _mac_anahtari(a)
         if mid in kullanilan:
             continue
-        secili.append(a)
+        secili.append((g, a))
         kullanilan.add(mid)
         if len(secili) >= bacak_sayisi:
             break
     if not secili:
         return None
     oran = 1.0
-    for a in secili:
+    for _g, a in secili:
         oran *= _fiyat(a, marj)
-    p = math.prod(a["p"] for a in secili)
-    fiyatsiz = sum(1 for a in secili if not a.get("oran"))
+    p = math.prod(g["guven"] for g, _a in secili)
+    fiyatsiz = sum(1 for _g, a in secili if not a.get("oran"))
+    bacaklar = []
+    for g, a in secili:
+        b = _bacak(a, marj)
+        guven = round(g["guven"], 4)
+        aciklama = f"ölçülen güven %{guven*100:.0f} (model %{b['p']*100:.0f}"
+        if g["keskin"] is not None:
+            aciklama += f", keskin piyasa %{g['keskin']*100:.0f}"
+        if g["bant_n"]:
+            aciklama += ", bant " + f"{g['bant_n']:,}".replace(",", ".") + " maç"
+        aciklama += ")"
+        gerekce = [aciklama] + [x for x in b.get("gerekce", []) if not x.startswith("dikkat: bu pazarın")]
+        if g["uyumsuz"]:
+            gerekce.append("dikkat: keskin piyasa modelden 10+ puan düşük diyor — "
+                           "ölçümde böyle bacaklar %56 tuttu (model %75 demişti)")
+        b.update({
+            "model_p": b["p"],
+            "p": guven,
+            "guven_p": guven,
+            "bant_p": round(g["bant_p"], 4),
+            "bant_n": g["bant_n"],
+            "uyumsuz": g["uyumsuz"],
+            "adil": round(1.0 / max(guven, 1e-6), 2),
+            "ev": (guven * float(b["oran"]) - 1.0) if b.get("oran") else None,
+            "gerekce": gerekce,
+        })
+        bacaklar.append(b)
     return {
-        "bacaklar": [_bacak(a, marj) for a in secili],
+        "bacaklar": bacaklar,
         "oran": round(oran, 2),
         "p": float(p),
         "ev": float(p * oran - 1.0),

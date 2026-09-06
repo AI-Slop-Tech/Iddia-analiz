@@ -3476,3 +3476,150 @@ def pinnacle_esle(indeks: dict, ev: str, dep: str, tarih) -> dict | None:
         if puan > en_puan:
             en_iyi, en_puan = kayit, puan
     return en_iyi if en_puan >= 0.6 else None
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# CANLI SKOR — aynı açık besleme, kısa ömürlü önbellek
+#
+# Bülten gün dosyasını 3 saatte bir tazeler (fikstür için yeter). Skor için
+# aynı gün gövdesi 90 saniyelik AYRI bir bellek önbelleğiyle okunur. Alanlar:
+#   Eps  : "NS" başlamadı · "28'" dakika · "HT" devre · "FT" bitti ·
+#          "AET"/"AP" uzatma/penaltı sonrası bitti · "Postp." ertelendi ·
+#          "Canc." iptal · "ET"/"Pen." uzatma/penaltılar sürüyor
+#   Tr1/Tr2 anlık skor · Trh1/Trh2 ilk yarı skoru
+# Ölçüldü (06.09.2026): gün gövdesi 0.6 sn, 780 maç, 43'ü o an canlı.
+# Korner/kart canlı gelmez — o pazarlar arşiv işlenince sonuçlanır.
+# Uzatmalı biten maçta (AET/AP) besleme 120 dk skorunu verir; bahis 90 dk
+# skoruyla sonuçlanır → otomatik işlenmez, yalnız gösterilir.
+CANLI_TTL = 90
+_CANLI_ONBELLEK: dict[str, tuple[float, list]] = {}
+_CANLI_KILIT = threading.Lock()
+
+
+def _canli_durum(eps: str, epr) -> str:
+    e = str(eps or "").strip().lower()
+    if e in ("", "ns", "none"):
+        return "baslamadi"
+    if e == "ht":
+        return "devre"
+    if e in ("ft", "aet", "ap"):
+        return "bitti"
+    if e.startswith(("postp", "canc", "aband", "abd", "susp", "int", "delay", "wo")):
+        return "iptal"
+    if e in ("et", "pen", "pen.") or e.endswith(("'", "+")) or e.rstrip("'+").isdigit():
+        return "canli"
+    if epr == 1:
+        return "canli"
+    if epr == 2:
+        return "bitti"
+    return "belirsiz"
+
+
+def _canli_kayit(m: dict, ulke: str, lig: str) -> dict | None:
+    ev = ((m.get("T1") or [{}])[0] or {}).get("Nm")
+    dep = ((m.get("T2") or [{}])[0] or {}).get("Nm")
+    if not ev or not dep:
+        return None
+
+    def _sayi(x):
+        try:
+            return int(x)
+        except (TypeError, ValueError):
+            return None
+
+    esd = str(m.get("Esd") or "")
+    ts = (f"{esd[:4]}-{esd[4:6]}-{esd[6:8]} {esd[8:10]}:{esd[10:12]}:00"
+          if len(esd) >= 12 and esd.isdigit() else "")
+    eps = str(m.get("Eps") or "")
+    durum = _canli_durum(eps, m.get("Epr"))
+    return {
+        "ts": ts, "ev": str(ev), "dep": str(dep), "ulke": ulke, "lig": lig,
+        "eid": str(m.get("Eid") or ""), "durum": durum, "eps": eps,
+        "dakika": eps if durum == "canli" else None,
+        "ev_gol": _sayi(m.get("Tr1")), "dep_gol": _sayi(m.get("Tr2")),
+        "iy_ev": _sayi(m.get("Trh1")), "iy_dep": _sayi(m.get("Trh2")),
+        "uzatma": eps.strip().lower() in ("aet", "ap"),
+    }
+
+
+def canli_skorlar(gun: str, yenile: bool = False) -> list[dict]:
+    """TR günü (YYYY-MM-DD) için beslemedeki tüm maçların anlık durumu/skoru."""
+    if acik_fikstur_kapali():
+        return []
+    with _CANLI_KILIT:
+        kayit = _CANLI_ONBELLEK.get(gun)
+        if kayit and not yenile and time.time() - kayit[0] < CANLI_TTL:
+            return kayit[1]
+        try:
+            yanit = istek(_acik_gun_url(gun), zaman_asimi=_ACIK_ZAMAN_ASIMI,
+                          dogrula=json_yanit_mi)
+            yanit.raise_for_status()
+            govde = yanit.json()
+        except Exception:  # noqa: BLE001 — skor gelmezse bayat liste, o da yoksa boş
+            return kayit[1] if kayit else []
+        cikti = []
+        for asama in govde.get("Stages") or []:
+            ulke = _acik_ulke_alani(asama)
+            lig = _acik_ad(asama.get("CompN") or asama.get("Snm") or asama.get("Cnm"))
+            for m in asama.get("Events") or []:
+                k = _canli_kayit(m, ulke, lig)
+                if k and k["ts"]:
+                    cikti.append(k)
+        for eski in sorted(g for g in _CANLI_ONBELLEK if g < gun)[:-2]:
+            _CANLI_ONBELLEK.pop(eski, None)     # eski günler bellekte birikmesin
+        _CANLI_ONBELLEK[gun] = (time.time(), cikti)
+        return cikti
+
+
+def canli_indeksi(kayitlar: list) -> dict:
+    """Pinnacle indeksiyle aynı biçim (ts/ev/dep): gün → [(ev_parça, dep_parça, ts, kayıt)]."""
+    return pinnacle_indeksi(kayitlar)
+
+
+def canli_esle(indeks: dict, ev: str, dep: str, tarih, cozucu=None,
+               pencere_saat: float = 3.0) -> dict | None:
+    """Bülten/defter satırını canlı kayda eşler.
+
+    1) Pinnacle eşleyicisiyle aynı sıkı kural (aynı gün, ±pencere, iki takımda
+       da parça örtüşmesi ≥ %60).
+    2) Tutmazsa arşiv ad çözücüsü: iki taraf da aynı arşiv adına çözülüyorsa
+       eşleşir ("Man United" ↔ "Manchester United"). Yanlış maça skor yazmak
+       skorsuz bırakmaktan kötü: iki kural da iki takımı birden ister.
+    """
+    t = pd.Timestamp(tarih)
+    adaylar = indeks.get(t.date()) or []
+    if not adaylar:
+        return None
+    e = _oddsapi_takim_parcalari(_PIN_ETIKET.sub("", str(ev)))
+    d = _oddsapi_takim_parcalari(_PIN_ETIKET.sub("", str(dep)))
+    en_iyi, en_puan = None, 0.0
+    for pe, pd_, pt, kayit in adaylar:
+        if abs((pt - t).total_seconds()) > pencere_saat * 3600:
+            continue
+        puan = min(_pin_puan(e, pe), _pin_puan(d, pd_))
+        if puan > en_puan:
+            en_iyi, en_puan = kayit, puan
+    if en_puan >= 0.6:
+        return en_iyi
+    if cozucu is None:
+        return None
+
+    def _coz(ad):
+        try:
+            return str(cozucu(str(ad))).strip().lower()
+        except Exception:  # noqa: BLE001
+            return str(ad).strip().lower()
+
+    ce, cd = _coz(ev), _coz(dep)
+    for _pe, _pd, pt, kayit in adaylar:
+        if abs((pt - t).total_seconds()) > pencere_saat * 3600:
+            continue
+        if _coz(kayit["ev"]) == ce and _coz(kayit["dep"]) == cd:
+            return kayit
+    return None
+
+
+def canli_skor_metni(k: dict) -> str | None:
+    if k.get("ev_gol") is None or k.get("dep_gol") is None:
+        return None
+    return f"{k['ev_gol']}-{k['dep_gol']}"

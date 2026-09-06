@@ -185,6 +185,8 @@
   }
   input::placeholder{color:var(--cok-soluk)}
   input:focus,select:focus{border-color:var(--vurgu);box-shadow:0 0 0 3px var(--vurgu-sis)}
+  .canli-chip{margin-left:6px;font-weight:700}
+  .canli-chip.canli-var{border-color:#ef4444;color:#fca5a5}
   input[type=range]{padding:0;background:none;border:0;accent-color:var(--vurgu)}
   input.oran{width:92px;text-align:center;font-weight:700;font-size:15px}
   input.takim{width:210px}
@@ -2375,7 +2377,8 @@ function kuponKartHTML(k){
         <span>${BACAK_IKON[s.durum] || iks('soru')}</span>
         <span class="ipucu">${esc(s.tarih)} ${esc(s.saat)} · ${esc(s.lig)}</span>
         <span style="flex:1;min-width:150px">${esc(s.ev)} – ${esc(s.dep)}
-          ${s.skor ? `<span class="ipucu">(${esc(s.skor)}${s.iy_skor ? ' · İY ' + esc(s.iy_skor) : ''})</span>` : ''}</span>
+          ${s.skor ? `<span class="ipucu">(${esc(s.skor)}${s.iy_skor ? ' · İY ' + esc(s.iy_skor) : ''})${s.sonuc_kaynak === 'canli' ? ' <span title="maç biter bitmez canlı beslemeden işlendi">⚡</span>' : ''}</span>` : ''}
+          ${s.durum === 'bekliyor' ? `<span class="chip canli-chip" data-canli="${esc(`${s.ev}|${s.dep}|${s.tarih}|${s.saat || ''}`)}" hidden></span>` : ''}</span>
         <span><b>${esc(s.pazar)}</b> @ ${s.oran.toFixed(2)}
           ${typeof s.clv === 'number' ? `<span class="chip ${s.clv > 0.01 ? 'ev-poz' : (s.clv < -0.01 ? 'ev-neg' : '')}"
               title="Kapanış çizgisi değeri: aldığın ${s.oran.toFixed(2)} vs Pinnacle kapanışı ${(s.kapanis||0).toFixed(2)}. Kapanışı düzenli yenen süreç uzun vadede kârdadır — tutup tutmamasından bağımsız.">
@@ -2419,6 +2422,7 @@ async function kuponSekmesiCiz(){
     $('#kupon-liste').innerHTML = (r.kuponlar || []).map(kuponKartHTML).join('')
       || '<div class="kart bos-durum"><p>Kayıtlı kupon yok.</p></div>';
     sistemKarnesiCiz(r.kuponlar || []);   // kaydet / sil / işaretle sonrası karne de tazelensin
+    canliGuncelle();
   }catch(h){
     $('#kupon-liste').innerHTML = `<div class="kart"><span class="ev-neg">${esc(h.message)}</span></div>`;
   }
@@ -3774,10 +3778,15 @@ function sisBacakHTML(b, i){
     <span class="chip">${i + 1}</span>
     <span style="flex:1;min-width:170px">
       <b>${esc(b.ev_ad)} – ${esc(b.dep_ad)}</b>
-      <div class="ipucu">${esc(b.saat || '')}${b.lig ? ' · ' + esc(b.lig) : ''}</div>
+      <div class="ipucu">${esc(b.saat || '')}${b.lig ? ' · ' + esc(b.lig) : ''}
+        <span class="chip canli-chip" data-canli="${esc(`${b.ev_ad}|${b.dep_ad}|${SIS_CIZ_TARIH || AKTIF_GUN || ''}|${b.saat || ''}`)}" hidden></span></div>
     </span>
     <span style="min-width:120px"><b>${esc(b.pazar)}</b> ${oranMetin}</span>
-    <span class="buyukev" title="ölçüm düzeltmesi uygulanmış model olasılığı">%${(b.p*100).toFixed(0)}</span>
+    ${(b.guven_p !== undefined && b.guven_p !== null)
+      ? `<span class="buyukev" title="ölçülen güven: pazar bandının ölçülmüş sapmasıyla düzeltilmiş model olasılığı${b.keskin_adil ? ' ile keskin piyasa (Pinnacle marjsız) olasılığının ortalaması' : ''}">%${(b.guven_p*100).toFixed(0)}</span>
+         <span class="chip" title="modelin ham olasılığı ve ölçüm dayanağı">model %${(b.model_p*100).toFixed(0)}${b.keskin_adil ? ` · keskin %${(b.keskin_adil*100).toFixed(0)}` : ''}${b.bant_n ? ` · bant ${tl(b.bant_n)} maç` : ''}</span>
+         ${b.uyumsuz ? `<span class="chip ev-neg" title="Pinnacle'ın marjsız olasılığı modelin 10+ puan altında; ölçümde böyle bacaklar %56 tuttu (model %75 demişti)">⚠ piyasa uyumsuz</span>` : ''}`
+      : `<span class="buyukev" title="ölçüm düzeltmesi uygulanmış model olasılığı">%${(b.p*100).toFixed(0)}</span>`}
     ${ev}
     ${sisRozet(b.karne)}${sisKatman(b)}
     ${b.keskin_sinir ? `<span class="chip" title="Pinnacle'ın marjsız olasılığı %${(b.keskin_adil*100).toFixed(1)}; sitendeki oran bu sınırın ÜSTÜNDEYSE dünyanın en keskin kitapçısına göre değer var">
@@ -3790,9 +3799,11 @@ function sisBacakHTML(b, i){
   </div>`;
 }
 
+let SIS_CIZ_TARIH = '';
 function sistemCiz(d){
   const kutu = $('#sistem-sonuc'); if(!kutu) return;
   if(d.hata){ kutu.innerHTML = `<div class="kart bos-durum"><p>${esc(d.hata)}</p></div>`; return; }
+  SIS_CIZ_TARIH = d.tarih || '';
   const k = d.kupon;
   const kuponHTML = k ? `
     <div class="kart">
@@ -3820,7 +3831,11 @@ function sistemCiz(d){
           <span style="flex:1">Ölçülen <b>getiri</b> (aynı kurallarla ${tl(d.strateji.n)} kupon)</span>
           <b class="${d.strateji.roi > d.strateji.hata ? 'ev-poz' : ''}">%${(d.strateji.roi*100).toFixed(1)}</b>
           <span class="ipucu">± ${(d.strateji.hata*100).toFixed(1)} puan —
-            ${Math.abs(d.strateji.roi) > d.strateji.hata ? 'anlamlı olabilir' : '<b>kâr kanıtlanmadı</b>, zarar da yok'}</span></div>` : ''}
+            ${d.strateji.roi > d.strateji.hata ? 'anlamlı olabilir' : (d.strateji.roi < -d.strateji.hata ? '<b>zarar anlamlı</b> — bu ayar tutturur, kazandırmaz' : '<b>kâr kanıtlanmadı</b>, zarar da yok')}</span></div>` : ''}
+        ${d.strateji && d.strateji.eski !== undefined ? `<div class="capraz-satir">
+          <span style="flex:1">Eski sıralama (modelin dediğine göre) aynı ölçümde</span>
+          <b class="ev-neg">%${(d.strateji.eski*100).toFixed(1)} tuttu</b>
+          <span class="ipucu">yeni sıralama ölçülen tutmaya göre: +${((d.strateji.gercek - d.strateji.eski)*100).toFixed(0)} puan</span></div>` : ''}
         <div class="capraz-satir"><span style="flex:1">Bu kuponun <b>kâra geçme sınırı</b></span>
           <b>${(1 / Math.max(d.strateji.gercek, 0.01)).toFixed(2)}</b>
           <span class="ipucu">sitende bu toplam oranın üstünü bulabilirsen matematik senden yana</span></div>` : ''}
@@ -3894,6 +3909,7 @@ function sistemCiz(d){
     </div>
     ${kuponHTML}${tekliHTML}${karneHTML}`;
   $('#sis-dipnot').innerHTML = (d.notlar || []).map(n => `<div style="margin-bottom:6px">${n}</div>`).join('');
+  canliGuncelle();
 }
 
 let SIS_MOD = 'kazanc';   // ölçümde en iyi 2x yolu (305 gün + son hafta kontrolü)
@@ -3907,7 +3923,7 @@ function sisModSec(mod){
   if(bacakAlan) bacakAlan.hidden = mod !== 'sans';
   const not = $('#sis-mod-not');
   const metin = {
-    sans: 'Oran hedefi yok: en çok tutan seçimler gelir, oran ne çıkarsa o.',
+    sans: 'Oran hedefi yok. Sıralama modelin dediğine değil <b>ölçülen</b> tutmaya göre: pazar bandının ölçülmüş sapması + keskin piyasa (Pinnacle marjsız) olasılığı. Ölçümde 1/2/3 bacak <b>%93 / %83 / %75</b> tuttu (eski sıralama %82 / %65 / %53). Tutturur, kazandırmaz: fiyatlar 1.06–1.19.',
     kazanc: 'Yalnız ölçümde kârlı çıkan 1.20–1.60 bandından, <b>gerçek fiyatlı</b> bacaklarla kurar. Bazı günler kupon çıkmaz.',
     oran: 'Önce oran hedefi tutturulur; tutma şansı ne çıkarsa o.'
   };
@@ -4026,7 +4042,8 @@ function oranlarCiz(){
   kutu.innerHTML = `<div class="kart" style="margin-top:10px"><div style="overflow-x:auto">
     <table class="roll-tablo"><thead><tr><th style="min-width:200px">maç</th>${pazarlar.map(pz => `<th>${esc(pz)}</th>`).join('')}</tr></thead>
     <tbody>${satirlar.map(m => `<tr${m.basladi ? ' style="opacity:.55"' : ''}>
-      <td><b>${esc(m.ev)} – ${esc(m.dep)}</b><div class="ipucu">${esc(m.saat)} · ${esc(m.lig)}${m.basladi ? ' · başladı' : ''}</div></td>
+      <td><b>${esc(m.ev)} – ${esc(m.dep)}</b><div class="ipucu">${esc(m.saat)} · ${esc(m.lig)}${m.basladi ? ' · başladı' : ''}
+        <span class="chip canli-chip" data-canli="${esc(`${m.ev}|${m.dep}|${d.tarih}|${m.saat || ''}`)}" hidden></span></div></td>
       ${pazarlar.map(pz => {
         const piyasa = m.pazarlar[pz], sinir = m.sinir[pz];
         if(!piyasa) return '<td class="ipucu">—</td>';
@@ -4040,7 +4057,51 @@ function oranlarCiz(){
     </tr>`).join('')}</tbody></table></div>
     <div class="ipucu" style="margin-top:6px">Yeşil = iddaa oranı keskin sınırın üstünde (değer var) · kırmızı = altında (marjı ödüyorsun). Girdiklerin bu tarayıcıda saklanır.</div>
   </div>`;
+  canliGuncelle();
 }
+
+// ───────────────────────────── Canlı skor: [data-canli="ev|dep|tarih|saat"] yuvalarını doldurur
+// Kaynak: bülteni besleyen açık skor beslemesi (sunucuda 90 sn önbellek). Yalnız gösterim;
+// bitmiş maçlar defterde otomatik işlenir (kupon.py). Ekranda yuva varken dakikada bir tazelenir.
+let CANLI_SON = {};
+let CANLI_MESGUL = false;
+function canliRozet(m){
+  if(!m) return null;
+  if(m.durum === 'canli') return {metin: `🔴 ${esc(m.dakika || '')} ${esc(m.skor || '')}`, sinif: 'canli-var', baslik: 'canlı — ' + (m.lig || '')};
+  if(m.durum === 'devre') return {metin: `⏸ İY ${esc(m.skor || '')}`, sinif: 'canli-var', baslik: 'devre arası'};
+  if(m.durum === 'bitti') return {metin: `FT ${esc(m.skor || '')}${m.uzatma ? ' (uzatma)' : ''}${m.iy_skor ? ' · İY ' + esc(m.iy_skor) : ''}`, sinif: '', baslik: m.uzatma ? 'uzatmalı bitti — 90 dk skoru farklı olabilir, otomatik işlenmez' : 'maç bitti'};
+  if(m.durum === 'iptal') return {metin: '⛔ ertelendi / iptal', sinif: 'ev-neg', baslik: 'besleme: ertelendi ya da iptal'};
+  return null;
+}
+async function canliGuncelle(){
+  const yuvalar = Array.from(document.querySelectorAll('section.aktif [data-canli]'));
+  if(!yuvalar.length || CANLI_MESGUL) return;
+  const bugun = new Date(), dun = new Date(bugun.getTime() - 86400000);
+  const gunMetin = t => `${String(t.getDate()).padStart(2,'0')}.${String(t.getMonth()+1).padStart(2,'0')}.${t.getFullYear()}`;
+  const izinli = new Set([gunMetin(bugun), gunMetin(dun)]);
+  const istek = [], gorulen = new Set();
+  for(const el of yuvalar){
+    const [ev, dep, tarih, saat] = el.dataset.canli.split('|');
+    if(!izinli.has(tarih)) continue;                 // yalnız bugün/dün: geçmiş için arşiv var, gelecek için skor yok
+    const k = `${ev}|${dep}|${tarih}`;
+    if(gorulen.has(k)) continue;
+    gorulen.add(k); istek.push({ev, dep, tarih, saat});
+  }
+  if(!istek.length) return;
+  CANLI_MESGUL = true;
+  try{
+    const r = await api('/api/canli', {maclar: istek});
+    for(const m of (r.maclar || [])) CANLI_SON[`${m.ev}|${m.dep}|${m.tarih}`] = m;
+  }catch(_h){}
+  CANLI_MESGUL = false;
+  for(const el of document.querySelectorAll('[data-canli]')){
+    const [ev, dep, tarih] = el.dataset.canli.split('|');
+    const roz = canliRozet(CANLI_SON[`${ev}|${dep}|${tarih}`]);
+    if(!roz){ el.hidden = true; continue; }
+    el.innerHTML = roz.metin; el.title = roz.baslik; el.className = 'chip canli-chip ' + roz.sinif; el.hidden = false;
+  }
+}
+setInterval(() => { if(document.querySelector('section.aktif [data-canli]')) canliGuncelle(); }, 60000);
 
 // ───────────────────────────── Sistem karnesi: senin sonuçların vs beklenti
 function normalCdf(z){ const t = 1/(1+0.2316419*Math.abs(z)); const dd = 0.3989423*Math.exp(-z*z/2);
