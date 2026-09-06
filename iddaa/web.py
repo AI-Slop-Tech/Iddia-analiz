@@ -1424,6 +1424,61 @@ def uygulama_olustur():
         kolon = "oran_ust25_maks" if secim.startswith("ÜST") else "oran_alt25_maks"
         return _num(r.get(kolon)) or _num(r.get("Max>2.5" if secim.startswith("ÜST") else "Max<2.5"))
 
+    @app.post("/api/canli")
+    def canli_skor():
+        """Canlı skor/durum: seçili günün fikstürü (tarih) ve/veya verilen
+        (ev, dep, tarih, saat) listesi (kupon defteri bacakları). Kaynak: bülteni
+        besleyen açık skor beslemesi, 90 sn önbellek. Yalnız gösterim ve
+        bitmiş maçların defterde işlenmesi için — analiz girdisi değildir."""
+        govde = request.get_json(silent=True) or {}
+        tarih = str(govde.get("tarih") or "")
+        satirlar = []
+        if tarih:
+            try:
+                fik, _kitapcilar = _fikstur()
+                hedef = fik[fik["Tarih"].dt.strftime("%d.%m.%Y") == tarih]
+                for _idx, r in hedef.iterrows():
+                    satirlar.append((r["HomeTeam"], r["AwayTeam"], r["Tarih"], True))
+            except Exception:  # noqa: BLE001 — fikstür yoksa yalnız verilen liste
+                pass
+        for m in (govde.get("maclar") or [])[:300]:
+            try:
+                saat = str(m.get("saat") or "").strip()
+                t = pd.to_datetime(f"{m.get('tarih')} {saat or '12:00'}", dayfirst=True)
+            except (ValueError, TypeError):
+                continue
+            satirlar.append((str(m.get("ev") or ""), str(m.get("dep") or ""), t, bool(saat)))
+        try:
+            cozucu = veri.takim_cozucu(_df(), hizli=True)
+        except Exception:  # noqa: BLE001
+            cozucu = None
+        indeksler: dict = {}
+        cikti, gorulen = [], set()
+        for ev, dep, t, saat_var in satirlar:
+            gun = t.strftime("%Y-%m-%d")
+            if gun not in indeksler:
+                try:
+                    indeksler[gun] = veri.canli_indeksi(veri.canli_skorlar(gun))
+                except Exception:  # noqa: BLE001
+                    indeksler[gun] = {}
+            k = veri.canli_esle(indeksler[gun], ev, dep, t, cozucu=cozucu,
+                                pencere_saat=3.0 if saat_var else 24.0) if indeksler[gun] else None
+            if not k:
+                continue
+            anahtar = (ev, dep, t.strftime("%d.%m.%Y"))
+            if anahtar in gorulen:
+                continue
+            gorulen.add(anahtar)
+            cikti.append({
+                "ev": ev, "dep": dep, "tarih": t.strftime("%d.%m.%Y"),
+                "durum": k["durum"], "dakika": k.get("dakika"),
+                "skor": veri.canli_skor_metni(k),
+                "iy_skor": (f"{k['iy_ev']}-{k['iy_dep']}"
+                            if k.get("iy_ev") is not None and k.get("iy_dep") is not None else None),
+                "uzatma": bool(k.get("uzatma")), "lig": k.get("lig"),
+            })
+        return jsonify({"maclar": cikti, "zaman": veri.simdi_tr().strftime("%H:%M")})
+
     @app.post("/api/oranlar")
     def oranlar_tablosu():
         """Oranlar sekmesi: günün maçları için pazar pazar Pinnacle fiyatı ve
@@ -1647,7 +1702,7 @@ def uygulama_olustur():
             "karne": sistem.karne_tablosu() + sistem.fiyatlanamaz_satirlari(),
             "karne_not": sistem.KARNE_NOT,
             "strateji": (sistem.kazanc_karne(hedef_oran, esik) if oncelik == "kazanc"
-                         else (None if oncelik == "sans"
+                         else (sistem.sans_karne(sans_bacak) if oncelik == "sans"
                                else sistem.strateji_karne(hedef_oran, esik))),
             # "tutmuyor" şikâyetinin panzehiri: bu şansla ne beklenmeli
             "beklenti": sistem.beklenti(kupon["p"], 10) if kupon else None,

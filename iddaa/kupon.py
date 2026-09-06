@@ -178,18 +178,38 @@ def _pazar_sonucu(pazar: str, r) -> str:
 def sonuclandir(df: pd.DataFrame | None) -> list[dict]:
     """Açık bacakları arşivden sonuçlandırır, dosyaya işler, defteri döndürür."""
     kuponlar = _oku()
-    if df is None or not kuponlar:
+    if not kuponlar:
         return kuponlar
 
     simdi = veri.simdi_tr()
-    cozucu = veri.takim_cozucu(df, hizli=True)
+    cozucu = veri.takim_cozucu(df, hizli=True) if df is not None else None
     degisti = False
 
     def _coz(ad: str) -> str:
+        if cozucu is None:
+            return str(ad)
         try:
             return cozucu(str(ad))
         except ValueError:
             return str(ad)
+
+    # Canlı besleme: maç bittiği an (FT) skor/İY ile sonuçlandır — arşivin
+    # işlenmesini beklemeden. Korner/kart gibi skordan çıkmayan pazarlar
+    # "belirsiz" kalır, arşiv gelince işlenir. Uzatmalı biten maç (AET/AP)
+    # otomatik işlenmez: besleme 120 dk skorunu verir, bahis 90 dk'ya bakar.
+    canli_indeks: dict = {}
+
+    def _canli(ev: str, dep: str, t: pd.Timestamp, saat_var: bool):
+        gun = t.strftime("%Y-%m-%d")
+        if gun not in canli_indeks:
+            try:
+                canli_indeks[gun] = veri.canli_indeksi(veri.canli_skorlar(gun))
+            except Exception:  # noqa: BLE001
+                canli_indeks[gun] = {}
+        if not canli_indeks[gun]:
+            return None
+        return veri.canli_esle(canli_indeks[gun], ev, dep, t, cozucu=cozucu,
+                               pencere_saat=3.0 if saat_var else 24.0)
 
     for k in kuponlar:
         for b in k["secimler"]:
@@ -211,7 +231,28 @@ def sonuclandir(df: pd.DataFrame | None) -> list[dict]:
                 t = pd.to_datetime(b["tarih"], dayfirst=True)
             except (ValueError, TypeError):
                 continue
-            if t >= simdi.normalize():  # maç günü geçmeden arama yapılmaz
+            # Bugün/dün oynanan maç: önce canlı beslemeye bak (bittiyse hemen işle)
+            if simdi.normalize() - pd.Timedelta(days=1) <= t <= simdi.normalize():
+                saat = str(b.get("saat") or "")
+                try:
+                    t_canli = pd.to_datetime(f"{b['tarih']} {saat or '12:00'}", dayfirst=True)
+                except (ValueError, TypeError):
+                    t_canli = t + pd.Timedelta(hours=12)
+                cs = _canli(b["ev"], b["dep"], t_canli, bool(saat))
+                if cs and cs["durum"] == "bitti" and not cs.get("uzatma") \
+                        and cs.get("ev_gol") is not None and cs.get("dep_gol") is not None:
+                    satir = {"FTHG": cs["ev_gol"], "FTAG": cs["dep_gol"],
+                             "HTHG": cs.get("iy_ev"), "HTAG": cs.get("iy_dep")}
+                    sonuc = _pazar_sonucu(b["pazar"], satir)
+                    if sonuc != "belirsiz":
+                        b["durum"] = sonuc
+                        b["skor"] = f"{cs['ev_gol']}-{cs['dep_gol']}"
+                        if cs.get("iy_ev") is not None and cs.get("iy_dep") is not None:
+                            b["iy_skor"] = f"{cs['iy_ev']}-{cs['iy_dep']}"
+                        b["sonuc_kaynak"] = "canli"
+                        degisti = True
+                        continue
+            if df is None or t >= simdi.normalize():  # maç günü geçmeden arşiv aranmaz
                 continue
             ev, dep = _coz(b["ev"]), _coz(b["dep"])
             aday = df[(df["Tarih"] >= t - pd.Timedelta(days=1))
