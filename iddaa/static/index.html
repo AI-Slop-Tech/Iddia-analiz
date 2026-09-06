@@ -779,6 +779,7 @@
       <button class="sekme" data-s="sonuc"><svg class="ic"><use href="#i-sonuc"/></svg><span>Sonuçlar</span></button>
       <button class="sekme" data-s="oran"><svg class="ic"><use href="#i-oran"/></svg><span>Oran Analizi</span></button>
       <button class="sekme" data-s="oranlar"><svg class="ic"><use href="#i-tablo"/></svg><span>Oranlar</span></button>
+      <button class="sekme" data-s="skarne"><svg class="ic"><use href="#i-karne"/></svg><span>Sistem Karnesi</span></button>
       <button class="sekme" data-s="takim"><svg class="ic"><use href="#i-hedef"/></svg><span>Takım Analizi</span></button>
       <button class="sekme" data-s="gecmis"><svg class="ic"><use href="#i-gecmis"/></svg><span>Geçmiş Maçlar</span></button>
       <button class="sekme" data-s="btest"><svg class="ic"><use href="#i-backtest"/></svg><span>Backtest</span></button>
@@ -1001,6 +1002,22 @@
     <div class="not" id="sis-dipnot"></div>
   </section>
 
+  <section id="s-skarne">
+    <div class="kart">
+      <h2><svg class="ic"><use href="#i-karne"/></svg> Sistem Karnesi — ileriye dönük</h2>
+      <div class="alt-baslik">Sistem her gün <b>kendi kuponlarını kendisi yazar</b> (hedef 2.00, 2x kâr bölgesi,
+        hedefsiz 1 ve 2 bacak, Sürpriz Radarı işaretlileri), maçlar bitince canlı besleme ve arşivle sonuçlar,
+        Pinnacle kapanışıyla CLV'sini ölçer. <b>Geçmişe uydurma değil:</b> kayıt yalnız maçlar başlamadan
+        atılır, geçmiş güne yazılmaz, sunucu kapalıysa gün boş kalır. 30 sonuçlu kupondan önce yargı yok.</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <button class="mini-btn" onclick="sistemKarneSimdi()"><svg class="ic ic-sm"><use href="#i-tara"/></svg>Bugünün kuponlarını şimdi üret</button>
+        <button class="mini-btn" onclick="sistemKarneYukle(true)"><svg class="ic ic-sm"><use href="#i-yenile"/></svg>Yenile</button>
+        <span class="ipucu" id="skarne-not"></span>
+      </div>
+    </div>
+    <div id="skarne-liste"></div>
+  </section>
+
   <section id="s-oranlar">
     <div class="kart">
       <h2><svg class="ic"><use href="#i-tablo"/></svg> Oranlar</h2>
@@ -1220,6 +1237,7 @@
     <button class="sekme" data-s="sonuc"><svg class="ic"><use href="#i-sonuc"/></svg><span>Sonuçlar & Karne</span></button>
     <button class="sekme" data-s="oran"><svg class="ic"><use href="#i-oran"/></svg><span>Oran Analizi</span></button>
     <button class="sekme" data-s="oranlar"><svg class="ic"><use href="#i-tablo"/></svg><span>Oranlar</span></button>
+    <button class="sekme" data-s="skarne"><svg class="ic"><use href="#i-karne"/></svg><span>Sistem Karnesi</span></button>
     <button class="sekme" data-s="takim"><svg class="ic"><use href="#i-hedef"/></svg><span>Takım Analizi</span></button>
     <button class="sekme" data-s="gecmis"><svg class="ic"><use href="#i-gecmis"/></svg><span>Geçmiş Maçlar</span></button>
     <button class="sekme" data-s="btest"><svg class="ic"><use href="#i-backtest"/></svg><span>Backtest</span></button>
@@ -1484,6 +1502,7 @@ const BOLUM = {
   sistem:  ['Sistem Önerisi',   'ölçülmüş karneye göre günün en mantıklı kuponu'],
   rolling: ['Rolling',          'kasa zinciri ve adım takibi'],
   oranlar: ['Oranlar',          'maç maç piyasa fiyatı, keskin sınır ve iddaa.com sütunu'],
+  skarne:  ['Sistem Karnesi',   'sistemin kendi ileriye dönük kayıt defteri'],
   kupon:   ['Kupon Defteri',    'topladığın seçimler ve karneleri'],
   sonuc:   ['Sonuçlar & Karne', 'oynanan maçlar ve tahmin isabeti'],
   oran:    ['Oran Analizi',     'bu oranla açılan maçlar tarihte ne yaptı?'],
@@ -1508,6 +1527,7 @@ function sekmeAc(ad){
   if(ad === 'kupon') kuponSekmesiCiz();   // defter + sistem karnesi
   if(ad === 'rolling') rollingYukle();
   if(ad === 'oranlar') oranlarYukle();
+  if(ad === 'skarne') sistemKarneYukle();
   if(ad === 'sistem'){
     sisModSec(SIS_MOD);
     const n = $('#sis-gun-not');
@@ -3971,7 +3991,9 @@ function sistemCiz(d){
       </div>
     </div>
     ${kuponHTML}${tekliHTML}${karneHTML}`;
-  $('#sis-dipnot').innerHTML = (d.notlar || []).map(n => `<div style="margin-bottom:6px">${n}</div>`).join('');
+  $('#sis-dipnot').innerHTML = (d.notlar || []).map(n => `<div style="margin-bottom:6px">${n}</div>`).join('')
+    + `<div style="margin-top:8px"><button class="mini-btn" onclick="sekmeAc('skarne')">📒 Sistemin kendi ileriye dönük karnesi →</button>
+       <span class="ipucu">sistem her gün bu modların kuponunu kendisi yazar ve sonuçlar; ne dediği, ne tutturduğu orada</span></div>`;
   canliGuncelle();
 }
 
@@ -4077,6 +4099,56 @@ async function sistemRollinge(){
 
 
 // ───────────────────────────── Oranlar sekmesi (iddaa.com sütunu kullanıcıdan)
+// ───────────────────────────── Sistem Karnesi: sistemin kendi ileriye dönük defteri
+let SKARNE_SON = null;
+async function sistemKarneYukle(yenile){
+  const kutu = $('#skarne-liste'); if(!kutu) return;
+  if(!yenile && SKARNE_SON){ sistemKarneCiz(); return; }
+  kutu.innerHTML = '<div class="kart bos-durum"><p>Defter okunuyor, bekleyen bacaklar sonuçlandırılıyor…</p></div>';
+  try{ SKARNE_SON = await api('/api/sistem-defteri'); sistemKarneCiz(); }
+  catch(h){ kutu.innerHTML = `<div class="kart bos-durum"><p>${esc(h.message)}</p></div>`; }
+}
+async function sistemKarneSimdi(){
+  const n = $('#skarne-not'); if(n) n.textContent = 'Günün maçları taranıyor (30-60 sn)…';
+  try{
+    const r = await api('/api/sistem-defteri/simdi', {mod: 'hepsi'});
+    const y = (r.yazildi || []).map(x => x.mod).join(', '), a = (r.atlandi || []).length, k = (r.kupon_yok || []).map(x => x.mod).join(', ');
+    bildir(`Yazıldı: ${y || '—'}${k ? ' · kupon çıkmadı: ' + k : ''}${a ? ' · atlandı: ' + a : ''}`);
+  }catch(h){ bildir(h.message, true); }
+  if(n) n.textContent = '';
+  await sistemKarneYukle(true);
+}
+function skarneYuzde(x){ return (x === null || x === undefined) ? '—' : '%' + (x*100).toFixed(1); }
+function sistemKarneCiz(){
+  const kutu = $('#skarne-liste'); if(!kutu || !SKARNE_SON) return;
+  const d = SKARNE_SON, karne = d.karne || {}, kuponlar = d.kuponlar || [], taslaklar = d.taslaklar || [];
+  const n = $('#skarne-not'); if(n) n.textContent = `${kuponlar.length} kupon · ${taslaklar.length} kupon çıkmayan gün/mod · son çalışma ${(d.son_calisma||{}).zaman || '—'} · yazım saatleri ${(d.ayarlar||{}).saatler ? d.ayarlar.saatler.join(':00 / ') + ':00 (TR)' : ''}`;
+  const kartlar = Object.entries(karne).map(([mod, k]) => {
+    const yargi = (k.sonuclu || 0) < 30 ? `<span class="chip" title="30 sonuçlu kupondan önce yargı yok">henüz ${k.sonuclu || 0} sonuçlu — yargı yok</span>`
+      : (k.z !== null && k.z !== undefined ? `<span class="chip ${k.z < -2 ? 'ev-neg' : (k.z > 2 ? 'ev-poz' : '')}" title="tutan − beklenen, standart sapma cinsinden">z ${k.z > 0 ? '+' : ''}${k.z}</span>` : '');
+    return `<div class="kart">
+      <h2>${esc(k.ad || mod)} <span class="ipucu">· ${mod}</span></h2>
+      <div class="capraz-kutu">
+        <div class="capraz-satir" style="border-top:0"><span style="flex:1">Yazılan ${mod === 'surpriz' ? 'seçim' : 'kupon'}</span><b>${k.n || 0}</b><span class="ipucu">${k.sonuclu || 0} sonuçlandı · ${k.bekleyen || 0} bekliyor · ${k.gun_sayisi || 0} gün${k.ilk_gun ? ' · ilk ' + esc(k.ilk_gun) : ''}${k.kupon_yok_gun ? ' · ' + k.kupon_yok_gun + ' gün kupon çıkmadı' : ''}</span></div>
+        <div class="capraz-satir"><span style="flex:1">Tutan / sonuçlanan</span><b>${k.tutan || 0} / ${k.sonuclu || 0}</b><span class="ipucu">gerçek ${skarneYuzde(k.gercek)} · sistem ${skarneYuzde(k.dedi)} demişti ${yargi}</span></div>
+        <div class="capraz-satir"><span style="flex:1">Getiri — gerçek fiyatlı ${mod === 'surpriz' ? 'seçimler' : 'kuponlar'}</span><b class="${(k.roi_gercek||0) > 0 ? 'ev-poz' : ((k.roi_gercek||0) < 0 ? 'ev-neg' : '')}">${skarneYuzde(k.roi_gercek)}</b><span class="ipucu">n=${k.roi_gercek_n || 0}${k.roi_tahmini !== null && k.roi_tahmini !== undefined ? ' · fiyatı tahmin edilenler dahil ' + skarneYuzde(k.roi_tahmini) + ' (ölçülmemiş fiyat)' : ''}${k.ort_oran ? ' · ort. oran ' + k.ort_oran.toFixed(2) : ''}</span></div>
+        <div class="capraz-satir"><span style="flex:1">Kapanış çizgisi (CLV)</span><b>${k.clv_ort === null || k.clv_ort === undefined ? '—' : (k.clv_ort >= 0 ? '+' : '') + (k.clv_ort*100).toFixed(1) + '%'}</b><span class="ipucu">${k.clv_n || 0} bacak · kapanışı yenme ${skarneYuzde(k.clv_yenen)}</span></div>
+      </div></div>`;
+  }).join('');
+  const son = kuponlar.slice(0, 30).map(k => {
+    const bacak = (k.secimler || []).map(b => `${esc(b.ev)} – ${esc(b.dep)} <b>${esc(b.pazar)}</b> @${Number(b.oran).toFixed(2)}${b.fiyat_tahmini ? '<span class="ipucu" title="gerçek piyasa fiyatı yoktu; tahmini fiyat">~</span>' : ''} ${b.durum === 'tuttu' ? '✅' : (b.durum === 'yatti' ? '❌' : '⏳')}${b.skor ? ' <span class="ipucu">' + esc(b.skor) + '</span>' : ''}${typeof b.clv === 'number' ? ` <span class="chip ${b.clv > 0.01 ? 'ev-poz' : (b.clv < -0.01 ? 'ev-neg' : '')}">CLV ${b.clv >= 0 ? '+' : ''}${(b.clv*100).toFixed(1)}%</span>` : ''}`).join('<br>');
+    const durum = k.durum === 'tuttu' ? '<span class="ev-poz">TUTTU</span>' : (k.durum === 'yatti' ? '<span class="ev-neg">YATTI</span>' : '<span class="ipucu">bekliyor</span>');
+    return `<tr><td>${esc(k.gun)}<div class="ipucu">${esc(k.olusturma || '')}</div></td><td>${esc((karne[k.mod]||{}).ad || k.mod)}</td><td>${bacak}</td>
+      <td>${k.iddia && k.iddia.p !== null ? skarneYuzde(k.iddia.p) : '—'}</td><td>${k.toplam_oran ? k.toplam_oran.toFixed(2) : (k.sistem === 'tekli' ? 'tekli' : '—')}</td><td>${durum}${k.net !== null && k.net !== undefined ? '<div class="ipucu">' + (k.net >= 0 ? '+' : '') + k.net.toFixed(2) + ' birim</div>' : ''}</td></tr>`;
+  }).join('');
+  kutu.innerHTML = kartlar + `<div class="kart"><h2>Son kayıtlar</h2>
+    ${kuponlar.length ? `<div style="overflow-x:auto"><table class="roll-tablo"><thead><tr><th>gün</th><th>mod</th><th>bacaklar</th><th>sistem dedi</th><th>oran</th><th>sonuç</th></tr></thead><tbody>${son}</tbody></table></div>`
+      : '<div class="bos-durum"><p>Henüz kayıt yok — sistem ilk kuponunu bir sonraki 10:00 / 16:00 (TR) turunda yazar; hemen görmek için "Bugünün kuponlarını şimdi üret".</p></div>'}
+    ${taslaklar.length ? `<div class="ipucu" style="margin-top:8px">Kupon çıkmayan gün/mod: ${taslaklar.slice(0, 12).map(t => `${esc(t.gun)} ${esc(t.mod)} (${esc(t.neden || '')})`).join(' · ')}</div>` : ''}
+    <div class="ipucu" style="margin-top:8px">Fiyatı "~" ile işaretli bacaklarda gerçek piyasa fiyatı yoktu; getiri satırında bunlar ayrı sayılır. Kâr iddiası yok: ölçülen şey sistemin söylediği olasılığın tutup tutmadığı ve kapanış çizgisini yenip yenmediği.</div>
+  </div>`;
+}
+
 const IDDAA_DEPO = 'iddaa_oranlari_v1';
 let ORANLAR_SON = null;
 function iddaaDepoOku(){ try{ return JSON.parse(localStorage.getItem(IDDAA_DEPO) || '{}') || {}; }catch(e){ return {}; } }

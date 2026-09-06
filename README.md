@@ -117,6 +117,19 @@ Veri hiç indirilmemişse panel tek tıkla indirme önerir; üstteki
 içindedir (bağımlılıksız, tek dosya, mobil uyumlu); JSON API uçları
 `iddaa/web.py` başında listelenmiştir.
 
+### Sistem Karnesi — sistemin kendi ileriye dönük defteri (v3.35)
+
+Sistem her gün **kendi kuponlarını kendisi yazar** ve sonuçlar; kullanıcının fişlemesine gerek yok.
+Bakım döngüsü 10:00 ve 16:00'dan (TR) sonraki ilk turda beş kaydı atar: *hedef 2.00*, *2x kâr
+bölgesi*, *hedefsiz 1 bacak*, *hedefsiz 2 bacak* ve *Sürpriz Radarı'nın işaretli İY/MS seçimleri*.
+Bacaklar maçlar bitince canlı besleme/arşivle sonuçlanır, Pinnacle kapanışıyla CLV ölçülür.
+
+Dürüstlük kuralları: kayıt yalnız kickoff'tan önce yazılır, geçmiş güne asla yazılmaz (sunucu kapalıysa
+gün boş kalır), aynı gün+mod bir kez yazılır, fiyatı tahmin edilen bacaklar ayrı işaretlenir ve "gerçek
+fiyatlı getiri"ye girmez, 30 sonuçlu kupondan önce ekran yargı vermez. Uçlar: `GET /api/sistem-defteri`,
+`POST /api/sistem-defteri/simdi` (`{"mod": "hepsi", "tarih": "dd.mm.yyyy"}` — yalnız bugün/ileri tarih).
+Dosya: `data/sistem_defteri.json`.
+
 ## Komutlar
 
 | Komut | Açıklama |
