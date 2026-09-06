@@ -780,6 +780,7 @@
       <button class="sekme" data-s="oran"><svg class="ic"><use href="#i-oran"/></svg><span>Oran Analizi</span></button>
       <button class="sekme" data-s="oranlar"><svg class="ic"><use href="#i-tablo"/></svg><span>Oranlar</span></button>
       <button class="sekme" data-s="skarne"><svg class="ic"><use href="#i-karne"/></svg><span>Sistem Karnesi</span></button>
+      <button class="sekme" data-s="devre"><svg class="ic"><use href="#i-oynaniyor"/></svg><span>Devre Arası</span></button>
       <button class="sekme" data-s="takim"><svg class="ic"><use href="#i-hedef"/></svg><span>Takım Analizi</span></button>
       <button class="sekme" data-s="gecmis"><svg class="ic"><use href="#i-gecmis"/></svg><span>Geçmiş Maçlar</span></button>
       <button class="sekme" data-s="btest"><svg class="ic"><use href="#i-backtest"/></svg><span>Backtest</span></button>
@@ -1018,6 +1019,32 @@
     <div id="skarne-liste"></div>
   </section>
 
+  <section id="s-devre">
+    <div class="kart">
+      <h2><svg class="ic"><use href="#i-oynaniyor"/></svg> Devre Arası — ölçülmüş 2. yarı olasılıkları</h2>
+      <div class="alt-baslik">Devredeki maçlarda <b>İY skoru + ön-maç piyasa λ'sı</b> ile 2. yarı Poisson modeli (deney32):
+        94 pazarın 93'ü 12.184 test maçında kalibrasyon kapısını geçti. Gösterilen yüzde, pazarın kendi bandında
+        <b>ölçülen</b> düzeltmeli olasılıktır. <b>Kâr ölçülmedi</b> (canlı fiyat arşivi yok): sitendeki canlı oranı
+        girersen beklenen değer ölçülmemiş bir fiyatla hesaplanır. Oyun içi dakika tahmini yok, garanti yok.</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <label class="ipucu" style="display:flex;gap:6px;align-items:center">güven eşiği
+          <select id="devre-esik" style="width:auto;padding:4px 8px" onchange="devreYukle(true)">
+            <option value="60" selected>%60</option><option value="65">%65</option><option value="70">%70</option>
+            <option value="75">%75</option><option value="80">%80</option><option value="50">%50</option>
+          </select></label>
+        <label class="ipucu" style="display:flex;gap:6px;align-items:center">en az fiyat
+          <select id="devre-min" style="width:auto;padding:4px 8px" onchange="devreYukle(true)">
+            <option value="1.05">hepsi (≥1.05)</option><option value="1.20" selected>1.20</option><option value="1.40">1.40</option>
+            <option value="1.60">1.60</option><option value="2.00">2.00</option>
+          </select></label>
+        <label class="ipucu" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="devre-gecen" checked onchange="devreCiz()"> yalnız ölçümü geçen pazarlar</label>
+        <button class="mini-btn" onclick="devreYukle(true)"><svg class="ic ic-sm"><use href="#i-yenile"/></svg>Yenile</button>
+        <span class="ipucu" id="devre-not"></span>
+      </div>
+    </div>
+    <div id="devre-liste"></div>
+  </section>
+
   <section id="s-oranlar">
     <div class="kart">
       <h2><svg class="ic"><use href="#i-tablo"/></svg> Oranlar</h2>
@@ -1238,6 +1265,7 @@
     <button class="sekme" data-s="oran"><svg class="ic"><use href="#i-oran"/></svg><span>Oran Analizi</span></button>
     <button class="sekme" data-s="oranlar"><svg class="ic"><use href="#i-tablo"/></svg><span>Oranlar</span></button>
     <button class="sekme" data-s="skarne"><svg class="ic"><use href="#i-karne"/></svg><span>Sistem Karnesi</span></button>
+    <button class="sekme" data-s="devre"><svg class="ic"><use href="#i-oynaniyor"/></svg><span>Devre Arası</span></button>
     <button class="sekme" data-s="takim"><svg class="ic"><use href="#i-hedef"/></svg><span>Takım Analizi</span></button>
     <button class="sekme" data-s="gecmis"><svg class="ic"><use href="#i-gecmis"/></svg><span>Geçmiş Maçlar</span></button>
     <button class="sekme" data-s="btest"><svg class="ic"><use href="#i-backtest"/></svg><span>Backtest</span></button>
@@ -1503,6 +1531,7 @@ const BOLUM = {
   rolling: ['Rolling',          'kasa zinciri ve adım takibi'],
   oranlar: ['Oranlar',          'maç maç piyasa fiyatı, keskin sınır ve iddaa.com sütunu'],
   skarne:  ['Sistem Karnesi',   'sistemin kendi ileriye dönük kayıt defteri'],
+  devre:   ['Devre Arası',      'devredeki maçlar için ölçülmüş 2. yarı olasılıkları'],
   kupon:   ['Kupon Defteri',    'topladığın seçimler ve karneleri'],
   sonuc:   ['Sonuçlar & Karne', 'oynanan maçlar ve tahmin isabeti'],
   oran:    ['Oran Analizi',     'bu oranla açılan maçlar tarihte ne yaptı?'],
@@ -1528,6 +1557,7 @@ function sekmeAc(ad){
   if(ad === 'rolling') rollingYukle();
   if(ad === 'oranlar') oranlarYukle();
   if(ad === 'skarne') sistemKarneYukle();
+  if(ad === 'devre') devreYukle();
   if(ad === 'sistem'){
     sisModSec(SIS_MOD);
     const n = $('#sis-gun-not');
@@ -2454,7 +2484,7 @@ function kuponKartHTML(k){
       <span class="ipucu">· ${esc(k.olusturma)} · ${k.sistem === 'kombine'
         ? 'toplam oran ' + (k.toplam_oran || 0).toFixed(2)
         : k.maliyet + ' kolon'}</span></h2>
-    <div style="margin-bottom:8px">${chip}
+    <div style="margin-bottom:8px">${chip}${(k.durum !== 'tuttu' && k.durum !== 'yatti') ? ` <span class="chip" data-kupon-sans="${k.id}" hidden></span>` : ''}
       <button class="mini-btn" style="float:right" onclick="kuponSil(${k.id})">${iks('sil')}Sil</button></div>
     ${k.secimler.map((s, i) => `
       <div class="one-cikan" style="border:none;padding:6px 0">
@@ -2462,7 +2492,7 @@ function kuponKartHTML(k){
         <span class="ipucu">${esc(s.tarih)} ${esc(s.saat)} · ${esc(s.lig)}</span>
         <span style="flex:1;min-width:150px">${esc(s.ev)} – ${esc(s.dep)}
           ${s.skor ? `<span class="ipucu">(${esc(s.skor)}${s.iy_skor ? ' · İY ' + esc(s.iy_skor) : ''})${s.sonuc_kaynak === 'canli' ? ' <span title="maç biter bitmez canlı beslemeden işlendi">⚡</span>' : ''}</span>` : ''}
-          ${s.durum === 'bekliyor' ? `<span class="chip canli-chip" data-canli="${esc(`${s.ev}|${s.dep}|${s.tarih}|${s.saat || ''}`)}" hidden></span>` : ''}</span>
+          ${s.durum === 'bekliyor' ? `<span class="chip canli-chip" data-canli="${esc(`${s.ev}|${s.dep}|${s.tarih}|${s.saat || ''}`)}" hidden></span><span class="chip" data-bacak-sans="${k.id}|${i}" hidden></span>` : ''}</span>
         <span><b>${esc(s.pazar)}</b> @ ${s.oran.toFixed(2)}
           ${typeof s.clv === 'number' ? `<span class="chip ${s.clv > 0.01 ? 'ev-poz' : (s.clv < -0.01 ? 'ev-neg' : '')}"
               title="Kapanış çizgisi değeri: aldığın ${s.oran.toFixed(2)} vs Pinnacle kapanışı ${(s.kapanis||0).toFixed(2)}. Kapanışı düzenli yenen süreç uzun vadede kârdadır — tutup tutmamasından bağımsız.">
@@ -2507,6 +2537,7 @@ async function kuponSekmesiCiz(){
       || '<div class="kart bos-durum"><p>Kayıtlı kupon yok.</p></div>';
     sistemKarnesiCiz(r.kuponlar || []);   // kaydet / sil / işaretle sonrası karne de tazelensin
     canliGuncelle();
+    bacakSansGuncelle();
   }catch(h){
     $('#kupon-liste').innerHTML = `<div class="kart"><span class="ev-neg">${esc(h.message)}</span></div>`;
   }
@@ -4252,6 +4283,164 @@ async function canliGuncelle(){
   }
 }
 setInterval(() => { if(document.querySelector('section.aktif [data-canli]')) canliGuncelle(); }, 60000);
+
+// ───────────────────────────── Devre Arası: devredeki maçlar için ölçülmüş 2. yarı olasılıkları
+// Kaynak: canlı besleme (İY skoru) + ön-maç piyasa λ'sı → 2. yarı Poisson (deney32/32b, 12.184 test
+// maçında ölçüldü). Kâr ölçülmedi; kullanıcı canlı oran girerse EV ölçülmemiş fiyatla gösterilir.
+const DEVRE_DEPO = 'devre_oranlari_v1';
+let DEVRE_SON = null, DEVRE_MESGUL = false;
+function devreDepoOku(){ try{ return JSON.parse(localStorage.getItem(DEVRE_DEPO) || '{}') || {}; }catch(e){ return {}; } }
+function devreDepoYaz(d){ try{ localStorage.setItem(DEVRE_DEPO, JSON.stringify(d)); }catch(e){} }
+function devreOranlari(tarih){
+  const d = devreDepoOku(), on = (tarih || '') + '|', cikti = {};
+  for(const [k, v] of Object.entries(d)) if(k.startsWith(on) && v > 1) cikti[k.slice(on.length)] = v;
+  return cikti;
+}
+function bugunMetni(){
+  if(typeof HAFTA !== 'undefined' && HAFTA && HAFTA.bugun) return HAFTA.bugun;
+  const t = new Date();
+  return `${String(t.getDate()).padStart(2,'0')}.${String(t.getMonth()+1).padStart(2,'0')}.${t.getFullYear()}`;
+}
+function devreOranYaz(el){
+  const d = devreDepoOku(), anahtar = el.dataset.k || '', guven = +el.dataset.guven || 0, v = +el.value;
+  if(v > 1) d[anahtar] = v; else delete d[anahtar];
+  devreDepoYaz(d);
+  const ev = (v > 1 && guven) ? guven * v - 1 : null;
+  el.style.borderColor = ev === null ? '' : (ev > 0 ? '#22c55e' : '#ef4444');
+  const s = el.parentElement ? el.parentElement.querySelector('[data-ev]') : null;
+  if(s){ s.textContent = ev === null ? '' : `${ev >= 0 ? '+' : ''}%${(ev*100).toFixed(1)}`; s.className = 'chip ' + (ev === null ? '' : (ev > 0 ? 'ev-poz' : 'ev-neg')); }
+}
+async function devreYukle(yenile, sessiz){
+  const kutu = $('#devre-liste'); if(!kutu || DEVRE_MESGUL) return;
+  if(!yenile && DEVRE_SON){ devreCiz(); return; }
+  if(!sessiz) kutu.innerHTML = '<div class="kart bos-durum"><p>Canlı besleme okunuyor, devredeki maçlar kuruluyor…</p></div>';
+  DEVRE_MESGUL = true;
+  try{
+    const esik = (+(($('#devre-esik') || {}).value || 60)) / 100;
+    const marjEl = $('#sis-marj'), marj = (marjEl && +marjEl.value >= 0) ? (+marjEl.value) / 100 : 0.09;
+    const min_oran = +(($('#devre-min') || {}).value || 1.2);
+    DEVRE_SON = await api('/api/devre-arasi', {esik, marj, min_oran, site_oranlari: devreOranlari(bugunMetni())});
+    devreCiz();
+  }catch(h){ if(!sessiz) kutu.innerHTML = `<div class="kart bos-durum"><p>${esc(h.message)}</p></div>`; }
+  DEVRE_MESGUL = false;
+}
+function devreYuzde(x){ return (x === null || x === undefined) ? '—' : '%' + (x*100).toFixed(0); }
+function devreRozet(k){
+  if(!k) return '';
+  const fark = (k.gercek - k.dedi) * 100;
+  return `<span class="chip" title="${k.bolge ? 'bu olasılık bandında' : 'tüm dağılımda'} ölçüm: model %${(k.dedi*100).toFixed(1)} dedi, gerçek %${(k.gercek*100).toFixed(1)} (${tl(k.n)} maç, ayırt ${(k.ayirt*100).toFixed(0)} puan)">${k.bolge ? 'bant' : 'karne'} ${tl(k.n)} maç · ${fark >= 0 ? '+' : ''}${fark.toFixed(1)}p</span>`;
+}
+function devreTabloHTML(t){
+  if(!t) return '<span class="ipucu">bu İY skoru için test döneminde 50\'den az maç — ampirik tablo yok</span>';
+  return `<span class="ipucu">aynı İY skoruyla test döneminde ${tl(t.n)} maç:</span>
+    <span class="chip">MS1 ${devreYuzde(t.MS1)}</span><span class="chip">X ${devreYuzde(t.MS0)}</span><span class="chip">MS2 ${devreYuzde(t.MS2)}</span>
+    <span class="chip">ÜST 2.5 ${devreYuzde(t['ÜST 2.5'])}</span><span class="chip">2Y gol ${devreYuzde(t['2Y GOL VAR'])}</span><span class="chip">KG ${devreYuzde(t['KG VAR'])}</span>`;
+}
+function devreKupona(mi, pazar){
+  const m = ((DEVRE_SON && DEVRE_SON.devrede) || [])[mi]; if(!m) return;
+  const s = (m.pazarlar || []).find(x => x.pazar === pazar); if(!s) return;
+  const girili = devreDepoOku()[`${m.tarih}|${m.ev}|${m.dep}|${pazar}`];
+  const oran = girili > 1 ? girili : s.site_oran;
+  if(!oran || oran < 1.01){ bildir('Bu seçim için fiyat yok.', true); return; }
+  kuponaEkle({tarih: m.tarih, saat: m.saat || '', lig: m.lig || '', ev: m.ev, dep: m.dep, pazar, oran, kaynak: 'devre', p: s.guven_p});
+  if(!(girili > 1)) bildir(`Fiyat "sitede beklenen" tahmini (${oran.toFixed(2)}); gerçek canlı oranı girersen onunla eklenir.`);
+}
+function devreSecimHTML(s, mi){
+  return `<div class="one-cikan" style="flex-wrap:wrap">
+    <span class="chip">⏸ İY ${esc(s.iy_skor || '')}</span>
+    <span style="flex:1;min-width:170px"><b>${esc(s.ev_ad)} – ${esc(s.dep_ad)}</b><div class="ipucu">${esc(s.saat || '')}${s.lig ? ' · ' + esc(s.lig) : ''}</div></span>
+    <span style="min-width:120px"><b>${esc(s.pazar)}</b> ${s.oran ? `@ <b>${s.oran.toFixed(2)}</b> <span class="ipucu">senin girdiğin canlı oran</span>`
+      : `<b>~${(s.site_oran || 0).toFixed(2)}</b> <span class="ipucu" title="marjsız adil oran ${(s.adil || 0).toFixed(2)}">sitede beklenen · adil ${(s.adil || 0).toFixed(2)}</span>`}</span>
+    <span class="buyukev" title="ölçülen güven: pazarın 10 puanlık bandında ölçülen sapmayla düzeltilmiş model olasılığı">${devreYuzde(s.guven_p)}</span>
+    <span class="chip" title="modelin ham olasılığı">model ${devreYuzde(s.p)}${s.bant_n ? ' · bant ' + tl(s.bant_n) + ' maç' : ''}</span>
+    ${(s.ev !== null && s.ev !== undefined) ? `<span class="chip ${s.ev >= 0 ? 'ev-poz' : 'ev-neg'}" title="girdiğin canlı oranla beklenen değer — bu fiyatın değeri ÖLÇÜLMEDİ">${s.ev >= 0 ? '+' : ''}%${(s.ev*100).toFixed(1)}</span>` : ''}
+    ${devreRozet(s.karne)}
+    ${mi >= 0 ? `<button class="mini-btn" onclick="devreKupona(${mi}, ${JSON.stringify(s.pazar).replace(/"/g, '&quot;')})" title="Kupona ekle">${iks('ekle')}</button>` : ''}
+  </div>`;
+}
+function devreCiz(){
+  const kutu = $('#devre-liste'); if(!kutu || !DEVRE_SON) return;
+  const d = DEVRE_SON, depo = devreDepoOku(), devrede = d.devrede || [], canli = d.canli || [], on = d.oneriler || [];
+  const yalnizGecen = !($('#devre-gecen') && !$('#devre-gecen').checked);
+  const minOran = +(d.min_oran || (($('#devre-min') || {}).value) || 1.05);
+  const n = $('#devre-not'); if(n) n.textContent = `${d.zaman} · ${devrede.length} maç devrede · ${canli.length} canlı · beslemede ${d.besleme_mac || 0} maç · her 60 sn yenilenir`;
+  const enYakin = canli.find(m => m.devreye !== null && m.devreye !== undefined);
+  let html = `<div class="kart"><h2>${iks('yildiz')} Günün devre arası önerileri <span class="ipucu">· ölçülen güven ≥ ${devreYuzde(d.esik)} · fiyat ≥ ${minOran.toFixed(2)} · maç başına en fazla 2</span></h2>
+    ${on.length ? on.map(s => devreSecimHTML(s, devrede.findIndex(m => m.ev === s.ev_ad && m.dep === s.dep_ad))).join('')
+      : `<div class="bos-durum" style="padding:10px 0"><p>${devrede.length ? 'Devredeki maçlarda eşiği geçen ölçülmüş seçim yok.'
+          : (d.besleme ? 'Şu an devrede maç yok.' : 'Canlı besleme yanıt vermedi — biraz sonra tekrar dene.')}${canli.length
+          ? ` Canlı ${canli.length} maç${enYakin ? ` — en yakını ~${enYakin.devreye} dk sonra devrede` : ''}.` : ''}</p></div>`}
+  </div>`;
+  devrede.forEach((m, mi) => {
+    const om = m.on_mac || {};
+    html += `<div class="kart"><h2>⏸ İY ${esc(m.iy_skor || '?')} · ${esc(m.ev)} – ${esc(m.dep)} <span class="ipucu">· ${esc(m.saat || '')} · ${esc(m.lig || '')}</span></h2>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:6px">${devreTabloHTML(m.tablo)}</div>
+      ${m.kapsam_disi ? `<div class="ipucu">${iks('uyari')} kapsam dışı: ${esc(m.kapsam_disi)}</div>` : `
+      <div class="ipucu" style="margin-bottom:6px">ön-maç: MS1 ${devreYuzde(om.ms1)} · X ${devreYuzde(om.ms0)} · MS2 ${devreYuzde(om.ms2)} · λ ${(om.lambda_ev || 0).toFixed(2)}/${(om.lambda_dep || 0).toFixed(2)} → 2. yarı λ ${(om.lambda2_ev || 0).toFixed(2)}/${(om.lambda2_dep || 0).toFixed(2)} (${om.lam_kaynak === 'piyasa' ? '1X2 oranından — ölçülen varyant' : 'takım modelinden — 1X2 oranı yok, ölçülmemiş varyant'})</div>
+      <div style="overflow-x:auto"><table class="roll-tablo"><thead><tr><th>pazar</th><th>model</th><th>ölçülen güven</th><th>adil</th><th>sitede beklenen</th><th>canlı oran (sen gir)</th><th>ölçüm</th><th></th></tr></thead><tbody>
+      ${(m.pazarlar || []).filter(s => !s.kesin && (!yalnizGecen || s.guvenilir)).map(s => {
+        const anahtar = `${m.tarih}|${m.ev}|${m.dep}|${s.pazar}`, girili = depo[anahtar], ev = girili > 1 ? s.guven_p * girili - 1 : null;
+        if((girili > 1 ? girili : (s.site_oran || 0)) < minOran) return '';
+        return `<tr${s.guvenilir ? '' : ' style="opacity:.6"'}>
+        <td><b>${esc(s.pazar)}</b></td><td>${devreYuzde(s.p)}</td><td><b>${devreYuzde(s.guven_p)}</b>${s.bant_n ? `<div class="ipucu">bant ${tl(s.bant_n)} maç</div>` : ''}</td>
+        <td>${s.adil ? s.adil.toFixed(2) : '—'}</td><td>${s.site_oran ? '~' + s.site_oran.toFixed(2) : '—'}</td>
+        <td style="white-space:nowrap"><input type="number" step="0.01" min="1.01" placeholder="canlı" value="${girili > 1 ? girili : ''}"
+            style="width:70px;padding:2px 4px;border-color:${ev === null ? '' : (ev > 0 ? '#22c55e' : '#ef4444')}"
+            data-k="${esc(anahtar)}" data-guven="${s.guven_p}" oninput="devreOranYaz(this)">
+          <span class="chip ${ev === null ? '' : (ev > 0 ? 'ev-poz' : 'ev-neg')}" data-ev title="beklenen değer — girdiğin canlı oranla; bu fiyatın değeri ÖLÇÜLMEDİ">${ev === null ? '' : (ev >= 0 ? '+' : '') + '%' + (ev*100).toFixed(1)}</span></td>
+        <td>${s.guvenilir ? devreRozet(s.karne) : `<span class="chip ev-neg" title="${esc(s.neden || '')}">elendi</span>`}</td>
+        <td>${s.guvenilir ? `<button class="mini-btn" onclick="devreKupona(${mi}, ${JSON.stringify(s.pazar).replace(/"/g, '&quot;')})" title="Kupona ekle">${iks('ekle')}</button>` : ''}</td></tr>`; }).join('')}
+      </tbody></table></div>`}
+    </div>`;
+  });
+  if(canli.length) html += `<div class="kart"><h2>${iks('oynaniyor')} Canlı — devre arası bekleniyor <span class="ipucu">· ${canli.length} maç</span></h2>
+    ${canli.map(m => `<div class="one-cikan" style="border:none;padding:6px 0"><span class="chip canli-chip canli-var">🔴 ${esc(m.dakika || '')} ${esc(m.skor || '')}</span>
+      <span style="flex:1;min-width:150px">${esc(m.ev)} – ${esc(m.dep)} <span class="ipucu">${esc(m.saat || '')} · ${esc(m.lig || '')}</span></span>
+      <span class="ipucu">${(m.devreye !== null && m.devreye !== undefined) ? `devreye ~${m.devreye} dk` : '2. yarı sürüyor — devre arası penceresi geçti'}</span></div>`).join('')}
+  </div>`;
+  html += `<div class="kart"><div class="ipucu">${esc(d.not || '')}${(d.notlar || []).length ? '<br>' + d.notlar.map(esc).join(' · ') : ''}</div>
+    <div class="ipucu" style="margin-top:6px">Ölçüm: ${d.karne ? `${d.karne.gecen}/${d.karne.pazar} pazar geçti · ${tl(d.karne.n)} test maçı · geçmeyen: ${(d.karne.gecmeyen || []).join(', ') || '—'}` : ''}. Oyun içi dakika bazlı olasılık gösterilmez (ölçülemez). Kupon Defteri'nde bekleyen bacakların devre arası şansı da bu modelle gösterilir.</div></div>`;
+  kutu.innerHTML = html;
+}
+setInterval(() => { if(document.querySelector('#s-devre.aktif')) devreYukle(true, true); }, 60000);
+
+// ───────────────────────────── Kupon Defteri: bekleyen bacağın kesinleşmesi / devre arası olasılığı
+// Kesinleşme deterministik (skor çizgiyi geçti); olasılık YALNIZ maç devredeyken (ölçülen model).
+// Oyun içi dakika bazlı tahmin yok — ölçülmedi.
+let BACAK_SANS_MESGUL = false;
+function bacakSansRozet(b){
+  if(!b) return null;
+  if(b.kesin === 'tuttu') return {metin: '✓ kesinleşti', sinif: 'ev-poz', baslik: 'skorla kesinleşti (deterministik); defter maç bitince işler'};
+  if(b.kesin === 'yatti') return {metin: '✗ yattı (kesin)', sinif: 'ev-neg', baslik: 'skorla kesinleşti (deterministik)'};
+  if(b.p !== null && b.p !== undefined) return {metin: `devre %${(b.p*100).toFixed(0)} (ölçülen)`, sinif: '',
+    baslik: `devre arası modeli (deney32): model %${((b.model_p === null || b.model_p === undefined ? b.p : b.model_p)*100).toFixed(0)}${b.bant_n ? ', bant ' + tl(b.bant_n) + ' maç' : ''} — olasılık ölçüldü, kâr değil`};
+  if(b.durum_canli === 'devre' && b.neden) return {metin: 'devre · ölçülmedi', sinif: '', baslik: b.neden};
+  return null;
+}
+async function bacakSansGuncelle(){
+  const yuvalar = Array.from(document.querySelectorAll('#s-kupon.aktif [data-bacak-sans]'));
+  if(!yuvalar.length || BACAK_SANS_MESGUL) return;
+  BACAK_SANS_MESGUL = true;
+  try{
+    const r = await api('/api/bacak-sans', {});
+    const h = {}; for(const b of (r.bacaklar || [])) h[`${b.kupon_id}|${b.indeks}`] = b;
+    for(const el of yuvalar){
+      const roz = bacakSansRozet(h[el.dataset.bacakSans]);
+      if(!roz){ el.hidden = true; continue; }
+      el.textContent = roz.metin; el.title = roz.baslik; el.className = 'chip ' + roz.sinif; el.hidden = false;
+    }
+    for(const el of document.querySelectorAll('#s-kupon.aktif [data-kupon-sans]')){
+      const k = (r.kuponlar || {})[el.dataset.kuponSans];
+      if(!k || (!k.yatti && (k.p === null || k.p === undefined))){ el.hidden = true; continue; }
+      if(k.yatti){ el.textContent = 'yattı (kesin)'; el.className = 'chip ev-neg'; el.title = 'bir bacak skorla kesin yattı'; }
+      else{ el.textContent = `kalan ${k.acik} bacak · %${(k.p*100).toFixed(0)} (ölçülen)`; el.className = 'chip';
+            el.title = 'devredeki bacakların ölçülmüş olasılıklarının çarpımı' + (k.kesin_tutan ? ` · ${k.kesin_tutan} bacak kesinleşti` : ''); }
+      el.hidden = false;
+    }
+  }catch(_h){}
+  BACAK_SANS_MESGUL = false;
+}
+setInterval(() => { if(document.querySelector('#s-kupon.aktif [data-bacak-sans]')) bacakSansGuncelle(); }, 60000);
 
 // ───────────────────────────── Sistem karnesi: senin sonuçların vs beklenti
 function normalCdf(z){ const t = 1/(1+0.2316419*Math.abs(z)); const dd = 0.3989423*Math.exp(-z*z/2);

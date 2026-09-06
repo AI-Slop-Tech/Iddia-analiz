@@ -130,6 +130,26 @@ fiyatlı getiri"ye girmez, 30 sonuçlu kupondan önce ekran yargı vermez. Uçla
 `POST /api/sistem-defteri/simdi` (`{"mod": "hepsi", "tarih": "dd.mm.yyyy"}` — yalnız bugün/ileri tarih).
 Dosya: `data/sistem_defteri.json`.
 
+### Devre Arası — ölçülmüş 2. yarı olasılıkları (v3.36)
+
+Canlı beslemede **devrede** görünen maçlar için İY skoru ve ön-maç piyasa λ'sı ile 2. yarı Poisson
+modeli kurulur (Dixon-Coles rho'lu 2Y skor matrisi İY skoruyla kaydırılır) ve `tum_pazarlar` adlarıyla
+94 pazarın olasılığı verilir. Model **deney32 / 32b** ile ölçüldü: eğitim 10.952 maç (2023-07 öncesi;
+durum çarpanları, rho ve varyant yalnız burada seçildi), test 12.184 maç / 454 gün (2023-07 sonrası;
+karne yalnız burada). Ham model 94 pazarın 71'ini geçirdi; pazar × 10 puanlık bant düzeltmesi
+(n/(n+50) büzülmüş) örneklem dışı uygulanınca **93 / 94** geçti (`İY/MS 0/1` havuza girmez). Sabitler
+`iddaa/devre_olcum.py`'de (üretilmiş dosya, elle düzenlenmez).
+
+Ekranda: devredeki maç kartı (aynı İY skoruyla test döneminde ne oldu tablosu, ön-maç λ, pazar tablosu:
+model %, **ölçülen güven**, adil ve sitede beklenen fiyat, kullanıcının girdiği canlı oran ve EV'si),
+günün devre arası önerileri (ölçümü geçen pazarlar, ölçülen güvene göre, en az fiyat süzgeci), Kupon
+Defteri'nde bekleyen bacağın **skorla kesinleşmesi** (deterministik) ve devredeyse ölçülmüş olasılığı.
+
+Ne ölçülmedi: **kâr / ROI** (canlı fiyat arşivi yok), kullanıcının girdiği canlı oranın değeri, oyun içi
+dakika bazlı olasılık (arşivde gol dakikası yok; bu yüzden 2. yarı sürerken olasılık gösterilmez, yalnız
+kesinleşme). Uçlar: `POST /api/devre-arasi` (`{esik, marj, min_oran, site_oranlari}`),
+`POST /api/bacak-sans` (`{}` defterdeki bugün/dün bekleyenler ya da `{maclar:[...]}`).
+
 ## Komutlar
 
 | Komut | Açıklama |
@@ -560,6 +580,8 @@ onunla çalışmaya devam eder.
 - Fikir listesi: Dixon-Coles düzeltmesi, xG verisi entegrasyonu, kupon takibi
   (oynanan kuponların gerçek sonuçlarla izlenmesi), kapanış oranı analizi,
   kupa/milli ara maçları.
+- Devre arası modu yalnız **devre arasında** olasılık verir; oyun içi dakika bazlı tahmin
+  ölçülemediği için yok, canlı fiyat arşivi olmadığı için kâr iddiası yok (v3.36).
 
 ## ⚠️ Sorumlu oyun
 

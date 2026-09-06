@@ -292,6 +292,19 @@ def _sonuclandir_govde(df: pd.DataFrame | None, kuponlar: list[dict]) -> bool:
     return degisti
 
 
+def acik_bacaklar(gunler: set[str] | None = None, dosya: str = KUPON_DOSYASI) -> list[dict]:
+    """Bekleyen bacaklar (kupon_id, indeks ile): canlı şans/kesinleşme sorgusu için."""
+    cikti = []
+    for k in _oku(dosya):
+        for i, b in enumerate(k.get("secimler") or []):
+            if b.get("durum") != "bekliyor":
+                continue
+            if gunler and b.get("tarih") not in gunler:
+                continue
+            cikti.append({"kupon_id": k.get("id"), "indeks": i, **b})
+    return cikti
+
+
 def degerlendir(kupon: dict) -> dict:
     """Kuponun toplam oranı, durumu ve (sonuçlanmışsa) net getirisi."""
     bacaklar = kupon["secimler"]

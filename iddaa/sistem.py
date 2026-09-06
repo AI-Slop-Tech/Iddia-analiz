@@ -1309,3 +1309,184 @@ def kazanc_kuponu(havuz: list[dict], hedef: float = 2.0, esik: float = 0.60,
                   "günler kupon çıkmayabilir."),
     }
 
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# DEVRE ARASI — İY skoru belli olduktan sonra 2. yarı için ölçülmüş olasılık
+#
+# Ölçüm deney32 / deney32b (06.09.2026), sabitler devre_olcum.py'de (elle
+# düzenlenmez). Eğitim 10.952 maç (2023-07 öncesi, çarpan/rho/varyant yalnız
+# burada seçildi), test 12.184 maç / 454 gün (2023-07 sonrası; karne yalnız
+# burada). Ham model 94 pazarın 71'ini geçirdi; test döneminde 2. yarı gol
+# sayısı modelin dediğinden ~3 puan fazla (uzatmalar uzadı). Pazar × 10
+# puanlık bant düzeltmesi, n/(n+50) büzmeyle ÖRNEKLEM DIŞI (test günleri
+# 2 kat) uygulanınca 93 / 94 geçti, hiçbiri düşmedi. Üretim aynı düzeltmeyi
+# tüm test dönemi tablosuyla uygular (DEVRE_DUZELTME).
+#
+# Ne ÖLÇÜLMEDİ: kâr / ROI (canlı fiyat arşivi yok), kullanıcının girdiği
+# canlı oranın değeri, oyun içi dakika bazlı olasılık (arşivde gol dakikası
+# yok). Bu yüzden devre arası ekranı "ölçülmüş olasılık" gösterir, "kazanç"
+# vaat etmez.
+from . import devre_olcum as _devre_olcum
+
+DEVRE_KARNE = _devre_olcum.DEVRE_KARNE          # pazar → ham ve düzeltmeli karne
+DEVRE_BANT = _devre_olcum.DEVRE_BANT            # pazar → {"90".."50": (n, dedi, gerçek)} rozet
+DEVRE_DUZELTME = _devre_olcum.DEVRE_DUZELTME    # pazar → {"0".."9": (n, dedi, gerçek)} düzeltme
+DEVRE_TABLO = _devre_olcum.DEVRE_TABLO          # İY skoru → test döneminde ne oldu (gösterim)
+DEVRE_BUZME = 50                                # deney32b ile aynı büzme
+DEVRE_ESIK = 0.60
+DEVRE_ADET = 5
+DEVRE_MAC_BASI = 2      # öneri listesi tek maça dönmesin
+DEVRE_MIN_ORAN = 1.20   # öneri için en düşük fiyat: 1.08'lik "kesin" pazarlar listeyi doldurmasın
+# pazar tablosu bülten düzeninde: sonuç → toplam gol → KG → takım golü → handikap → "ve" → 2Y → İY/MS → yarılar
+_DEVRE_GRUPLAR = (("MS", 0), ("ÇŞ", 0), ("ÜST", 1), ("ALT", 1), ("KG", 2), ("EV ÜST", 3), ("EV ALT", 3),
+                  ("DEP ÜST", 3), ("DEP ALT", 3), ("HND", 4), ("2Y", 6), ("İY/MS", 7), ("HER İKİ", 8),
+                  ("EV HER", 8), ("DEP HER", 8))
+DEVRE_OZET = {
+    "n": int(DEVRE_KARNE["MS1"]["n"]),
+    "pazar": len(DEVRE_KARNE),
+    "gecen": sum(1 for k in DEVRE_KARNE.values() if k.get("gecti_duzeltmeli")),
+    "gecen_ham": sum(1 for k in DEVRE_KARNE.values() if k.get("gecti")),
+    "gecmeyen": sorted(p for p, k in DEVRE_KARNE.items() if not k.get("gecti_duzeltmeli")),
+    "varyant": list(_devre_olcum.DEVRE_VARYANT),
+    "rho": _devre_olcum.DEVRE_RHO,
+}
+DEVRE_NOT = (
+    "Devre arası olasılıkları 12.184 test maçında (2023-07 sonrası, 454 gün) örneklem dışı ölçüldü: "
+    "94 pazarın 93'ü kalibrasyon kapısını geçti (İY/MS 0/1 geçmedi, havuza girmez). Ölçülen şey "
+    "olasılığın tutup tutmadığıdır; canlı fiyat arşivi olmadığı için KÂR / ROI ÖLÇÜLMEDİ. Sitendeki "
+    "canlı oranı sen girersen beklenen değer ölçülmemiş bir fiyatla hesaplanır. Oyun içi dakika bazlı "
+    "tahmin yok (arşivde gol dakikası yok, ölçülemez): yalnız devre arası skoru kullanılır. Garanti yok."
+)
+
+
+def devre_karne(pazar: str) -> dict | None:
+    return DEVRE_KARNE.get(pazar)
+
+
+def devre_pazar_grubu(pazar: str) -> int:
+    """Tablo sırası için pazar grubu (küçük önce)."""
+    pz = str(pazar)
+    if " ve " in pz:
+        return 5
+    for on_ek, grup in _DEVRE_GRUPLAR:
+        if pz.startswith(on_ek):
+            return grup
+    return 9
+
+
+def devre_guvenilir(pazar: str) -> tuple[bool, str]:
+    """Pazar devre arası havuzuna girebilir mi? (girer_mi, gerekçe) — düzeltmeli karneye göre."""
+    k = DEVRE_KARNE.get(pazar)
+    if not k:
+        return False, "devre arası modelinde ölçülmedi"
+    d = k.get("duzeltmeli") or k
+    if k["n"] < MIN_ORNEK:
+        return False, f"örneklem küçük (n={k['n']})"
+    if k.get("gecti_duzeltmeli"):
+        return True, "ölçümü geçti"
+    if abs(d["fark"]) > MAKS_SAPMA:
+        yon = "abartıyor" if d["fark"] < 0 else "eksik tahmin ediyor"
+        return False, f"kalibrasyon bozuk: model {yon} ({d['fark']*100:+.1f} puan)"
+    if d["ayirt"] < MIN_AYIRT:
+        return False, f"ayırt gücü yok ({d['ayirt']*100:+.1f} puan)"
+    return False, "öneri bölgesinde bozuluyor"
+
+
+def _devre_bant(p: float) -> str:
+    return str(max(0, min(9, int(float(p) * 10))))
+
+
+def devre_guven_olasiligi(pazar: str, p: float) -> dict:
+    """Devre arası modelinin p'si, o pazar-bandında ÖLÇÜLEN sapmayla düzeltilir (deney32b).
+
+    Skorla kesinleşmiş hücre (p≈0 / p≈1) düzeltilmez; keskin piyasa yok (canlı
+    Pinnacle çekilmiyor). Dönen: guven, bant_n, kesin."""
+    p = float(p)
+    if p <= 0.001 or p >= 0.999:
+        return {"guven": max(0.0, min(1.0, p)), "bant_n": 0, "kesin": True}
+    kayit = (DEVRE_DUZELTME.get(pazar) or {}).get(_devre_bant(p))
+    if not kayit:
+        return {"guven": max(0.02, min(0.985, p)), "bant_n": 0, "kesin": False}
+    n, dedi, gercek = kayit
+    guven = max(0.02, min(0.985, p + (gercek - dedi) * n / (n + DEVRE_BUZME)))
+    return {"guven": float(guven), "bant_n": int(n), "kesin": False}
+
+
+def devre_rozeti(pazar: str, p: float) -> dict | None:
+    """Rozet: seçimin kendi olasılık bandındaki devre arası ölçümü (_karne_rozeti kalıbı)."""
+    k = DEVRE_KARNE.get(pazar)
+    if not k:
+        return None
+    bantlar = DEVRE_BANT.get(pazar) or {}
+    for sinir in BANT_SINIRLARI:
+        if p >= sinir / 100.0:
+            kayit = bantlar.get(str(sinir))
+            if kayit:
+                n, dedi, gercek = kayit
+                return {"n": int(n), "dedi": dedi, "gercek": gercek, "ayirt": k["ayirt"],
+                        "bolge": True, "bant": sinir, "guvenilir": bool(k.get("gecti_duzeltmeli"))}
+            break
+    d = k.get("duzeltmeli") or k
+    return {"n": int(k["n"]), "dedi": d["dedi"], "gercek": d["gercek"], "ayirt": d["ayirt"],
+            "bolge": False, "bant": None, "guvenilir": bool(k.get("gecti_duzeltmeli"))}
+
+
+def devre_pazar_satiri(pazar: str, p: float, marj: float = MARJ_VARSAYILAN,
+                       site_oran: float | None = None) -> dict:
+    """Devre arası ekranının bir pazar satırı: model p, ölçülen güven, adil ve
+    sitede beklenen fiyat, kullanıcı canlı oran girdiyse EV (ölçülmemiş fiyat)."""
+    g = devre_guven_olasiligi(pazar, p)
+    uygun, neden = devre_guvenilir(pazar)
+    guven = float(g["guven"])
+    satir = {
+        "pazar": pazar, "p": round(float(p), 4), "guven_p": round(guven, 4),
+        "bant_n": int(g["bant_n"]), "kesin": bool(g["kesin"]),
+        "adil": round(1.0 / max(guven, 1e-6), 2) if not g["kesin"] else None,
+        "site_oran": round(gercekci_fiyat(guven, marj), 2) if not g["kesin"] else None,
+        "oran": None, "oran_kaynak": None, "ev": None,
+        "karne": devre_rozeti(pazar, p), "guvenilir": bool(uygun), "neden": neden,
+    }
+    try:
+        o = float(site_oran) if site_oran is not None else 0.0
+    except (TypeError, ValueError):
+        o = 0.0
+    if o >= 1.01 and not g["kesin"]:
+        satir.update({"oran": round(o, 3), "oran_kaynak": "canli-site",
+                      "ev": round(guven * o - 1.0, 4)})
+    return satir
+
+
+def devre_secimleri(maclar: list[dict], esik: float = DEVRE_ESIK, adet: int = DEVRE_ADET,
+                    marj: float = MARJ_VARSAYILAN, min_oran: float = DEVRE_MIN_ORAN) -> list[dict]:
+    """Devredeki maçların ölçümü geçen pazarlarından, ölçülen güvene göre en iyi `adet` seçim.
+
+    maclar: /api/devre-arasi 'devrede' kayıtları (her biri pazarlar listesiyle).
+    Kesinleşmiş hücreler (p 0/1) ve fiyatı min_oran'ın (en az MIN_OYNANABILIR_ORAN)
+    altında kalanlar girmez; maç başına en fazla DEVRE_MAC_BASI seçim."""
+    esik = max(0.40, min(0.95, float(esik)))
+    min_oran = max(MIN_OYNANABILIR_ORAN, float(min_oran))
+    adaylar = []
+    for m in maclar:
+        if m.get("kapsam_disi"):
+            continue
+        for s in m.get("pazarlar") or []:
+            if not s.get("guvenilir") or s.get("kesin") or float(s.get("guven_p") or 0) < esik:
+                continue
+            fiyat = s.get("oran") or s.get("site_oran") or 0
+            if fiyat < min_oran:
+                continue
+            adaylar.append({**s, "ev_ad": m.get("ev"), "dep_ad": m.get("dep"), "lig": m.get("lig"),
+                            "saat": m.get("saat"), "iy_skor": m.get("iy_skor"), "tarih": m.get("tarih"),
+                            "dakika": m.get("dakika")})
+    adaylar.sort(key=lambda s: (-float(s["guven_p"]), -float(s.get("site_oran") or 0), s["pazar"]))
+    cikti, sayac = [], {}
+    for s in adaylar:
+        anahtar = (s["ev_ad"], s["dep_ad"])
+        if sayac.get(anahtar, 0) >= DEVRE_MAC_BASI:
+            continue
+        sayac[anahtar] = sayac.get(anahtar, 0) + 1
+        cikti.append(s)
+        if len(cikti) >= max(1, int(adet)):
+            break
+    return cikti
