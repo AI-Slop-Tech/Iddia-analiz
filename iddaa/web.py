@@ -26,8 +26,14 @@ from . import analiz, backtest, kayit, kupon, rapor, rolling, sistem, veri, yoru
 _DURUM: dict = {
     "df": None, "elo": None, "fikstur": None, "kitapcilar": [],
     "fikstur_zaman": 0.0, "arsiv_zaman": 0.0,
+    # bülten arka planda tazeleniyor mu / kaçıncı kurulum (stale-while-revalidate)
+    "fikstur_tazeleniyor": False, "fikstur_surum": 0,
 }
 _BAKIM = {"basladi": False}
+_TAZELE_KILIT = threading.Lock()
+# "Veriyi Güncelle" arka plan işi: uzun indirme isteği bekletmez, sekme kapansa da sürer
+_GUNCELLE: dict = {"calisiyor": False, "baslangic": None, "bitis": None, "ozet": None, "hata": None}
+_GUNCELLE_KILIT = threading.Lock()
 # Bülten yeniden kurulumu tek seferde: kurulum artık dört kaynağı çekiyor,
 # eşzamanlı istekler aynı işi tekrarlamasın.
 _FIKSTUR_KILIT = threading.Lock()
@@ -87,16 +93,28 @@ def _bakim_dongusu() -> None:
                 except Exception:  # noqa: BLE001
                     pass
                 _df(zorla=True)
-                _DURUM["fikstur"] = None  # yeni veriyle yeniden okunsun
+                # yeni arşivle bülten ARKA PLANDA kurulur; eskiden kopya None
+                # yapılıyor, sonraki ilk ziyaretçi 50 sn'lik kurulumu bekliyordu
+                tazele = _BAKIM.get("fikstur_tazele")
+                if tazele:
+                    tazele(False)
+                else:
+                    _DURUM["fikstur"] = None
         except Exception:  # noqa: BLE001 - bakım hatası servisi düşürmesin
             pass
         try:
             if _DURUM["df"] is not None:
-                # dosya önbelleğini tazele (6 saatlik TTL'e uyar); bellek kopyasını
-                # DOĞRUDAN yazma — dış/AF kapsama katmanlarını atlayarak eziyordu.
-                # Sadece süreyi eskit: bir sonraki bülten çağrısı tam zincirle kurar.
+                # dosya önbelleğini tazele (6 saatlik TTL'e uyar) ve bülteni tam
+                # zincirle BURADA, bakım iş parçacığında yeniden kur. Eskiden yalnız
+                # süre eskitiliyor, kurulumu 15 dakikada bir hangi sekme denk
+                # gelirse o ödüyordu — kullanıcının "yeni sekmede boş bülten"
+                # şikâyetinin ana kaynağı buydu.
                 veri.fikstur_indir()
-                _DURUM["fikstur_zaman"] = 0.0
+                tazele = _BAKIM.get("fikstur_tazele")
+                if tazele:
+                    tazele(False)
+                else:
+                    _DURUM["fikstur_zaman"] = 0.0
         except Exception:  # noqa: BLE001
             pass
 
@@ -266,6 +284,13 @@ def uygulama_olustur():
         def _isit():
             try:
                 _df()
+                # bülten de açılışta kurulsun: ilk sekme iskelette 50 sn beklemesin
+                for _ in range(60):          # kayıt (aşağıda) birkaç ms sonra hazır olur
+                    isit = _BAKIM.get("fikstur_isit")
+                    if isit:
+                        isit()
+                        break
+                    time.sleep(0.5)
             except Exception:  # noqa: BLE001 — veri henüz yoksa panel zaten yönlendirir
                 pass
 
@@ -489,25 +514,56 @@ def uygulama_olustur():
 
     @app.post("/api/guncelle")
     def guncelle():
+        """Veri güncellemesini ARKA PLANDA başlatır, hemen döner; ilerleme
+        /api/guncelle-durum'dan izlenir. Eskiden istek 1-3 dk açık kalıyordu:
+        ara vekiller (100 sn) kesiyor, kullanıcı hata görüyor ama indirme
+        sürüyordu; sekme kapanınca da durum kayboluyordu."""
         govde = request.get_json(silent=True) or {}
-        try:
-            ozet = veri.indir(govde.get("ligler"))
-        except veri.ErisimHatasi as hata:
-            return jsonify({"hata": str(hata), "indirilen": hata.ozet.get("indirilen", 0)}), 502
-        try:
-            veri.iy_hasadi()  # ek ülke İY skorları yan kaynaklardan depoya
-        except Exception:  # noqa: BLE001
-            pass
-        try:
-            veri.kupa_hasadi()  # ŞL sonuç arşivi (football-data.org)
-        except Exception:  # noqa: BLE001
-            pass
-        try:
-            _df(zorla=True)
-        except FileNotFoundError:
-            return jsonify({"hata": "Veri indirilemedi, internet bağlantısını kontrol edin."}), 502
-        return jsonify({"indirilen": ozet["indirilen"], "onbellek": ozet["onbellek"],
-                        "degismedi": ozet.get("degismedi", 0), "hata_sayisi": len(ozet["hata"])})
+        with _GUNCELLE_KILIT:
+            if _GUNCELLE["calisiyor"]:
+                return jsonify({"basladi": False, "calisiyor": True, "baslangic": _GUNCELLE["baslangic"]})
+            _GUNCELLE.update({"calisiyor": True, "baslangic": time.time(), "bitis": None,
+                              "ozet": None, "hata": None, "asama": "arşiv indiriliyor"})
+        ligler = govde.get("ligler")
+
+        def _calis():
+            try:
+                ozet = veri.indir(ligler)
+                _GUNCELLE["asama"] = "yan kaynaklar"
+                try:
+                    veri.iy_hasadi()  # ek ülke İY skorları yan kaynaklardan depoya
+                except Exception:  # noqa: BLE001
+                    pass
+                try:
+                    veri.kupa_hasadi()  # ŞL sonuç arşivi (football-data.org)
+                except Exception:  # noqa: BLE001
+                    pass
+                _GUNCELLE["asama"] = "arşiv belleğe yükleniyor"
+                _df(zorla=True)
+                _GUNCELLE["ozet"] = {"indirilen": ozet["indirilen"], "onbellek": ozet["onbellek"],
+                                     "degismedi": ozet.get("degismedi", 0), "hata_sayisi": len(ozet["hata"])}
+                _GUNCELLE["asama"] = "bülten kuruluyor"
+                _fikstur_arka_planda(False, beklet=True)   # yeni arşivle bülten, sekmeler beklemeden
+            except veri.ErisimHatasi as hata:
+                _GUNCELLE["hata"] = str(hata)
+                _GUNCELLE["ozet"] = {"indirilen": getattr(hata, "ozet", {}).get("indirilen", 0)}
+            except FileNotFoundError:
+                _GUNCELLE["hata"] = "Veri indirilemedi, internet bağlantısını kontrol edin."
+            except Exception as hata:  # noqa: BLE001
+                _GUNCELLE["hata"] = str(hata)[:300]
+            finally:
+                _GUNCELLE["bitis"] = time.time()
+                _GUNCELLE["asama"] = "bitti"
+                _GUNCELLE["calisiyor"] = False
+
+        threading.Thread(target=_calis, daemon=True, name="iddaa-guncelle").start()
+        return jsonify({"basladi": True, "calisiyor": True, "baslangic": _GUNCELLE["baslangic"]})
+
+    @app.get("/api/guncelle-durum")
+    def guncelle_durum():
+        d = dict(_GUNCELLE)
+        d["sure"] = int(((d["bitis"] or time.time()) - d["baslangic"])) if d["baslangic"] else 0
+        return jsonify(d)
 
     @app.get("/api/takimlar")
     def takimlar():
@@ -1189,98 +1245,166 @@ def uygulama_olustur():
         })
         return pd.concat([fik, y], ignore_index=True).sort_values("Tarih").reset_index(drop=True)
 
+    def _kararli_idler(fik, onceki):
+        """Aynı maç (gün, ev, dep) yeniden kurulumda AYNI id'yi korur.
+
+        Bülten artık arka planda tazelendiği için açık bir sekme eski id'lerle
+        detay/tarama isteyebilir; id kayarsa tıklama başka maça gider. Yeni
+        maçlar eski en büyük id'den devam eder (uçlar .loc ile bakar)."""
+        if onceki is None or fik is None or len(fik) == 0:
+            return fik
+        try:
+            def _anahtar(d):
+                return list(zip(d["Tarih"].dt.date, d["HomeTeam"].astype(str), d["AwayTeam"].astype(str)))
+            # aynı maç iki kaynaktan iki kez listelenmiş olabilir: anahtar başına
+            # id KUYRUĞU tutulur, tekrarlar da sırayla eski id'lerini alır
+            eski: dict = {}
+            for k, i in zip(_anahtar(onceki), onceki.index):
+                eski.setdefault(k, []).append(int(i))
+            sayac = (int(max(onceki.index)) if len(onceki) else 0) + 1
+            yeni = []
+            for k in _anahtar(fik):
+                kuyruk = eski.get(k)
+                if kuyruk:
+                    yeni.append(kuyruk.pop(0))
+                else:
+                    yeni.append(sayac)
+                    sayac += 1
+            fik = fik.copy()
+            fik.index = pd.Index(yeni)
+        except Exception:  # noqa: BLE001 — id eşlemesi bülteni düşürmesin
+            pass
+        return fik
+
+    def _fikstur_kur(df, yenile: bool):
+        """Bülten kopyasını TAM zincirle kurar (dört kaynak, ağ dahil). _DURUM'a
+        dokunmaz; sonucu _fikstur_degistir yerleştirir."""
+        fik, kitapcilar = veri.fikstur_yukle(
+            ligler=sorted(set(df["Div"].unique()) | set(veri.EK_LIGLER)), yenile=yenile
+        )
+        # Katman katman kaç maç eklendiği ve hata varsa nedeni kaydedilir:
+        # eskiden bu hatalar sessizce yutuluyordu, "neden az maç var"
+        # sorusu ancak sunucu günlüğüne bakarak yanıtlanabiliyordu.
+        kapsam = {"csv": int(len(fik))}
+        n = len(fik)
+        try:
+            fik = _dis_kapsami_ekle(df, fik, yenile)
+            kapsam["fdorg"] = int(len(fik) - n)
+        except Exception as h:  # noqa: BLE001
+            kapsam["fdorg"] = 0
+            kapsam["fdorg_hata"] = str(h)[:200]
+        n = len(fik)
+        try:
+            fik = _dun_arsivden_ekle(df, fik)   # dünkü oynanmışlar denetim için
+            kapsam["dun"] = int(len(fik) - n)
+        except Exception as h:  # noqa: BLE001
+            kapsam["dun"] = 0
+            kapsam["dun_hata"] = str(h)[:200]
+        n = len(fik)
+        try:
+            fik = _af_kapsami_ekle(df, fik)
+            kapsam["af"] = int(len(fik) - n)
+        except Exception as h:  # noqa: BLE001 — kapsama katmanı bülteni düşürmesin
+            kapsam["af"] = 0
+            kapsam["af_hata"] = str(h)[:200]
+        n = len(fik)
+        try:
+            fik = _acik_kapsami_ekle(df, fik)
+            kapsam["acik"] = int(len(fik) - n)
+        except Exception as h:  # noqa: BLE001
+            kapsam["acik"] = 0
+            kapsam["acik_hata"] = str(h)[:200]
+        kapsam["acik_kapali"] = bool(veri.acik_fikstur_kapali())
+        try:
+            kapsam["acik_arsiv"] = veri.acik_arsiv_ozeti()
+            kapsam["acik_arsiv"]["analiz_lig"] = len(veri.ACIK_LIG_TAKIMLARI)
+        except Exception:  # noqa: BLE001
+            pass
+        kapsam["toplam"] = int(len(fik))
+        kapsam["af_anahtar"] = bool(veri.gizli_anahtar("APIFOOTBALL_KEY", "apifootball_key"))
+        # "Oran neden yok" sorusu ekrandan okunabilsin: oran bültenin
+        # kendisinden (fixtures.csv) gelir; AF/fd.org katmanları maçı
+        # listeler ama fiyat getirmez. Bu ikisini ayırmak şart.
+        try:
+            yol = os.path.join(veri.VERI_KLASORU, "fixtures.csv")
+            if os.path.exists(yol):
+                yas = (time.time() - os.path.getmtime(yol)) / 3600.0
+                kapsam["fikstur_saat"] = round(yas, 1)
+                kapsam["fikstur_kb"] = int(os.path.getsize(yol) / 1024)
+            else:
+                kapsam["fikstur_yok"] = True
+        except Exception:  # noqa: BLE001 — teşhis asla bülteni düşürmesin
+            pass
+        try:
+            kapsam["pinnacle"] = _pinnacle_fuzyonu(fik)   # anahtarsız oran
+        except Exception as h:  # noqa: BLE001
+            kapsam["pinnacle"] = 0
+            kapsam["pinnacle_hata"] = str(h)[:200]
+        try:
+            _piyasa_fuzyonu_uygula(fik)      # önbellekte ne varsa satırlara işle
+            _piyasa_isit_baslat(fik)         # eksikleri arka planda çek
+        except Exception:  # noqa: BLE001
+            pass
+        # "oranlı" sayımı EN SON: bütün oran katmanları işlendikten sonra
+        try:
+            oran_kol = ["oran_ev", "oran_berabere", "oran_dep"]
+            if all(k in fik.columns for k in oran_kol):
+                kapsam["oranli"] = int(fik[oran_kol].notna().all(axis=1).sum())
+        except Exception:  # noqa: BLE001
+            pass
+        return fik, kitapcilar, kapsam
+
+    def _fikstur_degistir(fik, kitapcilar, kapsam):
+        fik = _kararli_idler(fik, _DURUM.get("fikstur"))
+        _DURUM["kapsam"] = kapsam
+        _DURUM["fikstur"], _DURUM["kitapcilar"] = fik, kitapcilar
+        _DURUM["fikstur_zaman"] = time.time()
+        _DURUM["fikstur_surum"] = int(_DURUM.get("fikstur_surum", 0)) + 1
+
+    def _fikstur_arka_planda(yenile: bool = False, beklet: bool = False):
+        """Bülteni arka planda yeniden kurar; mevcut kopya o sırada sunulmaya
+        devam eder (stale-while-revalidate). Tek seferde bir kurulum.
+        beklet=True: çağıran iş parçacığında çalışır (bakım döngüsü, güncelleme)."""
+        with _TAZELE_KILIT:
+            if _DURUM["fikstur_tazeleniyor"]:
+                return False
+            _DURUM["fikstur_tazeleniyor"] = True
+
+        def _calis():
+            try:
+                _fikstur_degistir(*_fikstur_kur(_df(), yenile))
+            except Exception:  # noqa: BLE001 — eski kopya kalır, sonraki tur yine dener
+                pass
+            finally:
+                _DURUM["fikstur_tazeleniyor"] = False
+
+        if beklet:
+            _calis()
+        else:
+            threading.Thread(target=_calis, daemon=True, name="iddaa-bulten-tazele").start()
+        return True
+
     def _fikstur(yenile: bool = False, bellek_ttl: bool = False):
-        """bellek_ttl=True: listeleme çağrıları için TTL dolduysa yeniden oku.
-        Detay/tarama çağrıları mevcut kopyayı kullanır ki satır id'leri kaymasın."""
+        """bellek_ttl=True: listeleme çağrıları için TTL dolduysa ARKA PLANDA
+        yeniden kur, eldeki kopyayı hemen ver. Detay/tarama çağrıları mevcut
+        kopyayı kullanır (id'ler kurulumlar arasında kararlı).
+
+        Ölçüm (06.09.2026): tam kurulum soğukta 50 sn, yenile ile 23 sn. Eskiden
+        bu süreyi TTL'e denk gelen ziyaretçi iskelet ekranda bekliyordu."""
         df = _df()
-        bayat = bellek_ttl and time.time() - _DURUM["fikstur_zaman"] > FIKSTUR_BELLEK_TTL
-        if not (_DURUM["fikstur"] is None or yenile or bayat):
+        if _DURUM["fikstur"] is None:
+            # soğuk açılış: elde kopya yok, kurmadan verilecek bir şey de yok
+            with _FIKSTUR_KILIT:
+                if _DURUM["fikstur"] is None:
+                    _fikstur_degistir(*_fikstur_kur(df, yenile))
             return _DURUM["fikstur"], _DURUM["kitapcilar"]
-        # Sunucu 8 iş parçacığıyla çalışıyor: kilit olmadan aynı anda gelen
-        # sekiz istek bülteni sekiz kez kuruyor, her biri dört kaynağı ayrı
-        # ayrı çekiyordu. Kilidi bekleyen istek, kurulum bitmişse hazır
-        # kopyayı alır.
-        with _FIKSTUR_KILIT:
-            bayat = bellek_ttl and time.time() - _DURUM["fikstur_zaman"] > FIKSTUR_BELLEK_TTL
-            if _DURUM["fikstur"] is None or yenile or bayat:
-                fik, kitapcilar = veri.fikstur_yukle(
-                    ligler=sorted(set(df["Div"].unique()) | set(veri.EK_LIGLER)), yenile=yenile
-                )
-                # Katman katman kaç maç eklendiği ve hata varsa nedeni kaydedilir:
-                # eskiden bu hatalar sessizce yutuluyordu, "neden az maç var"
-                # sorusu ancak sunucu günlüğüne bakarak yanıtlanabiliyordu.
-                kapsam = {"csv": int(len(fik))}
-                n = len(fik)
-                try:
-                    fik = _dis_kapsami_ekle(df, fik, yenile)
-                    kapsam["fdorg"] = int(len(fik) - n)
-                except Exception as h:  # noqa: BLE001
-                    kapsam["fdorg"] = 0
-                    kapsam["fdorg_hata"] = str(h)[:200]
-                n = len(fik)
-                try:
-                    fik = _dun_arsivden_ekle(df, fik)   # dünkü oynanmışlar denetim için
-                    kapsam["dun"] = int(len(fik) - n)
-                except Exception as h:  # noqa: BLE001
-                    kapsam["dun"] = 0
-                    kapsam["dun_hata"] = str(h)[:200]
-                n = len(fik)
-                try:
-                    fik = _af_kapsami_ekle(df, fik)
-                    kapsam["af"] = int(len(fik) - n)
-                except Exception as h:  # noqa: BLE001 — kapsama katmanı bülteni düşürmesin
-                    kapsam["af"] = 0
-                    kapsam["af_hata"] = str(h)[:200]
-                n = len(fik)
-                try:
-                    fik = _acik_kapsami_ekle(df, fik)
-                    kapsam["acik"] = int(len(fik) - n)
-                except Exception as h:  # noqa: BLE001
-                    kapsam["acik"] = 0
-                    kapsam["acik_hata"] = str(h)[:200]
-                kapsam["acik_kapali"] = bool(veri.acik_fikstur_kapali())
-                try:
-                    kapsam["acik_arsiv"] = veri.acik_arsiv_ozeti()
-                    kapsam["acik_arsiv"]["analiz_lig"] = len(veri.ACIK_LIG_TAKIMLARI)
-                except Exception:  # noqa: BLE001
-                    pass
-                kapsam["toplam"] = int(len(fik))
-                kapsam["af_anahtar"] = bool(veri.gizli_anahtar("APIFOOTBALL_KEY", "apifootball_key"))
-                # "Oran neden yok" sorusu ekrandan okunabilsin: oran bültenin
-                # kendisinden (fixtures.csv) gelir; AF/fd.org katmanları maçı
-                # listeler ama fiyat getirmez. Bu ikisini ayırmak şart.
-                try:
-                    yol = os.path.join(veri.VERI_KLASORU, "fixtures.csv")
-                    if os.path.exists(yol):
-                        yas = (time.time() - os.path.getmtime(yol)) / 3600.0
-                        kapsam["fikstur_saat"] = round(yas, 1)
-                        kapsam["fikstur_kb"] = int(os.path.getsize(yol) / 1024)
-                    else:
-                        kapsam["fikstur_yok"] = True
-                except Exception:  # noqa: BLE001 — teşhis asla bülteni düşürmesin
-                    pass
-                _DURUM["kapsam"] = kapsam
-                try:
-                    kapsam["pinnacle"] = _pinnacle_fuzyonu(fik)   # anahtarsız oran
-                except Exception as h:  # noqa: BLE001
-                    kapsam["pinnacle"] = 0
-                    kapsam["pinnacle_hata"] = str(h)[:200]
-                try:
-                    _piyasa_fuzyonu_uygula(fik)      # önbellekte ne varsa satırlara işle
-                    _piyasa_isit_baslat(fik)         # eksikleri arka planda çek
-                except Exception:  # noqa: BLE001
-                    pass
-                # "oranlı" sayımı EN SON: bütün oran katmanları işlendikten sonra
-                try:
-                    oran_kol = ["oran_ev", "oran_berabere", "oran_dep"]
-                    if all(k in fik.columns for k in oran_kol):
-                        kapsam["oranli"] = int(fik[oran_kol].notna().all(axis=1).sum())
-                    _DURUM["kapsam"] = kapsam
-                except Exception:  # noqa: BLE001
-                    pass
-                _DURUM["fikstur"], _DURUM["kitapcilar"] = fik, kitapcilar
-                _DURUM["fikstur_zaman"] = time.time()
+        bayat = bellek_ttl and time.time() - _DURUM["fikstur_zaman"] > FIKSTUR_BELLEK_TTL
+        if yenile or bayat:
+            _fikstur_arka_planda(yenile)
         return _DURUM["fikstur"], _DURUM["kitapcilar"]
+
+    _BAKIM["fikstur_isit"] = lambda: _fikstur()
+    _BAKIM["fikstur_tazele"] = lambda yenile=False: _fikstur_arka_planda(yenile, beklet=True)
 
 
     def _gercek_sonuc(df, r):
@@ -1410,6 +1534,8 @@ def uygulama_olustur():
                 "bugun": simdi.strftime("%d.%m.%Y"),
                 "simdi": simdi.strftime("%H:%M"),
                 "guncelleme": time.strftime("%H:%M", time.localtime(_DURUM["fikstur_zaman"])),
+                "tazeleniyor": bool(_DURUM.get("fikstur_tazeleniyor")),
+                "surum": int(_DURUM.get("fikstur_surum", 0)),
                 "kaynak_yayini": veri.fikstur_kaynak_yayini(),
                 "dis": dict(veri.DIS_SON_DURUM),
             }
