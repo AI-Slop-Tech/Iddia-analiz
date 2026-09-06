@@ -3783,7 +3783,7 @@ function sisBacakHTML(b, i){
     </span>
     <span style="min-width:120px"><b>${esc(b.pazar)}</b> ${oranMetin}</span>
     ${(b.guven_p !== undefined && b.guven_p !== null)
-      ? `<span class="buyukev" title="ölçülen güven: pazar bandının ölçülmüş sapmasıyla düzeltilmiş model olasılığı${b.keskin_adil ? ' ile keskin piyasa (Pinnacle marjsız) olasılığının ortalaması' : ''}">%${(b.guven_p*100).toFixed(0)}</span>
+      ? `<span class="buyukev" title="${b.guven_kaynak === 'keskin piyasa' ? 'keskin piyasa: Pinnacle\'ın marjsız olasılığı — kupon bunu çarpar, modeli değil' : ('ölçülen güven: pazar bandının ölçülmüş sapmasıyla düzeltilmiş model olasılığı' + (b.keskin_adil && b.guven_kaynak !== 'ölçülen bant' ? ' ile keskin piyasa (Pinnacle marjsız) olasılığının ortalaması' : ''))}">%${(b.guven_p*100).toFixed(0)}</span>
          <span class="chip" title="modelin ham olasılığı ve ölçüm dayanağı">model %${(b.model_p*100).toFixed(0)}${b.keskin_adil ? ` · keskin %${(b.keskin_adil*100).toFixed(0)}` : ''}${b.bant_n ? ` · bant ${tl(b.bant_n)} maç` : ''}</span>
          ${b.uyumsuz ? `<span class="chip ev-neg" title="Pinnacle'ın marjsız olasılığı modelin 10+ puan altında; ölçümde böyle bacaklar %56 tuttu (model %75 demişti)">⚠ piyasa uyumsuz</span>` : ''}`
       : `<span class="buyukev" title="ölçüm düzeltmesi uygulanmış model olasılığı">%${(b.p*100).toFixed(0)}</span>`}
@@ -3833,9 +3833,9 @@ function sistemCiz(d){
           <span class="ipucu">± ${(d.strateji.hata*100).toFixed(1)} puan —
             ${d.strateji.roi > d.strateji.hata ? 'anlamlı olabilir' : (d.strateji.roi < -d.strateji.hata ? '<b>zarar anlamlı</b> — bu ayar tutturur, kazandırmaz' : '<b>kâr kanıtlanmadı</b>, zarar da yok')}</span></div>` : ''}
         ${d.strateji && d.strateji.eski !== undefined ? `<div class="capraz-satir">
-          <span style="flex:1">Eski sıralama (modelin dediğine göre) aynı ölçümde</span>
+          <span style="flex:1">Eski yöntem (modelin olasılığıyla) aynı ölçümde</span>
           <b class="ev-neg">%${(d.strateji.eski*100).toFixed(1)} tuttu</b>
-          <span class="ipucu">yeni sıralama ölçülen tutmaya göre: +${((d.strateji.gercek - d.strateji.eski)*100).toFixed(0)} puan</span></div>` : ''}
+          <span class="ipucu">yeni yöntem ölçülen/keskin olasılıkla: +${((d.strateji.gercek - d.strateji.eski)*100).toFixed(0)} puan</span></div>` : ''}
         <div class="capraz-satir"><span style="flex:1">Bu kuponun <b>kâra geçme sınırı</b></span>
           <b>${(1 / Math.max(d.strateji.gercek, 0.01)).toFixed(2)}</b>
           <span class="ipucu">sitende bu toplam oranın üstünü bulabilirsen matematik senden yana</span></div>` : ''}
@@ -3913,6 +3913,7 @@ function sistemCiz(d){
 }
 
 let SIS_MOD = 'kazanc';   // ölçümde en iyi 2x yolu (305 gün + son hafta kontrolü)
+let SIS_ESIK_MOD = '';    // eşik varsayılanı hangi mod için yazıldı
 function sisModSec(mod){
   SIS_MOD = mod;
   for(const [ad, dugme] of [['oran','#sis-mod-oran'], ['sans','#sis-mod-sans'], ['kazanc','#sis-mod-kazanc']]){
@@ -3921,11 +3922,25 @@ function sisModSec(mod){
   }
   const bacakAlan = $('#sis-alan-bacak');
   if(bacakAlan) bacakAlan.hidden = mod !== 'sans';
+  // şans modunda oran hedefi ve "en fazla bacak" kullanılmaz: kullanıcı 2.00 yazıp
+  // düşük oran görünce "hedefi yok saydı" sanıyordu — alanlar gri olsun
+  for(const id of ['#sis-hedef', '#sis-bacak']){
+    const el = $(id); if(!el) continue;
+    el.disabled = mod === 'sans';
+    el.title = mod === 'sans' ? 'Bu modda oran hedefi yok — hedef için 🎯 Hedef orana ulaş modunu kullan' : '';
+    el.style.opacity = mod === 'sans' ? '.45' : '';
+  }
+  // hedef modunda bacak sayısını sistem seçer (en fazla 4; ölçümde 3 ile 4 aynı) — alan gizli
+  const bacakKutu = $('#sis-bacak') && $('#sis-bacak').parentElement;
+  if(bacakKutu) bacakKutu.hidden = mod === 'oran';
+  // güven eşiği: her modun ölçümde en iyi çıkan varsayılanı (kullanıcı sonra değiştirebilir)
+  const esik = $('#sis-esik');
+  if(esik && SIS_ESIK_MOD !== mod){ esik.value = mod === 'oran' ? 60 : 65; SIS_ESIK_MOD = mod; }
   const not = $('#sis-mod-not');
   const metin = {
     sans: 'Oran hedefi yok. Sıralama modelin dediğine değil <b>ölçülen</b> tutmaya göre: pazar bandının ölçülmüş sapması + keskin piyasa (Pinnacle marjsız) olasılığı. Ölçümde 1/2/3 bacak <b>%93 / %83 / %75</b> tuttu (eski sıralama %82 / %65 / %53). Tutturur, kazandırmaz: fiyatlar 1.06–1.19.',
     kazanc: 'Yalnız ölçümde kârlı çıkan 1.20–1.60 bandından, <b>gerçek fiyatlı</b> bacaklarla kurar. Bazı günler kupon çıkmaz.',
-    oran: 'Önce oran hedefi tutturulur; tutma şansı ne çıkarsa o.'
+    oran: 'Sen hedef toplam oranı yaz, maçları ve bacak sayısını (en fazla 4) sistem seçer: hedefi tutturan, <b>ölçülen tutma şansı en yüksek</b> kombinasyon. Çarpılan olasılık modelin değil, <b>keskin piyasanın</b> (Pinnacle marjsız) — yoksa ölçülmüş bant. Ölçümde 2.00 hedefte %48.5 tuttu, %45.5 demişti (eski yöntem %75.8 deyip %37.1 tutuyordu). Adil fiyatlı 2.00 kuponunun tavanı ~%50; üstü matematiksel olarak yok.'
   };
   if(not) not.innerHTML = metin[mod] || metin.oran;
 }
@@ -3951,7 +3966,7 @@ async function sistemTara(){
     const d = await api('/api/sistem-onerisi', {
       tarih: AKTIF_GUN,
       hedef: +$('#sis-hedef').value,
-      maks_bacak: +$('#sis-bacak').value,
+      maks_bacak: SIS_MOD === 'oran' ? 4 : +$('#sis-bacak').value,   // hedef modunda sistem seçer
       esik: (+$('#sis-esik').value) / 100,
       kapsam: $('#sis-kapsam').value,
       marj: (+$('#sis-marj').value) / 100,

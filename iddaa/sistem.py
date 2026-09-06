@@ -212,14 +212,44 @@ PAZAR_KARNE: dict[str, dict] = {
 #
 # Sapmaların hepsi ARTI yönde: sistem söylediğinden biraz daha iyi tutuyor,
 # yani temkinli tarafta yanılıyor. Kullanıcı açısından güvenli yön budur.
+# ─────────────────────────────────────────────────────────────────────────
+# HEDEF ORANLI KUPON NEYİ ÇARPMALI — deney31 (06.09.2026)
+#
+# Soru: "2.00 hedefinde tutma şansı en yüksek kombinasyon" derken DFS hangi
+# olasılığı çarpmalı? 8.057 maç / 167 gün, 2 kat çapraz doğrulama, MS ve 2.5
+# A/Ü'de gerçek kapanış fiyatı, ÇŞ'de MS kapanışından türetilmiş fiyat,
+# diğer pazarlarda ölçülen gerçek olasılıktan (öbür yarıdan) marjlı fiyat
+# (modelden türetilmez — model yanılınca sahte "değer" doğuyordu).
+#
+#   çarpılan olasılık                 2.00 tutma   dedi    3.00 tutma   dedi
+#   model p (eski üretim)             %37.1        %75.8   %26.9        %64.5
+#   bant düzeltmeli model p           %38.9        %69.8   —            —
+#   bant + keskin piyasa ortalaması   %40.1        %55.4   —            —
+#   keskin piyasa p, yoksa bant p  ✔  %48.5        %45.5   %31.7        %29.5
+#
+# NEDEN: DFS "olasılığı çarpımı en yüksek, fiyat çarpımı ≥ hedef" diye arar.
+# Olasılıkta model payı olduğu sürece optimizasyon, modelin piyasadan EN ÇOK
+# saptığı bacakları seçer (ÇŞ 1X'te model %90 der, piyasa %78 fiyatlar; DFS
+# hepsini alır) — piyasa haklı çıkar, kupon %75 deyip %37 tutar. Bu, "3 kere
+# tutmadı" şikâyetinin ta kendisi. Piyasanın kendi olasılığı çarpılınca
+# sömürülecek sapma kalmaz: kupon ne diyorsa o tutar (%45.5 dedi, %48.5 tuttu).
+#
+# TAVAN: adil fiyatlı 2.00 kuponunun tutma şansı 1/(2.00·(1+marj)) ≈ %46-50.
+# Üstü matematiksel olarak yok; ölçülen getiri −%1.6 (±3.9) — kâr değil,
+# kalibrasyon. Getiri ancak sitedeki fiyat keskin sınırın üstündeyse doğar.
+# Eşik model p'ye uygulanır; eşiği ölçülen olasılığa uygulamak fark yaratmadı
+# (O5: %47-51, gürültü içinde). "En fazla bacak" 4 (otomatik): 3 ile 4 aynı.
 STRATEJI_KARNE = {
-    (2.0, 0.55): {"n": 305, "dedi": 0.476, "gercek": 0.495},
-    (2.0, 0.60): {"n": 305, "dedi": 0.469, "gercek": 0.498},
-    (2.0, 0.65): {"n": 305, "dedi": 0.444, "gercek": 0.449},
-    (2.0, 0.70): {"n": 303, "dedi": 0.420, "gercek": 0.455},
-    (3.0, 0.55): {"n": 305, "dedi": 0.327, "gercek": 0.348},
-    (3.0, 0.60): {"n": 294, "dedi": 0.307, "gercek": 0.313},
+    (2.0, 0.55): {"n": 167, "dedi": 0.453, "gercek": 0.449, "roi": -0.076, "hata": 0.038, "fiyat": 2.06, "eski": 0.371},
+    (2.0, 0.60): {"n": 167, "dedi": 0.455, "gercek": 0.485, "roi": -0.016, "hata": 0.039, "fiyat": 2.03, "eski": 0.371},
+    (2.0, 0.65): {"n": 167, "dedi": 0.449, "gercek": 0.473, "roi": -0.045, "hata": 0.039, "fiyat": 2.02, "eski": 0.377},
+    (2.0, 0.70): {"n": 167, "dedi": 0.441, "gercek": 0.437, "roi": -0.115, "hata": 0.038, "fiyat": 2.02, "eski": 0.347},
+    (3.0, 0.55): {"n": 167, "dedi": 0.303, "gercek": 0.353, "roi": 0.068, "hata": 0.037, "fiyat": 3.02, "eski": 0.281},
+    (3.0, 0.60): {"n": 167, "dedi": 0.295, "gercek": 0.317, "roi": -0.041, "hata": 0.036, "fiyat": 3.02, "eski": 0.269},
+    (3.0, 0.65): {"n": 167, "dedi": 0.288, "gercek": 0.293, "roi": -0.112, "hata": 0.035, "fiyat": 3.03, "eski": 0.259},
+    (3.0, 0.70): {"n": 167, "dedi": 0.282, "gercek": 0.275, "roi": -0.163, "hata": 0.035, "fiyat": 3.03, "eski": 0.245},
 }
+HEDEF_OTOMATIK_BACAK = 4     # hedef modunda bacak sayısını sistem seçer (ölçüm: 3 ile 4 aynı)
 
 
 def strateji_karne(hedef: float, esik: float) -> dict | None:
@@ -747,12 +777,24 @@ def kupon_kur(havuz: list[dict], hedef: float = 2.0, maks_bacak: int = 3,
     Hedefe ulaşmak için asla eşik altı seçim eklenmez; ulaşılamıyorsa kupon
     kurulmaz ve bu açıkça söylenir.
 
-    MATEMATİK NOTU: fiyatı bilinmeyen bacaklarda adil oran (1/p) kullanılır;
-    öyle bacaklarla kurulan 2.00'lik kuponun olasılığı tam olarak %50 çıkar
-    (çarpım birebir tersidir). Yani değer, ancak GERÇEK fiyatı adil oranın
-    üstünde olan bacaklardan gelir.
+    MATEMATİK NOTU: fiyatı bilinmeyen bacaklarda marjlı gerçekçi fiyat
+    kullanılır; öyle bacaklarla kurulan 2.00'lik kuponun olasılığı ~%46 çıkar.
+    Yani değer, ancak GERÇEK fiyatı keskin sınırın üstünde olan bacaklardan gelir.
+
+    ÇARPILAN OLASILIK (deney31, STRATEJI_KARNE üstündeki tablo): modelin ham
+    p'si DEĞİL — keskin piyasa (Pinnacle marjsız) olasılığı, yoksa ölçülmüş bant
+    düzeltmesi. Model p çarpılınca DFS modelin piyasadan en çok saptığı bacakları
+    topluyor ve kupon %75 deyip %37 tutuyordu; yeni amaçla %45.5 deyip %48.5.
     """
-    adaylar = [a for a in havuz if a["p"] >= esik]
+    # Eşik modelin ham p'sine uygulanır (ölçüm: eşiği ölçülen olasılığa uygulamak
+    # fark yaratmadı). Çarpılan olasılık ise deney31'in seçtiği: keskin piyasa,
+    # yoksa ölçülmüş bant — a["p"] burada ona dönüştürülür, ham p model_p'de kalır.
+    adaylar = []
+    for a in havuz:
+        if a["p"] < esik:
+            continue
+        hp, g, kaynak = hedef_olasiligi(a)
+        adaylar.append({**a, "p": hp, "model_p": a["p"], "_guven": g, "_kaynak": kaynak})
     if not adaylar:
         return None
     # verim = bir bacağın orana kattığı birim başına koruduğu olasılık;
@@ -804,11 +846,12 @@ def kupon_kur(havuz: list[dict], hedef: float = 2.0, maks_bacak: int = 3,
                  "yüksekse kârdasın, düşükse kupon bu toplama ulaşmaz; marjı sekmeden "
                  "kendi sitene göre ayarlayabilirsin.")
     return {
-        "bacaklar": [_bacak(b, marj) for b in bacaklar],
+        "bacaklar": [_guvenli_bacak(b, b["_guven"], b["p"], marj, b["_kaynak"]) for b in bacaklar],
         "oran": round(oran, 2),
         "p": float(p),
         "ev": float(p * oran - 1.0),
         "basabas": float(1.0 / oran),
+        "mod": "oran",
         "uyari": uyari,
     }
 
@@ -846,18 +889,21 @@ KARNE_NOT = ("137 pazarın hepsi 8.000 maçta ölçüldü (876.040 tekil ölçü
 def _strateji_notu() -> str:
     """Bu stratejinin geçmişte gerçekte ne yaptığı — süslemesiz."""
     a = STRATEJI_KARNE[(2.0, 0.60)]
-    uc = STRATEJI_KARNE[(3.0, 0.55)]
+    uc = STRATEJI_KARNE[(3.0, 0.60)]
     basabas = 1.0 / a["gercek"]
     return (
-        "📊 <b>Bu sekmenin stratejisi geçmişte ne yaptı:</b> 305 günün bülteni "
-        "üretimdeki kurallarla (aynı kapsam, aynı %9 marj) taranıp 1.915 kupon "
-        f"simüle edildi. Varsayılan ayarda sistem <b>%{a['dedi']*100:.1f}</b> demişti, "
-        f"gerçekte <b>%{a['gercek']*100:.1f}</b> tuttu ({a['n']} kupon) — yani söylediğinden "
-        f"{(a['gercek']-a['dedi'])*100:.1f} puan <b>daha iyi</b>; sistem temkinli tarafta "
-        f"yanılıyor. 3.00 hedefte %{uc['dedi']*100:.1f} deyip %{uc['gercek']*100:.1f} tutmuş. "
-        f"<b>Pratik kural:</b> bu kuponu sitende <b>{basabas:.2f}</b> ve üstü toplam orana "
-        "kurabiliyorsan matematik senden yana; altındaysa marjı ödüyorsun demektir. "
-        "Kâr garantisi yok — ölçülen şey olasılığın dürüstlüğü, o da tamam."
+        "📊 <b>Hedef oran modu geçmişte ne yaptı:</b> 167 günün bülteni (8.057 maç) "
+        "üretimdeki kupon kurucusuyla tarandı; olasılık tablosu günlerin bir yarısından "
+        "öğrenilip öbür yarısında sınandı. Kupon artık modelin olasılığını değil, "
+        "<b>keskin piyasanın</b> (Pinnacle marjsız) olasılığını, o yoksa ölçülmüş bant "
+        f"düzeltmesini çarpar. 2.00 hedefte sistem <b>%{a['dedi']*100:.1f}</b> dedi, gerçekte "
+        f"<b>%{a['gercek']*100:.1f}</b> tuttu ({a['n']} kupon); eski yöntem (modelin olasılığı) "
+        f"aynı ölçümde %75.8 deyip <b>%{a['eski']*100:.1f}</b> tutmuştu — 'garanti dedi, tutmadı' "
+        f"şikâyetinin sebebi buydu. 3.00 hedefte %{uc['dedi']*100:.1f} deyip %{uc['gercek']*100:.1f} tuttu. "
+        f"<b>Tavan:</b> adil fiyatlı 2.00 kuponu en fazla ~%50 tutar; üstü matematiksel olarak yok. "
+        f"<b>Pratik kural:</b> kuponu sitende <b>{basabas:.2f}</b> ve üstü toplam orana "
+        "kurabiliyorsan matematik senden yana; altındaysa marjı ödüyorsun. Kâr garantisi yok — "
+        "ölçülen şey olasılığın dürüstlüğü."
     )
 
 
@@ -1015,6 +1061,45 @@ def guven_olasiligi(aday: dict) -> dict:
             "uyumsuz": bool(keskin is not None and keskin < ham - SANS_UYUMSUZ_FARK)}
 
 
+def _guvenli_bacak(aday: dict, g: dict, guven: float, marj: float, kaynak: str) -> dict:
+    """Bacak sözlüğü: p = ölçülmüş güven; modelin ham p'si ve dayanağı yanında."""
+    b = _bacak({**aday, "p": guven}, marj)
+    guven = round(float(guven), 4)
+    model_p = float(aday.get("model_p", aday["p"]))
+    aciklama = f"{kaynak} %{guven*100:.0f} (model %{model_p*100:.0f}"
+    if g.get("keskin") is not None:
+        aciklama += f", keskin piyasa %{g['keskin']*100:.0f}"
+    if g.get("bant_n"):
+        aciklama += ", bant " + f"{g['bant_n']:,}".replace(",", ".") + " maç"
+    aciklama += ")"
+    gerekce = [aciklama] + [x for x in b.get("gerekce", []) if not x.startswith("dikkat: bu pazarın")]
+    if g.get("uyumsuz"):
+        gerekce.append("dikkat: keskin piyasa modelden 10+ puan düşük diyor — "
+                       "ölçümde böyle bacaklar %56 tuttu (model %75 demişti)")
+    b.update({
+        "model_p": model_p,
+        "p": guven,
+        "guven_p": guven,
+        "bant_p": round(float(g.get("bant_p", guven)), 4),
+        "bant_n": int(g.get("bant_n") or 0),
+        "uyumsuz": bool(g.get("uyumsuz")),
+        "guven_kaynak": kaynak,
+        "adil": round(1.0 / max(guven, 1e-6), 2),
+        "ev": (guven * float(b["oran"]) - 1.0) if b.get("oran") else None,
+        "gerekce": gerekce,
+    })
+    return b
+
+
+def hedef_olasiligi(aday: dict) -> tuple[float, dict, str]:
+    """Hedefli kuponun çarptığı olasılık (deney31): keskin piyasa varsa o, yoksa
+    ölçülmüş bant düzeltmesi. Modelin ham p'si tek başına asla çarpılmaz."""
+    g = guven_olasiligi(aday)
+    if g["keskin"] is not None:
+        return float(g["keskin"]), g, "keskin piyasa"
+    return float(g["bant_p"]), g, "ölçülen bant"
+
+
 def en_yuksek_sans(havuz: list[dict], bacak_sayisi: int = 1,
                    esik: float = 0.60, marj: float = MARJ_VARSAYILAN) -> dict | None:
     """Oran hedefi YOK: verilen bacak sayısıyla tutma şansı en yüksek kupon.
@@ -1053,32 +1138,7 @@ def en_yuksek_sans(havuz: list[dict], bacak_sayisi: int = 1,
         oran *= _fiyat(a, marj)
     p = math.prod(g["guven"] for g, _a in secili)
     fiyatsiz = sum(1 for _g, a in secili if not a.get("oran"))
-    bacaklar = []
-    for g, a in secili:
-        b = _bacak(a, marj)
-        guven = round(g["guven"], 4)
-        aciklama = f"ölçülen güven %{guven*100:.0f} (model %{b['p']*100:.0f}"
-        if g["keskin"] is not None:
-            aciklama += f", keskin piyasa %{g['keskin']*100:.0f}"
-        if g["bant_n"]:
-            aciklama += ", bant " + f"{g['bant_n']:,}".replace(",", ".") + " maç"
-        aciklama += ")"
-        gerekce = [aciklama] + [x for x in b.get("gerekce", []) if not x.startswith("dikkat: bu pazarın")]
-        if g["uyumsuz"]:
-            gerekce.append("dikkat: keskin piyasa modelden 10+ puan düşük diyor — "
-                           "ölçümde böyle bacaklar %56 tuttu (model %75 demişti)")
-        b.update({
-            "model_p": b["p"],
-            "p": guven,
-            "guven_p": guven,
-            "bant_p": round(g["bant_p"], 4),
-            "bant_n": g["bant_n"],
-            "uyumsuz": g["uyumsuz"],
-            "adil": round(1.0 / max(guven, 1e-6), 2),
-            "ev": (guven * float(b["oran"]) - 1.0) if b.get("oran") else None,
-            "gerekce": gerekce,
-        })
-        bacaklar.append(b)
+    bacaklar = [_guvenli_bacak(a, g, g["guven"], marj, "ölçülen güven") for g, a in secili]
     return {
         "bacaklar": bacaklar,
         "oran": round(oran, 2),
