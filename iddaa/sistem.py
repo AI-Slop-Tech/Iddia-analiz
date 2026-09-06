@@ -457,9 +457,11 @@ TEMEL_PAZARLAR = {
 YAYGIN_PAZARLAR = TEMEL_PAZARLAR | {
     "ÜST 1.5", "ALT 1.5", "ÜST 3.5", "ALT 3.5",
     "İY 0.5 ÜST", "İY 0.5 ALT", "İY 1.5 ÜST", "İY 1.5 ALT",
-    "İY 1", "İY 0", "İY 2", "İY KG VAR", "İY KG YOK",
-    "2Y GOL VAR", "2Y GOL YOK",
-    "HER İKİ YARI GOL VAR", "HER İKİ YARI GOL YOK",
+    "İY 1", "İY 0", "İY 2",
+    # "2Y GOL VAR/YOK", "HER İKİ YARI GOL", "İY KG" burada DEĞİL (06.09.2026,
+    # kullanıcı bildirimi: "2Y gol var diye bir seçenek yok markette"). Türkiye
+    # bülteninde bu pazarlar ya hiç ya da nadiren açılıyor; sistem önerdiğinde
+    # kullanıcı oynayamıyor. Artık yalnız "Hepsi" kapsamında çıkarlar.
     "HND 0:1 1", "HND 0:1 0", "HND 0:1 2",
     "HND 1:0 1", "HND 1:0 0", "HND 1:0 2",
     "1 ve ÜST 2.5", "1 ve ALT 2.5", "0 ve ÜST 2.5", "0 ve ALT 2.5",
@@ -1239,7 +1241,9 @@ SON_HAFTA_KONTROL = {
     "kazanc": {"kupon": 4, "gecti": 4}, "oran60": {"kupon": 7, "gecti": 4},
     "sans1": {"kupon": 7, "gecti": 5},
 }
-VARSAYILAN_MOD, VARSAYILAN_ESIK = "kazanc", 0.65
+# Varsayılan mod: hedef oran (deney31 ile kalibre edildi; kullanıcının asıl sorusu
+# "2.00'de en yüksek tutma şansı"). Eşik 0.60: 2.00 hedefte ölçülen en iyi hücre.
+VARSAYILAN_MOD, VARSAYILAN_ESIK = "oran", 0.60
 
 # KAPANIŞ ÇİZGİSİ (CLV) — deney26, 8.057 maç:
 #   sistem seçimi (p>=%60, fiyatlı): kapanışı yenme %70.6 · ROI +%1.8 (±1.5)
