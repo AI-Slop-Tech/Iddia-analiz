@@ -1424,6 +1424,46 @@ def uygulama_olustur():
         kolon = "oran_ust25_maks" if secim.startswith("ÜST") else "oran_alt25_maks"
         return _num(r.get(kolon)) or _num(r.get("Max>2.5" if secim.startswith("ÜST") else "Max<2.5"))
 
+    @app.post("/api/oranlar")
+    def oranlar_tablosu():
+        """Oranlar sekmesi: günün maçları için pazar pazar Pinnacle fiyatı ve
+        keskin sınır (marjsız fiyat). iddaa.com sütununu kullanıcı kendisi
+        doldurur — site otomatik çekilmez (kullanım şartları)."""
+        govde = request.get_json(silent=True) or {}
+        tarih = str(govde.get("tarih", ""))
+        try:
+            fik, _kitapcilar = _fikstur()
+        except Exception as hata:  # noqa: BLE001
+            return jsonify({"hata": f"Fikstür alınamadı: {hata}"}), 502
+        try:
+            pin_indeks = veri.pinnacle_indeksi(veri.pinnacle_oranlari())
+        except Exception:  # noqa: BLE001
+            pin_indeks = {}
+        hedef = fik[fik["Tarih"].dt.strftime("%d.%m.%Y") == tarih]
+        simdi = veri.simdi_tr()
+        maclar = []
+        for _idx, r in hedef.iterrows():
+            pin = veri.pinnacle_esle(pin_indeks, r["HomeTeam"], r["AwayTeam"], r["Tarih"]) if pin_indeks else None
+            if not pin:
+                continue
+            adil = pin.get("adil") or {}
+            lig_ad = r.get("LigAdi")
+            if lig_ad is None or pd.isna(lig_ad) or not str(lig_ad).strip():
+                lig_ad = r["Div"]
+            maclar.append({
+                "ev": r["HomeTeam"], "dep": r["AwayTeam"],
+                "saat": r["Tarih"].strftime("%H:%M"),
+                "lig": str(lig_ad),
+                "basladi": bool(r["Tarih"] <= simdi),
+                "pazarlar": pin.get("pazarlar") or {},
+                "sinir": {pz: round(1.0 / p, 2) for pz, p in adil.items() if p and p > 0},
+            })
+        maclar.sort(key=lambda m: (m["basladi"], m["saat"], m["lig"]))
+        return jsonify({"tarih": tarih, "maclar": maclar,
+                        "pazar_sirasi": ["MS1", "MS0", "MS2", "ÜST 2.5", "ALT 2.5", "ÜST 1.5", "ALT 1.5",
+                                         "ÜST 3.5", "ALT 3.5", "İY 1", "İY 0", "İY 2",
+                                         "EV ÜST 1.5", "DEP ÜST 1.5"]})
+
     @app.post("/api/sistem-onerisi")
     def sistem_onerisi():
         """Günün tüm maç ve pazarlarını ölçülmüş karneyle sıralar, kupon kurar.
@@ -1451,6 +1491,16 @@ def uygulama_olustur():
             kapsam = str(govde.get("kapsam", "yaygin"))
             if kapsam not in ("temel", "yaygin", "genis"):
                 kapsam = "yaygin"
+            # Oranlar sekmesinde kullanıcının iddaa.com'dan yazdığı fiyatlar:
+            # {"ev|dep|pazar": oran}. Varsa gerçek Türkiye fiyatı olarak kullanılır.
+            site_oranlari = {}
+            for anahtar, deger in (govde.get("site_oranlari") or {}).items():
+                try:
+                    o = float(deger)
+                except (TypeError, ValueError):
+                    continue
+                if 1.01 <= o <= 1000 and isinstance(anahtar, str):
+                    site_oranlari[anahtar] = o
         except (TypeError, ValueError):
             return jsonify({"hata": "Geçersiz parametre."}), 400
         try:
@@ -1538,11 +1588,13 @@ def uygulama_olustur():
                 elif pazar.startswith("KART"):
                     gerekce.append(f"beklenen sarı kart {kart['toplam']} "
                                    f"(lig ortalaması {kart['lig_ort']})")
-                oran_gercek = en_iyi.get(pazar) or pin_fiyat.get(pazar)
+                site_fiyat = site_oranlari.get(f"{r['HomeTeam']}|{r['AwayTeam']}|{pazar}")
+                oran_gercek = site_fiyat or en_iyi.get(pazar) or pin_fiyat.get(pazar)
                 secenekler.append({
                     "pazar": pazar,
                     "p": float(p),
-                    "oran": oran_gercek,                  # bülten ya da Pinnacle fiyatı
+                    "oran": oran_gercek,                  # iddaa.com (kullanıcı) > bülten > Pinnacle
+                    "oran_kaynak": "iddaa" if site_fiyat else ("piyasa" if oran_gercek else None),
                     "keskin_adil": pin_adil.get(pazar),   # Pinnacle marjsız olasılık
                     "gerekce": gerekce,
                 })

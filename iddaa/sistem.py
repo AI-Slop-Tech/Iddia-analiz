@@ -381,6 +381,7 @@ def _bacak(aday: dict, marj: float = MARJ_VARSAYILAN) -> dict:
         "oran": float(oran) if oran else None,
         # fiyatı bilinmeyen bacakta sitede beklenen fiyat (marj düşülmüş)
         "site_oran": None if oran else round(gercekci_fiyat(p, marj), 2),
+        "oran_kaynak": aday.get("oran_kaynak"),   # "iddaa" = kullanıcının girdiği gerçek fiyat
         # Keskin fiyata göre değer: Pinnacle'ın marjsız olasılığı. Sitedeki oran
         # 1/keskin_adil'in üstündeyse, dünyanın en keskin kitapçısına göre
         # gerçek değer var demektir — perakende bahisçinin en güvenilir kenarı.

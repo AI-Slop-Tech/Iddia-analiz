@@ -67,6 +67,9 @@ def olustur(secimler: list[dict], sistem: str = "kombine", ad: str = "") -> dict
             "pazar": str(s.get("pazar", ""))[:24],
             "oran": oran,
             "kaynak": str(s.get("kaynak", "elle"))[:12],
+            # Sistem Önerisi'nden gelen seçimlerde modelin olasılığı: kullanıcının
+            # kendi sonuçlarını beklentiyle kıyaslayan "sistem karnesi" bunu kullanır.
+            "p": (float(s["p"]) if s.get("p") is not None and 0 < float(s["p"]) < 1 else None),
             "durum": "bekliyor",
             "elle": False,
         })
