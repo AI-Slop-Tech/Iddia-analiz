@@ -776,6 +776,7 @@
     <div class="yan-baslik">Analiz</div>
       <button class="sekme" data-s="sonuc"><svg class="ic"><use href="#i-sonuc"/></svg><span>Sonuçlar</span></button>
       <button class="sekme" data-s="oran"><svg class="ic"><use href="#i-oran"/></svg><span>Oran Analizi</span></button>
+      <button class="sekme" data-s="oranlar"><svg class="ic"><use href="#i-tablo"/></svg><span>Oranlar</span></button>
       <button class="sekme" data-s="takim"><svg class="ic"><use href="#i-hedef"/></svg><span>Takım Analizi</span></button>
       <button class="sekme" data-s="gecmis"><svg class="ic"><use href="#i-gecmis"/></svg><span>Geçmiş Maçlar</span></button>
       <button class="sekme" data-s="btest"><svg class="ic"><use href="#i-backtest"/></svg><span>Backtest</span></button>
@@ -998,6 +999,23 @@
     <div class="not" id="sis-dipnot"></div>
   </section>
 
+  <section id="s-oranlar">
+    <div class="kart">
+      <h2><svg class="ic"><use href="#i-tablo"/></svg> Oranlar</h2>
+      <div class="alt-baslik">Seçili günün maçları, pazar pazar: <b>piyasa</b> (Pinnacle fiyatı) ·
+        <b>sınır</b> (marjsız keskin fiyat) · <b>iddaa.com</b> sütunu — siteden baktığın oranı buraya yaz.
+        Sınırın <b>üstündeki</b> oran yeşil yanar (keskin fiyata göre değer). Girdiğin oranlar bu tarayıcıda
+        kalır ve <b>Sistem Önerisi kuponu onlarla kurulur</b>; siteyi otomatik çekmiyoruz (kullanım şartları).</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <input id="orn-suz" placeholder="takım / lig süz" style="flex:1;min-width:160px" oninput="oranlarCiz()">
+        <label class="ipucu" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="orn-girili" onchange="oranlarCiz()"> yalnız iddaa girdiğim maçlar</label>
+        <button class="mini-btn" onclick="oranlarYukle(true)"><svg class="ic ic-sm"><use href="#i-yenile"/></svg>Yenile</button>
+        <span class="ipucu" id="orn-not"></span>
+      </div>
+    </div>
+    <div id="oranlar-liste"></div>
+  </section>
+
   <section id="s-rolling">
     <div class="kart">
       <h2><svg class="ic"><use href="#i-rolling"/></svg> Rolling Planlayıcı</h2>
@@ -1032,6 +1050,7 @@
   </section>
 
   <section id="s-kupon">
+    <div id="sistem-karne"></div>
     <div class="kart">
       <h2><svg class="ic "><use href="#i-kupon"/></svg>Kupon Defteri</h2>
       <div class="alt-baslik">Günün Taraması ve Sürpriz Radarı'ndan topladığınız seçimleri kombine ya da
@@ -1198,6 +1217,7 @@
     <button class="sekme" data-s="surpriz"><svg class="ic"><use href="#i-radar"/></svg><span>Sürpriz Radarı</span></button>
     <button class="sekme" data-s="sonuc"><svg class="ic"><use href="#i-sonuc"/></svg><span>Sonuçlar & Karne</span></button>
     <button class="sekme" data-s="oran"><svg class="ic"><use href="#i-oran"/></svg><span>Oran Analizi</span></button>
+    <button class="sekme" data-s="oranlar"><svg class="ic"><use href="#i-tablo"/></svg><span>Oranlar</span></button>
     <button class="sekme" data-s="takim"><svg class="ic"><use href="#i-hedef"/></svg><span>Takım Analizi</span></button>
     <button class="sekme" data-s="gecmis"><svg class="ic"><use href="#i-gecmis"/></svg><span>Geçmiş Maçlar</span></button>
     <button class="sekme" data-s="btest"><svg class="ic"><use href="#i-backtest"/></svg><span>Backtest</span></button>
@@ -1461,6 +1481,7 @@ const BOLUM = {
   surpriz: ['Sürpriz Radarı',   'İY/MS çapraz sonuç taraması'],
   sistem:  ['Sistem Önerisi',   'ölçülmüş karneye göre günün en mantıklı kuponu'],
   rolling: ['Rolling',          'kasa zinciri ve adım takibi'],
+  oranlar: ['Oranlar',          'maç maç piyasa fiyatı, keskin sınır ve iddaa.com sütunu'],
   kupon:   ['Kupon Defteri',    'topladığın seçimler ve karneleri'],
   sonuc:   ['Sonuçlar & Karne', 'oynanan maçlar ve tahmin isabeti'],
   oran:    ['Oran Analizi',     'bu oranla açılan maçlar tarihte ne yaptı?'],
@@ -1482,8 +1503,9 @@ function sekmeAc(ad){
   if(daha) daha.classList.toggle('aktif', !ALT_BARDA.includes(ad));
   dahaKapat();
   window.scrollTo({top: 0, behavior: 'instant'});
-  if(ad === 'kupon') kuponSekmesiCiz();
+  if(ad === 'kupon') kuponSekmesiCiz();   // defter + sistem karnesi
   if(ad === 'rolling') rollingYukle();
+  if(ad === 'oranlar') oranlarYukle();
   if(ad === 'sistem'){
     sisModSec(SIS_MOD);
     const n = $('#sis-gun-not');
@@ -2243,7 +2265,7 @@ async function fisKaydet(){
 }
 
 // oran düğmesi: tek dokunuşla fişe ekler, tekrar dokununca çıkarır (aç/kapa)
-function oranSec(id, pazar, oran, ev, dep, saat, lig, tarih){
+function oranSec(id, pazar, oran, ev, dep, saat, lig, tarih, ek){
   const el = (typeof event !== 'undefined' && event) ? event.currentTarget : null;
   const idx = KUPON_TASLAK.findIndex(s => s.ev === ev && s.dep === dep && s.pazar === pazar);
   if(idx >= 0){
@@ -2251,7 +2273,7 @@ function oranSec(id, pazar, oran, ev, dep, saat, lig, tarih){
     bildir(`Fişten çıkarıldı: ${ev} – ${dep} · ${SECIM_AD[pazar] || pazar}`);
   }else{
     kuponaEkle({tarih: tarih || AKTIF_GUN, saat: saat || '', lig: lig || '',
-                ev: ev, dep: dep, pazar: pazar, oran: Number(oran), kaynak: 'oran'});
+                ev: ev, dep: dep, pazar: pazar, oran: Number(oran), kaynak: 'oran', ...(ek || {})});
   }
   if(el && el.classList) el.classList.toggle('secili', fisSeciliMi(ev, dep, pazar));
   fisCiz();
@@ -2396,6 +2418,7 @@ async function kuponSekmesiCiz(){
     const r = await api('/api/kuponlar');
     $('#kupon-liste').innerHTML = (r.kuponlar || []).map(kuponKartHTML).join('')
       || '<div class="kart bos-durum"><p>Kayıtlı kupon yok.</p></div>';
+    sistemKarnesiCiz(r.kuponlar || []);   // kaydet / sil / işaretle sonrası karne de tazelensin
   }catch(h){
     $('#kupon-liste').innerHTML = `<div class="kart"><span class="ev-neg">${esc(h.message)}</span></div>`;
   }
@@ -3741,7 +3764,7 @@ function sisKeskin(el, pKeskin){
 
 function sisBacakHTML(b, i){
   const oranMetin = b.oran
-    ? `@ <b>${b.oran.toFixed(2)}</b> <span class="ipucu">piyasa fiyatı</span>`
+    ? `@ <b>${b.oran.toFixed(2)}</b> <span class="ipucu">${b.oran_kaynak === 'iddaa' ? 'iddaa.com — senin girdiğin' : 'piyasa fiyatı'}</span>`
     : `<b>~${(b.site_oran || b.adil).toFixed(2)}</b>
        <span class="ipucu" title="marjsız adil oran ${b.adil.toFixed(2)}; sitende bunu değil, marj düşülmüş fiyatı görürsün">
          sitede beklenen · adil ${b.adil.toFixed(2)}</span>`;
@@ -3773,10 +3796,12 @@ function sistemCiz(d){
   const k = d.kupon;
   const kuponHTML = k ? `
     <div class="kart">
-      <h2>🎯 Önerilen kupon — sitede beklenen toplam <b>${k.oran.toFixed(2)}</b></h2>
-      <div class="alt-baslik">Fiyatı bilinmeyen bacaklarda oran, <b>%${((d.marj || 0.09)*100).toFixed(0)} marj
+      <h2>🎯 Önerilen kupon — ${k.bacaklar.every(b => b.oran_kaynak === 'iddaa') ? 'iddaa.com oranlarınla toplam' : 'sitede beklenen toplam'} <b>${k.oran.toFixed(2)}</b></h2>
+      <div class="alt-baslik">${k.bacaklar.every(b => b.oran_kaynak === 'iddaa')
+        ? `Bütün bacaklar <b>Oranlar sekmesinde girdiğin iddaa.com fiyatıyla</b> hesaplandı — tahmin değil, sitede göreceğin oran bu.`
+        : `Fiyatı bilinmeyen bacaklarda oran, <b>%${((d.marj || 0.09)*100).toFixed(0)} marj
         düşülerek</b> tahmin edildi — yani sitende göreceğine yakın olsun diye. Marjsız "adil" oranla
-        hesaplasaydık bu kupon olduğundan yüksek görünürdü.</div>
+        hesaplasaydık bu kupon olduğundan yüksek görünürdü. Gerçek fiyatı <b>Oranlar</b> sekmesine yazarsan kupon onunla kurulur.`}</div>
       <div class="capraz-kutu">
         <div class="capraz-satir" style="border-top:0"><span style="flex:1">Kuponun tutma olasılığı (bacakların çarpımı)</span>
           <b class="${k.p >= 0.5 ? 'ev-poz' : ''}">%${(k.p*100).toFixed(1)}</b>
@@ -3915,7 +3940,8 @@ async function sistemTara(){
       kapsam: $('#sis-kapsam').value,
       marj: (+$('#sis-marj').value) / 100,
       oncelik: SIS_MOD,
-      sans_bacak: +$('#sis-sans-bacak').value
+      sans_bacak: +$('#sis-sans-bacak').value,
+      site_oranlari: iddaaOranlari(AKTIF_GUN)
     });
     SISTEM_SON = d;
     sistemCiz(d);
@@ -3929,7 +3955,8 @@ function sistemKupona(){
   let n = 0;
   for(const b of SISTEM_SON.kupon.bacaklar){
     if(b.mac_id === null || b.mac_id === undefined) continue;
-    oranSec(b.mac_id, b.pazar, b.oran || b.adil, b.ev_ad, b.dep_ad, b.saat || '', b.lig || '', SISTEM_SON.tarih);
+    oranSec(b.mac_id, b.pazar, b.oran || b.site_oran || b.adil, b.ev_ad, b.dep_ad, b.saat || '', b.lig || '',
+            SISTEM_SON.tarih, {kaynak: 'sistem', p: b.p});
     n++;
   }
   bildir(n ? `${n} seçim fişe eklendi.` : 'Fişe eklenebilecek seçim yok.', !n);
@@ -3952,6 +3979,103 @@ async function sistemRollinge(){
     bildir(`📈 ${bacaklar.length} bacaklı sistem kuponu Rolling'e adım olarak yazıldı.`);
     ROLLING_PLANLAR = [];
   }catch(h){ bildir(h.message, true); }
+}
+
+
+// ───────────────────────────── Oranlar sekmesi (iddaa.com sütunu kullanıcıdan)
+const IDDAA_DEPO = 'iddaa_oranlari_v1';
+let ORANLAR_SON = null;
+function iddaaDepoOku(){ try{ return JSON.parse(localStorage.getItem(IDDAA_DEPO) || '{}') || {}; }catch(e){ return {}; } }
+function iddaaDepoYaz(d){ try{ localStorage.setItem(IDDAA_DEPO, JSON.stringify(d)); }catch(e){} }
+function iddaaOranlari(tarih){
+  // Sistem Önerisi'ne gönderilecek biçim: {"ev|dep|pazar": oran} — yalnız o günün kayıtları
+  const d = iddaaDepoOku(), on = (tarih || '') + '|', cikti = {};
+  for(const [k, v] of Object.entries(d)) if(k.startsWith(on) && v > 1) cikti[k.slice(on.length)] = v;
+  return cikti;
+}
+function iddaaOranYaz(el){
+  // anahtar ve sınır data-* üzerinde: takım adlarındaki tırnak/kesme HTML özniteliğini bozmasın
+  const d = iddaaDepoOku(), anahtar = el.dataset.k || '', sinir = +el.dataset.sinir || 0, tarih = anahtar.split('|')[0];
+  const v = +el.value;
+  if(v > 1) d[anahtar] = v; else delete d[anahtar];
+  iddaaDepoYaz(d);
+  el.style.borderColor = v > 1 ? (sinir && v > sinir ? '#22c55e' : (sinir && v < sinir ? '#ef4444' : '')) : '';
+  const n = $('#orn-not'); if(n) n.textContent = `${Object.keys(iddaaOranlari(tarih)).length} oran girildi — Sistem Önerisi bunları kullanır`;
+}
+async function oranlarYukle(yenile){
+  const kutu = $('#oranlar-liste'); if(!kutu) return;
+  if(!AKTIF_GUN){ kutu.innerHTML = '<div class="kart bos-durum"><p>Önce Bülten sekmesinden bir gün seç.</p></div>'; return; }
+  if(!yenile && ORANLAR_SON && ORANLAR_SON.tarih === AKTIF_GUN){ oranlarCiz(); return; }
+  kutu.innerHTML = '<div class="kart bos-durum"><p>Piyasa fiyatları yükleniyor…</p></div>';
+  try{ ORANLAR_SON = await api('/api/oranlar', {tarih: AKTIF_GUN}); oranlarCiz(); }
+  catch(h){ kutu.innerHTML = `<div class="kart bos-durum"><p>${esc(h.message)}</p></div>`; }
+}
+function oranlarCiz(){
+  const kutu = $('#oranlar-liste'); if(!kutu || !ORANLAR_SON) return;
+  const d = ORANLAR_SON, depo = iddaaDepoOku();
+  const suz = ($('#orn-suz') ? $('#orn-suz').value : '').trim().toLowerCase();
+  const yalnizGirili = $('#orn-girili') && $('#orn-girili').checked;
+  const pazarlar = d.pazar_sirasi || [];
+  const satirlar = d.maclar.filter(m => {
+    if(suz && !(`${m.ev} ${m.dep} ${m.lig}`.toLowerCase().includes(suz))) return false;
+    if(yalnizGirili && !pazarlar.some(pz => depo[`${d.tarih}|${m.ev}|${m.dep}|${pz}`] > 1)) return false;
+    return true;
+  });
+  const n = $('#orn-not'); if(n) n.textContent = `${d.maclar.length} maçta Pinnacle fiyatı · ${Object.keys(iddaaOranlari(d.tarih)).length} iddaa oranı girildi`;
+  if(!satirlar.length){ kutu.innerHTML = '<div class="kart bos-durum"><p>Bu günde Pinnacle fiyatı olan maç yok.</p></div>'; return; }
+  kutu.innerHTML = `<div class="kart" style="margin-top:10px"><div style="overflow-x:auto">
+    <table class="roll-tablo"><thead><tr><th style="min-width:200px">maç</th>${pazarlar.map(pz => `<th>${esc(pz)}</th>`).join('')}</tr></thead>
+    <tbody>${satirlar.map(m => `<tr${m.basladi ? ' style="opacity:.55"' : ''}>
+      <td><b>${esc(m.ev)} – ${esc(m.dep)}</b><div class="ipucu">${esc(m.saat)} · ${esc(m.lig)}${m.basladi ? ' · başladı' : ''}</div></td>
+      ${pazarlar.map(pz => {
+        const piyasa = m.pazarlar[pz], sinir = m.sinir[pz];
+        if(!piyasa) return '<td class="ipucu">—</td>';
+        const anahtar = `${d.tarih}|${m.ev}|${m.dep}|${pz}`, girili = depo[anahtar];
+        const renk = girili > 1 ? (sinir && girili > sinir ? '#22c55e' : (sinir && girili < sinir ? '#ef4444' : '')) : '';
+        return `<td style="white-space:nowrap"><div>${piyasa.toFixed(2)} <span class="ipucu" title="marjsız keskin fiyat">sınır ${sinir ? sinir.toFixed(2) : '—'}</span></div>
+          <input type="number" step="0.01" min="1.01" placeholder="iddaa" value="${girili > 1 ? girili : ''}"
+            style="width:70px;padding:2px 4px;margin-top:2px;border-color:${renk}"
+            data-k="${esc(anahtar)}" data-sinir="${sinir || 0}" oninput="iddaaOranYaz(this)"></td>`;
+      }).join('')}
+    </tr>`).join('')}</tbody></table></div>
+    <div class="ipucu" style="margin-top:6px">Yeşil = iddaa oranı keskin sınırın üstünde (değer var) · kırmızı = altında (marjı ödüyorsun). Girdiklerin bu tarayıcıda saklanır.</div>
+  </div>`;
+}
+
+// ───────────────────────────── Sistem karnesi: senin sonuçların vs beklenti
+function normalCdf(z){ const t = 1/(1+0.2316419*Math.abs(z)); const dd = 0.3989423*Math.exp(-z*z/2);
+  const p = dd*t*(0.3193815+t*(-0.3565638+t*(1.781478+t*(-1.821256+t*1.330274)))); return z >= 0 ? 1-p : p; }
+async function sistemKarnesiCiz(liste){
+  const kutu = $('#sistem-karne'); if(!kutu) return;
+  let kuponlar = Array.isArray(liste) ? liste : [];
+  if(!Array.isArray(liste)){
+    try{ const r = await api('/api/kuponlar'); kuponlar = r.kuponlar || []; }catch(h){ kutu.innerHTML = ''; return; }
+  }
+  const bacaklar = [];
+  for(const k of kuponlar) for(const s of (k.secimler || [])) if(s.kaynak === 'sistem' && typeof s.p === 'number') bacaklar.push(s);
+  const sonuclu = bacaklar.filter(s => s.durum === 'tuttu' || s.durum === 'yatti');
+  if(!bacaklar.length){ kutu.innerHTML = ''; return; }
+  const tutan = sonuclu.filter(s => s.durum === 'tuttu').length;
+  const beklenen = sonuclu.reduce((a, s) => a + s.p, 0);
+  const ortP = bacaklar.reduce((a, s) => a + s.p, 0) / bacaklar.length;   // bekleyenler dahil: sistem ne demişti
+  const sd = Math.sqrt(sonuclu.reduce((a, s) => a + s.p*(1-s.p), 0)) || 1;
+  const z = (tutan - beklenen) / sd, kotuIhtimal = normalCdf(z);
+  const yorum = sonuclu.length < 20 ? `Henüz ${sonuclu.length} sonuçlu seçim — yargı için en az 20-30 gerekir.`
+    : (kotuIhtimal < 0.05 ? 'Beklenenin belirgin altında: sistem bu seçimlerde iddia ettiğini tutturamıyor.'
+      : (kotuIhtimal > 0.95 ? 'Beklenenin belirgin üstünde — şans payı yüksek olabilir, abartma.'
+        : 'Beklenti bandının içinde: kötü seri, sistemin bozuk olduğunu göstermiyor.'));
+  const seriSatir = sonuclu.length
+    ? `<div class="capraz-satir"><span style="flex:1">Bu kadar ${z < 0 ? 'kötü' : 'iyi'} gitmesi</span><b>%${((z < 0 ? kotuIhtimal : 1 - kotuIhtimal)*100).toFixed(0)} ihtimalle normal</b><span class="ipucu">${yorum}</span></div>`
+    : `<div class="capraz-satir"><span style="flex:1">Seri yorumu</span><span class="ipucu">${yorum} Maçlar bitince sonuçlar arşivden otomatik işlenir.</span></div>`;
+  kutu.innerHTML = `<div class="kart">
+    <h2>📊 Sistem karnesi — senin seçimlerin vs beklenti</h2>
+    <div class="capraz-kutu">
+      <div class="capraz-satir" style="border-top:0"><span style="flex:1">Sistem Önerisi'nden fişe attığın seçim</span><b>${bacaklar.length}</b><span class="ipucu">${sonuclu.length} tanesi sonuçlandı, ${bacaklar.length - sonuclu.length} bekliyor · sistem bunlara ortalama %${(ortP*100).toFixed(0)} demişti</span></div>
+      <div class="capraz-satir"><span style="flex:1">Tutan / sistemin beklediği</span><b>${tutan} / ${beklenen.toFixed(1)}</b><span class="ipucu">${sonuclu.length ? `sonuçlanan ${sonuclu.length} seçimde` : 'henüz sonuçlanan yok'}</span></div>
+      ${seriSatir}
+    </div>
+    <div class="ipucu" style="margin-top:6px">"Tutan" beklenenin altında kalıyorsa ve bu %5'in altında bir ihtimalse sistem o pazarlarda fazla iddialı demektir; band karnesi (Sistem Önerisi'ndeki ⚠ rozetleri) hangi pazarların abarttığını gösterir.</div>
+  </div>`;
 }
 
 const ROLL_PAZARLAR = ['MS1','MS0','MS2','ÜST 2.5','ALT 2.5','KG VAR','KG YOK','ÇŞ 1X','ÇŞ 12','ÇŞ X2'];
