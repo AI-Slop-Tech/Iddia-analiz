@@ -220,17 +220,18 @@ def istek(url: str, *, oturum: requests.Session | None = None, yontem: str = "ge
     raise son_hata if son_hata else requests.RequestException("istek başarısız")
 
 
-def _istek(oturum: requests.Session, url: str, zaman_asimi: int):
+def _istek(oturum: requests.Session, url: str, zaman_asimi: int, basliklar: dict | None = None):
     """football-data.co.uk isteği (CSV bekler)."""
-    return istek(url, oturum=oturum, zaman_asimi=zaman_asimi)
+    return istek(url, oturum=oturum, zaman_asimi=zaman_asimi, headers=basliklar or {})
 
 
-def _getir(oturum: requests.Session, url: str, zaman_asimi: int = ZAMAN_ASIMI):
+def _getir(oturum: requests.Session, url: str, zaman_asimi: int = ZAMAN_ASIMI,
+           basliklar: dict | None = None):
     """Geçici hatalarda üstel bekleyerek tekrar dener; ulaşılamazsa ErisimHatasi."""
     son_hata: Exception | None = None
     for deneme in range(DENEME_SAYISI):
         try:
-            yanit = _istek(oturum, url, zaman_asimi)
+            yanit = _istek(oturum, url, zaman_asimi, basliklar)
             if yanit.status_code >= 500:  # sunucu/vekil geçici arızası
                 raise requests.HTTPError(f"HTTP {yanit.status_code}")
             return yanit
@@ -493,6 +494,60 @@ def sezon_kodlari(sezon_sayisi: int) -> list[str]:
     return [f"{y % 100:02d}{(y + 1) % 100:02d}" for y in range(bas, bas - sezon_sayisi, -1)]
 
 
+# ── ARTIMLI GÜNCELLEME: değişmeyen dosya yeniden indirilmez ─────────────────
+# Kullanıcı bildirimi (06.09.2026): "sürekli sıfırdan indiriyor". Eski sezonlar
+# zaten önbellekteydi ama güncel sezonun 38 lig dosyası + ek lig dosyaları her
+# güncellemede koşulsuz iniyordu. Artık her dosyanın ETag / Last-Modified
+# etiketi saklanır ve kaynağa "değiştiyse ver" (If-None-Match /
+# If-Modified-Since) diye sorulur; 304 dönerse diskteki kopya kalır. Kaynak
+# statik CSV sunar, koşullu isteği destekler. Etiket yoksa/desteklenmezse
+# davranış eskisi gibi (tam indirme) — hiçbir şey kaybolmaz.
+ETIKET_DOSYASI = os.path.join(VERI_KLASORU, "indirme_etiketleri.json")
+
+
+def _etiketleri_oku() -> dict:
+    try:
+        with open(ETIKET_DOSYASI, encoding="utf-8") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _etiketleri_yaz(etiketler: dict) -> None:
+    try:
+        gecici = ETIKET_DOSYASI + ".tmp"
+        with open(gecici, "w", encoding="utf-8") as f:
+            json.dump(etiketler, f, ensure_ascii=False)
+        os.replace(gecici, ETIKET_DOSYASI)
+    except OSError:
+        pass
+
+
+def _kosullu_getir(oturum, url: str, hedef: str, etiketler: dict):
+    """Diskte kopyası olan dosya için koşullu GET.
+
+    Dönen: (yanıt | None, değişmedi). 304 → (None, True): diskteki kopya güncel.
+    """
+    basliklar = {}
+    e = etiketler.get(os.path.basename(hedef)) or {}
+    if os.path.exists(hedef):
+        if e.get("etag"):
+            basliklar["If-None-Match"] = e["etag"]
+        if e.get("last_modified"):
+            basliklar["If-Modified-Since"] = e["last_modified"]
+    yanit = _getir(oturum, url, basliklar=basliklar or None)
+    if yanit.status_code == 304 and os.path.exists(hedef):
+        return None, True
+    return yanit, False
+
+
+def _etiket_kaydet(etiketler: dict, hedef: str, yanit) -> None:
+    etag, lm = yanit.headers.get("ETag"), yanit.headers.get("Last-Modified")
+    if etag or lm:
+        etiketler[os.path.basename(hedef)] = {"etag": etag, "last_modified": lm, "zaman": time.time()}
+
+
 def indir(ligler: list[str] | None = None, sezon_sayisi: int = 33, yenile: bool = False) -> dict:
     """Seçilen liglerin sezon CSV'lerini indirir ve data/ altında önbelleğe alır.
 
@@ -510,8 +565,9 @@ def indir(ligler: list[str] | None = None, sezon_sayisi: int = 33, yenile: bool 
     kodlar = sezon_kodlari(sezon_sayisi)
     guncel_kod = kodlar[0]
 
-    ozet = {"indirilen": 0, "onbellek": 0, "hata": []}
+    ozet = {"indirilen": 0, "onbellek": 0, "degismedi": 0, "hata": []}
     oturum = _oturum()
+    etiketler = {} if yenile else _etiketleri_oku()
 
     for lig in ligler:
         if lig in EK_LIGLER:
@@ -530,7 +586,10 @@ def indir(ligler: list[str] | None = None, sezon_sayisi: int = 33, yenile: bool 
             try:
                 # Ağ seviyesinde erişim yoksa 242 dosyayı tek tek denemenin
                 # anlamı yok; ErisimHatasi yakalanmadan yukarı fırlatılır.
-                yanit = _getir(oturum, url)
+                yanit, degismedi = _kosullu_getir(oturum, url, hedef, etiketler)
+                if degismedi:
+                    ozet["degismedi"] += 1
+                    continue
                 if yanit.status_code != 200 or b"Div" not in yanit.content[:200]:
                     raise ValueError(f"HTTP {yanit.status_code}")
                 satirlar = yanit.content.splitlines()
@@ -540,6 +599,7 @@ def indir(ligler: list[str] | None = None, sezon_sayisi: int = 33, yenile: bool 
                     raise ValueError("sezon henüz yayınlanmamış")
                 with open(hedef, "wb") as f:
                     f.write(yanit.content)
+                _etiket_kaydet(etiketler, hedef, yanit)
                 ozet["indirilen"] += 1
                 print(f"  ✓ {lig} {sezon[:2]}/{sezon[2:]} sezonu indirildi")
             except ErisimHatasi as h:
@@ -579,11 +639,15 @@ def indir(ligler: list[str] | None = None, sezon_sayisi: int = 33, yenile: bool 
             continue
         hedef = os.path.join(VERI_KLASORU, f"EK_{lig}.csv")
         try:
-            yanit = _getir(oturum, kaynak_taban() + f"/new/{lig}.csv")
+            yanit, degismedi = _kosullu_getir(oturum, kaynak_taban() + f"/new/{lig}.csv", hedef, etiketler)
+            if degismedi:
+                ozet["degismedi"] += 1
+                continue
             if yanit.status_code != 200 or b"Country" not in yanit.content[:200]:
                 raise ValueError(f"HTTP {yanit.status_code}")
             with open(hedef, "wb") as f:
                 f.write(yanit.content)
+            _etiket_kaydet(etiketler, hedef, yanit)
             ozet["indirilen"] += 1
             print(f"  ✓ {LIGLER[lig]} arşivi indirildi")
         except ErisimHatasi as h:
@@ -592,6 +656,9 @@ def indir(ligler: list[str] | None = None, sezon_sayisi: int = 33, yenile: bool 
         except Exception as h:  # noqa: BLE001
             ozet["hata"].append(f"{lig}: {h}")
             print(f"  ✗ {LIGLER[lig]} indirilemedi ({h})")
+    _etiketleri_yaz(etiketler)
+    if ozet["degismedi"]:
+        print(f"  = {ozet['degismedi']} dosya kaynakta değişmemiş, yeniden indirilmedi")
     return ozet
 
 

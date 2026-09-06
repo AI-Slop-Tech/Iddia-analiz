@@ -506,7 +506,8 @@ def uygulama_olustur():
             _df(zorla=True)
         except FileNotFoundError:
             return jsonify({"hata": "Veri indirilemedi, internet bağlantısını kontrol edin."}), 502
-        return jsonify({"indirilen": ozet["indirilen"], "onbellek": ozet["onbellek"], "hata_sayisi": len(ozet["hata"])})
+        return jsonify({"indirilen": ozet["indirilen"], "onbellek": ozet["onbellek"],
+                        "degismedi": ozet.get("degismedi", 0), "hata_sayisi": len(ozet["hata"])})
 
     @app.get("/api/takimlar")
     def takimlar():

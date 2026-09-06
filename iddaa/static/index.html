@@ -957,8 +957,8 @@
         her seçimi <b>ölçülmüş karnesiyle</b> sıralar ve hedef orana ulaşan kuponu kurar.
         Sıralama ölçüme dayanır: aşağıdaki "pazar karnesi" 10.000 maçlık eğitim/test ayrımından çıktı.</div>
       <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
-        <button class="mini-btn" id="sis-mod-oran" onclick="sisModSec('oran')">🎯 Hedef orana ulaş</button>
-        <button class="mini-btn" id="sis-mod-sans" onclick="sisModSec('sans')">🛡 En yüksek tutma şansı</button>
+        <button class="mini-btn" id="sis-mod-oran" onclick="sisModSec('oran')">🎯 Hedef oranda en yüksek tutma şansı</button>
+        <button class="mini-btn" id="sis-mod-sans" onclick="sisModSec('sans')">🛡 Hedefsiz — en garanti (düşük oran)</button>
         <button class="mini-btn" id="sis-mod-kazanc" onclick="sisModSec('kazanc')">💰 2x kâr bölgesi</button>
         <span class="ipucu" id="sis-mod-not" style="align-self:center"></span>
       </div>
@@ -1594,26 +1594,31 @@ function ligAramaEkleri(ad){
   return ek;
 }
 let GEMINI_VAR = false, GEMINI_BAGLAMLAR = {}, GEMINI_SAYAC = 0;
+let VERI_YOKTU = false;   // ilk kurulum: veri hiç yokken açıldıysa indirme sonrası tam yeniden kurulum gerekir
+function durumChipleriYaz(d){
+  const durum = (ad, deger) => `<div class="durum-satir"><span>${ad}</span><b>${deger}</b></div>`;
+  $('#durum-chipler').innerHTML =
+    durum('Arşiv', d.ilk_tarih.slice(-4) + '–' + d.son_tarih.slice(-4)) +
+    durum('Oran kapsamı', pct1(d.oran_kapsami)) +
+    durum('<span class="canli-nokta"></span> Veri', esc(String(d.veri_zamani || '—').split(' ')[0]));
+  $('#surum-rozet').textContent = 'v' + d.surum + ' · ' + d.toplam_mac.toLocaleString('tr-TR') + ' maç';
+  $('#surum-notu').textContent =
+    `İddaa Analiz v${d.surum} · veri yüklemesi: ${d.veri_zamani} · fikstür ve arşiv otomatik tazelenir` +
+    (GEMINI_VAR ? ' · Gemini bağlı' : '') + (d.dis_kapsam ? ' · geniş kapsam' : '');
+}
 async function baslat(){
   try{
     const d = await api('/api/durum');
     if(d.veri_yok){
+      VERI_YOKTU = true;
       $('#durum-chipler').innerHTML = '<div class="durum-satir"><span>Arşiv</span><b>veri yok</b></div>';
       $('#s-hafta').insertAdjacentHTML('afterbegin', `<div class="kart bos-durum"><div class="dev">${ik('paket','ic-xl')}</div>
         <p>Henüz maç verisi indirilmemiş. Tek tıkla son 10 yılın skor + oran arşivini indirin (~1 dk).</p>
         <button class="btn" onclick="veriGuncelle()">${iks('yenile')}Veriyi İndir</button></div>`);
       return;
     }
-    const durum = (ad, deger) => `<div class="durum-satir"><span>${ad}</span><b>${deger}</b></div>`;
-    $('#durum-chipler').innerHTML =
-      durum('Arşiv', d.ilk_tarih.slice(-4) + '–' + d.son_tarih.slice(-4)) +
-      durum('Oran kapsamı', pct1(d.oran_kapsami)) +
-      durum('<span class="canli-nokta"></span> Veri', esc(String(d.veri_zamani || '—').split(' ')[0]));
     GEMINI_VAR = !!d.gemini;
-    $('#surum-rozet').textContent = 'v' + d.surum + ' · ' + d.toplam_mac.toLocaleString('tr-TR') + ' maç';
-    $('#surum-notu').textContent =
-      `İddaa Analiz v${d.surum} · veri yüklemesi: ${d.veri_zamani} · fikstür ve arşiv otomatik tazelenir` +
-      (GEMINI_VAR ? ' · Gemini bağlı' : '') + (d.dis_kapsam ? ' · geniş kapsam' : '');
+    durumChipleriYaz(d);
     d.ligler.forEach(l => { LIG_AD[l.kod] = l.ad; });
     d.ligler.forEach(l => {
       $('#g-lig').insertAdjacentHTML('beforeend', `<option value="${esc(l.kod)}">${esc(l.ad)}</option>`);
@@ -1675,9 +1680,16 @@ async function veriGuncelle(){
   btnMesgul(b, 'İndiriliyor… (~1 dk)');
   try{
     const s = await api('/api/guncelle', {});
-    bildir(`Veri hazır: ${s.indirilen} dosya indirildi, ${s.onbellek} önbellekten.`);
-    location.reload();
-  }catch(h){ bildir(h.message, true); btnHazir(b, 'yenile', 'Veriyi Güncelle'); }
+    if(VERI_YOKTU){ location.reload(); return; }   // ilk kurulum: liste/seçiciler sıfırdan kurulsun
+    // Sayfa YENİLENMEZ. Eskiden indirme bitince location.reload() yapılıyordu:
+    // kullanıcı o sırada başka sekmede analiz yapıyorsa her şey silinip boş
+    // bültene düşüyordu (bildirim 06.09.2026). Artık bülten sessizce tazelenir,
+    // seçili sekme ve açık paneller korunur.
+    bildir(`Veri hazır: ${s.indirilen} dosya değişmişti ve indirildi${s.degismedi ? `, ${s.degismedi} dosya kaynakta değişmemiş (atlandı)` : ''}, ${s.onbellek} önbellekten. Sekmen ve açık analizlerin korundu.`);
+    try{ const d = await api('/api/durum'); if(!d.veri_yok) durumChipleriYaz(d); }catch(_e){}
+    try{ await haftaYukle(true, true); }catch(_e){}
+  }catch(h){ bildir(h.message, true); }
+  btnHazir(b, 'yenile', 'Veriyi Güncelle');
 }
 
 /* ---------- BU HAFTA ---------- */
@@ -3825,8 +3837,7 @@ function sistemCiz(d){
             ${d.strateji.tam_eslesme ? '' : `<span class="ipucu">(en yakın ölçülen ayar: hedef ${d.strateji.hedef.toFixed(2)} · eşik %${(d.strateji.esik*100).toFixed(0)})</span>`}</span>
           <b class="${d.strateji.gercek >= d.strateji.dedi ? 'ev-poz' : 'ev-neg'}">%${(d.strateji.gercek*100).toFixed(1)} tuttu</b>
           <span class="ipucu">sistem %${(d.strateji.dedi*100).toFixed(1)} demişti —
-            ${Math.abs(d.strateji.gercek - d.strateji.dedi) <= 0.02
-              ? 'söylediği olasılık doğru çıkmış' : 'sapma var, ayarı değiştir'}</span></div>
+            ${d.strateji.gercek - d.strateji.dedi >= -0.02 ? (d.strateji.gercek - d.strateji.dedi > 0.02 ? 'söylediğinden de iyi tuttu' : 'söylediği olasılık doğru çıkmış') : 'söylediğinden az tuttu — eşiği değiştir'}</span></div>
         ${d.strateji && d.strateji.roi !== undefined ? `<div class="capraz-satir">
           <span style="flex:1">Ölçülen <b>getiri</b> (aynı kurallarla ${tl(d.strateji.n)} kupon)</span>
           <b class="${d.strateji.roi > d.strateji.hata ? 'ev-poz' : ''}">%${(d.strateji.roi*100).toFixed(1)}</b>
@@ -3912,7 +3923,7 @@ function sistemCiz(d){
   canliGuncelle();
 }
 
-let SIS_MOD = 'kazanc';   // ölçümde en iyi 2x yolu (305 gün + son hafta kontrolü)
+let SIS_MOD = 'oran';     // varsayılan: hedef oranda en yüksek tutma şansı (deney31 ile kalibre)
 let SIS_ESIK_MOD = '';    // eşik varsayılanı hangi mod için yazıldı
 function sisModSec(mod){
   SIS_MOD = mod;
@@ -3938,7 +3949,7 @@ function sisModSec(mod){
   if(esik && SIS_ESIK_MOD !== mod){ esik.value = mod === 'oran' ? 60 : 65; SIS_ESIK_MOD = mod; }
   const not = $('#sis-mod-not');
   const metin = {
-    sans: 'Oran hedefi yok. Sıralama modelin dediğine değil <b>ölçülen</b> tutmaya göre: pazar bandının ölçülmüş sapması + keskin piyasa (Pinnacle marjsız) olasılığı. Ölçümde 1/2/3 bacak <b>%93 / %83 / %75</b> tuttu (eski sıralama %82 / %65 / %53). Tutturur, kazandırmaz: fiyatlar 1.06–1.19.',
+    sans: '<b>Oran hedefi YOK</b> — bu mod 1.05–1.20 arası fiyatlı en garanti seçimleri getirir; 2.00 gibi bir hedef istiyorsan 🎯 modunu kullan. Sıralama modelin dediğine değil <b>ölçülen</b> tutmaya göre: pazar bandının ölçülmüş sapması + keskin piyasa (Pinnacle marjsız) olasılığı. Ölçümde 1/2/3 bacak <b>%93 / %83 / %75</b> tuttu (eski sıralama %82 / %65 / %53). Tutturur, kazandırmaz: fiyatlar 1.06–1.19.',
     kazanc: 'Yalnız ölçümde kârlı çıkan 1.20–1.60 bandından, <b>gerçek fiyatlı</b> bacaklarla kurar. Bazı günler kupon çıkmaz.',
     oran: 'Sen hedef toplam oranı yaz, maçları ve bacak sayısını (en fazla 4) sistem seçer: hedefi tutturan, <b>ölçülen tutma şansı en yüksek</b> kombinasyon. Çarpılan olasılık modelin değil, <b>keskin piyasanın</b> (Pinnacle marjsız) — yoksa ölçülmüş bant. Ölçümde 2.00 hedefte %48.5 tuttu, %45.5 demişti (eski yöntem %75.8 deyip %37.1 tutuyordu). Adil fiyatlı 2.00 kuponunun tavanı ~%50; üstü matematiksel olarak yok.'
   };
