@@ -1630,6 +1630,7 @@ async function baslat(){
     ligSecicileriKur();
     sonuclarYukle(true);
     haftaYukle(false);
+    api('/api/guncelle-durum').then(d => { if(d.calisiyor){ btnMesgul($('#btn-guncelle'), 'Güncelleme sürüyor…'); guncellemeIzle($('#btn-guncelle')); } }).catch(() => {});
     TAKIMLAR = await api('/api/takimlar');
     takimSecicileriKur();
   }catch(h){ bildir(h.message, true); }
@@ -1677,19 +1678,41 @@ async function teshisAc(){
 
 async function veriGuncelle(){
   const b = $('#btn-guncelle');
-  btnMesgul(b, 'İndiriliyor… (~1 dk)');
+  btnMesgul(b, 'Başlatılıyor…');
   try{
     const s = await api('/api/guncelle', {});
-    if(VERI_YOKTU){ location.reload(); return; }   // ilk kurulum: liste/seçiciler sıfırdan kurulsun
-    // Sayfa YENİLENMEZ. Eskiden indirme bitince location.reload() yapılıyordu:
-    // kullanıcı o sırada başka sekmede analiz yapıyorsa her şey silinip boş
-    // bültene düşüyordu (bildirim 06.09.2026). Artık bülten sessizce tazelenir,
-    // seçili sekme ve açık paneller korunur.
-    bildir(`Veri hazır: ${s.indirilen} dosya değişmişti ve indirildi${s.degismedi ? `, ${s.degismedi} dosya kaynakta değişmemiş (atlandı)` : ''}, ${s.onbellek} önbellekten. Sekmen ve açık analizlerin korundu.`);
-    try{ const d = await api('/api/durum'); if(!d.veri_yok) durumChipleriYaz(d); }catch(_e){}
-    try{ await haftaYukle(true, true); }catch(_e){}
-  }catch(h){ bildir(h.message, true); }
-  btnHazir(b, 'yenile', 'Veriyi Güncelle');
+    if(!s.basladi && !s.calisiyor) throw new Error(s.hata || 'Güncelleme başlatılamadı.');
+    if(!s.basladi) bildir('Güncelleme zaten sürüyor (başka sekmeden başlatılmış) — ilerlemesi izleniyor.');
+    await guncellemeIzle(b);
+  }catch(h){ bildir(h.message, true); btnHazir(b, 'yenile', 'Veriyi Güncelle'); }
+}
+let GUNCELLEME_IZLENIYOR = false;
+async function guncellemeIzle(b){
+  // İş sunucuda ARKA PLANDA sürer; burada yalnız 3 sn'de bir durumu sorulur. Sayfa
+  // YENİLENMEZ: eskiden indirme bitince location.reload() kullanıcıyı boş bültene
+  // düşürüyordu (bildirim 06.09.2026). Bülten sessizce tazelenir, açık paneller kalır.
+  if(GUNCELLEME_IZLENIYOR) return;
+  GUNCELLEME_IZLENIYOR = true;
+  try{
+    for(let i = 0; i < 600; i++){
+      let d = {};
+      try{ d = await api('/api/guncelle-durum'); }catch(_e){}
+      if(d.calisiyor){
+        btnMesgul(b, `${d.asama || 'güncelleniyor'}… ${d.sure || 0} sn`);
+        await new Promise(r => setTimeout(r, 3000));
+        continue;
+      }
+      btnHazir(b, 'yenile', 'Veriyi Güncelle');
+      if(d.hata){ bildir(d.hata, true); return; }
+      if(VERI_YOKTU){ location.reload(); return; }   // ilk kurulum: liste/seçiciler sıfırdan kurulsun
+      const s = d.ozet || {};
+      bildir(`Veri hazır (${d.sure || 0} sn): ${s.indirilen || 0} dosya değişmişti ve indirildi${s.degismedi ? `, ${s.degismedi} dosya kaynakta değişmemiş (atlandı)` : ''}, ${s.onbellek || 0} önbellekten. Sekmen ve açık analizlerin korundu.`);
+      try{ const dd = await api('/api/durum'); if(!dd.veri_yok) durumChipleriYaz(dd); }catch(_e){}
+      try{ await haftaYukle(false, true); }catch(_e){}
+      return;
+    }
+    btnHazir(b, 'yenile', 'Veriyi Güncelle');
+  }finally{ GUNCELLEME_IZLENIYOR = false; }
 }
 
 /* ---------- BU HAFTA ---------- */
@@ -1730,11 +1753,36 @@ function ligSeciciyiTazele(){
   aramaliSelectTazele(sec);
 }
 
-async function haftaYukle(yenile, sessiz){
-  if(!sessiz)
-    $('#hafta-liste').innerHTML = '<div class="iskelet"></div>'.repeat(6);
+let HAFTA_BEKLE_SAYAC = null;
+async function apiZamanli(yol, ms){
+  // bülten isteği sonsuza kadar askıda kalmasın: 5 dk sonra hata + "Tekrar Dene"
+  const ac = new AbortController(); const t = setTimeout(() => ac.abort(), ms);
   try{
-    HAFTA = await api('/api/bulten' + (yenile ? '?yenile=1' : ''));
+    const y = await fetch(yol, {signal: ac.signal});
+    const j = await y.json().catch(() => ({}));
+    if(!y.ok) throw new Error(j.hata || ('Sunucu hatası (' + y.status + ')'));
+    return j;
+  }catch(h){
+    if(h.name === 'AbortError') throw new Error('Sunucu 5 dakikada yanıt vermedi — bülten kurulumu takılmış olabilir.');
+    throw h;
+  }finally{ clearTimeout(t); }
+}
+async function haftaYukle(yenile, sessiz){
+  if(!sessiz){
+    $('#hafta-liste').innerHTML = '<div class="ipucu" id="hafta-bekle" style="margin:4px 0 8px;display:flex;gap:8px;align-items:center"></div>'
+      + '<div class="iskelet"></div>'.repeat(6);
+    // Boş iskelet "hiç maç yok" sanılıyordu: 5 sn geçince ne beklendiğini söyle.
+    const t0 = Date.now();
+    clearInterval(HAFTA_BEKLE_SAYAC);
+    HAFTA_BEKLE_SAYAC = setInterval(() => {
+      const el = $('#hafta-bekle'); if(!el){ clearInterval(HAFTA_BEKLE_SAYAC); return; }
+      const sn = Math.round((Date.now() - t0) / 1000);
+      if(sn >= 5) el.innerHTML = `${ik('spinner', 'ic-sm doner')}<span>Sunucu bülteni kuruyor — açılışta ya da arşiv yenilendikten sonra 20-60 sn sürebilir · ${sn} sn</span>`;
+    }, 1000);
+  }
+  try{
+    HAFTA = await apiZamanli('/api/bulten' + (yenile ? '?yenile=1' : ''), 300000);
+    clearInterval(HAFTA_BEKLE_SAYAC);
     if(!sessiz){
       // yalnız elle yenilemede sıfırlanır; arka plan tazelemeleri (45 sn piyasa
       // ısıtması, 10 dk periyodik) açık analiz panellerini KAPATMAMALI
@@ -1758,10 +1806,14 @@ async function haftaYukle(yenile, sessiz){
         `Kaynağın son bülten yayını: ${HAFTA.kaynak_yayini} — yeni tur maçları kaynak yayınladıkça (genellikle Salı–Perşembe) otomatik eklenir.` + disMetni(HAFTA.dis) +
         (HAFTA.piyasa_isitma ? ' · piyasa oranları arka planda yükleniyor, 1-2 dk içinde görünür…' : '');
     if(HAFTA.piyasa_isitma) setTimeout(() => haftaYukle(false, true), 45000);
+    // Sunucu bülteni arka planda yeniden kuruyorsa (TTL doldu / yenile istendi /
+    // arşiv güncellendi) eldeki kopya hemen geldi; taze kopya için biraz sonra sessizce sor.
+    if(HAFTA.tazeleniyor) setTimeout(() => haftaYukle(false, true), 25000);
     setTimeout(haftaOtoTara, 2500);  // haftanın kalan günleri kendiliğinden taranır
     $('#anahtar-kutu').style.display = (HAFTA.dis && !HAFTA.dis.anahtar_var) ? '' : 'none';
-    if(yenile) bildir('Fikstür yenilendi.');
+    if(yenile) bildir(HAFTA.tazeleniyor ? 'Bülten arka planda yeniden kuruluyor — 20-60 sn içinde kendiliğinden tazelenir.' : 'Fikstür yenilendi.');
   }catch(h){
+    clearInterval(HAFTA_BEKLE_SAYAC);
     if(sessiz) return;  // arka plan yenilemesi sessizce pes eder, mevcut görünüm kalır
     $('#hafta-liste').innerHTML = `<div class="kart bos-durum"><div class="dev">${ik('dikkat','ic-xl')}</div><p>${esc(h.message)}</p>
       <button class="btn" onclick="haftaYukle(true)">Tekrar Dene</button></div>`;
