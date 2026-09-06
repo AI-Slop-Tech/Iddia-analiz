@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import time
 from itertools import combinations
 
@@ -21,21 +22,33 @@ from . import analiz, veri
 KUPON_DOSYASI = os.path.join(veri.VERI_KLASORU, "kuponlar.json")
 GECERLI_SISTEMLER = ("kombine",)  # + "k/n" biçimi (ör. "2/4") çalışma anında doğrulanır
 
+# Defter dosyası parametreli: kullanıcının defteri (kuponlar.json) ile sistemin
+# kendi otomatik defteri (sistem_defteri.json) aynı okuma/yazma/sonuçlandırma
+# makinesini kullanır. Dosya başına kilit: bakım iş parçacığı ile istekler aynı
+# dosyayı aynı anda yazmasın.
+_KILITLER: dict[str, threading.Lock] = {}
+_KILIT_KILIDI = threading.Lock()
 
-def _oku() -> list[dict]:
+
+def _kilit(dosya: str) -> threading.Lock:
+    with _KILIT_KILIDI:
+        return _KILITLER.setdefault(dosya, threading.Lock())
+
+
+def _oku(dosya: str = KUPON_DOSYASI) -> list[dict]:
     try:
-        with open(KUPON_DOSYASI, encoding="utf-8") as f:
+        with open(dosya, encoding="utf-8") as f:
             return json.load(f)
     except (OSError, json.JSONDecodeError):
         return []
 
 
-def _yaz(kuponlar: list[dict]) -> None:
+def _yaz(kuponlar: list[dict], dosya: str = KUPON_DOSYASI) -> None:
     os.makedirs(veri.VERI_KLASORU, exist_ok=True)
-    gecici = KUPON_DOSYASI + ".tmp"
+    gecici = dosya + ".tmp"
     with open(gecici, "w", encoding="utf-8") as f:
         json.dump(kuponlar, f, ensure_ascii=False)
-    os.replace(gecici, KUPON_DOSYASI)
+    os.replace(gecici, dosya)
 
 
 def _sistem_dogrula(sistem: str, bacak_sayisi: int) -> str:
@@ -175,12 +188,19 @@ def _pazar_sonucu(pazar: str, r) -> str:
     return "belirsiz"
 
 
-def sonuclandir(df: pd.DataFrame | None) -> list[dict]:
-    """Açık bacakları arşivden sonuçlandırır, dosyaya işler, defteri döndürür."""
-    kuponlar = _oku()
-    if not kuponlar:
+def sonuclandir(df: pd.DataFrame | None, dosya: str = KUPON_DOSYASI) -> list[dict]:
+    """Açık bacakları arşivden/canlıdan sonuçlandırır, dosyaya işler, defteri döndürür."""
+    with _kilit(dosya):
+        kuponlar = _oku(dosya)
+        if not kuponlar:
+            return kuponlar
+        if _sonuclandir_govde(df, kuponlar):
+            _yaz(kuponlar, dosya)
         return kuponlar
 
+
+def _sonuclandir_govde(df: pd.DataFrame | None, kuponlar: list[dict]) -> bool:
+    """Defterdeki bekleyen bacakları yerinde sonuçlandırır; değişiklik olduysa True."""
     simdi = veri.simdi_tr()
     cozucu = veri.takim_cozucu(df, hizli=True) if df is not None else None
     degisti = False
@@ -269,9 +289,7 @@ def sonuclandir(df: pd.DataFrame | None) -> list[dict]:
                 b["durum"] = sonuc
             degisti = True
 
-    if degisti:
-        _yaz(kuponlar)
-    return kuponlar
+    return degisti
 
 
 def degerlendir(kupon: dict) -> dict:
