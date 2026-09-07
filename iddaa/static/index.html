@@ -775,6 +775,7 @@
       <button class="sekme" data-s="sistem"><svg class="ic"><use href="#i-sistem"/></svg><span>Sistem Önerisi</span></button>
       <button class="sekme" data-s="kupon"><svg class="ic"><use href="#i-kupon"/></svg><span>Kupon Defteri</span><span class="rozet-sayi" hidden></span></button>
       <button class="sekme" data-s="rolling"><svg class="ic"><use href="#i-rolling"/></svg><span>Rolling</span></button>
+      <button class="sekme" data-s="kasa"><svg class="ic"><use href="#i-banka"/></svg><span>Kasa</span></button>
     <div class="yan-baslik">Analiz</div>
       <button class="sekme" data-s="sonuc"><svg class="ic"><use href="#i-sonuc"/></svg><span>Sonuçlar</span></button>
       <button class="sekme" data-s="oran"><svg class="ic"><use href="#i-oran"/></svg><span>Oran Analizi</span></button>
@@ -1095,6 +1096,33 @@
       <b>kayıt altında ve gerçek sayılarla</b> yapman için var. Ana kasayla değil, gözden çıkardığın parayla oyna.</div>
   </section>
 
+  <section id="s-kasa">
+    <div class="kart">
+      <h2><svg class="ic"><use href="#i-banka"/></svg> Kasa &amp; Performans</h2>
+      <div class="alt-baslik">Kupon defterin <b>gerçek para birimiyle</b>: başlangıç kasası, her kuponun tutarı, gerçekleşen kâr,
+        bakiye eğrisi ve <b>maksimum düşüş</b> (drawdown), kapanış çizgisi (CLV), haftalık seyir ve pazar / lig / kaynak kırılımı.
+        Bekleyen kuponların tutarı bakiyeden düşülmez, <b>açık risk</b> olarak ayrı görünür. Tutarı girilmemiş eski kuponlar
+        birim bahisle sayılır ve işaretlenir. Fişte, tüm bacakları ölçülmüş olasılık taşıyan kuponlara kesirli Kelly tutarı önerilir.</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px">
+        <div><label>Başlangıç kasası (₺)</label><input id="kasa-baslangic" type="number" min="1" step="50" value="1000"></div>
+        <div><label>Birim bahis (₺)</label><input id="kasa-birim" type="number" min="1" step="10" value="50"></div>
+        <div><label>Kelly böleni</label><input id="kasa-bolen" type="number" min="1" max="20" step="1" value="4" title="4 = çeyrek Kelly"></div>
+        <div><label>Başlangıç tarihi</label><input id="kasa-tarih" placeholder="gg.aa.yyyy"></div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px">
+        <button class="btn" onclick="kasaKaydet()"><svg class="ic ic-sm"><use href="#i-kaydet"/></svg>Kaydet</button>
+        <span class="ipucu">pencere:</span>
+        <button class="mini-btn kasa-gun" data-gun="30" onclick="kasaGunSec(30)">30 gün</button>
+        <button class="mini-btn kasa-gun" data-gun="90" onclick="kasaGunSec(90)">90 gün</button>
+        <button class="mini-btn kasa-gun" data-gun="365" onclick="kasaGunSec(365)">1 yıl</button>
+        <button class="mini-btn kasa-gun" data-gun="0" onclick="kasaGunSec(0)">hepsi</button>
+        <button class="mini-btn" onclick="kasaYukle(true)"><svg class="ic ic-sm"><use href="#i-yenile"/></svg>Yenile</button>
+        <span class="ipucu" id="kasa-not"></span>
+      </div>
+    </div>
+    <div id="kasa-liste"></div>
+  </section>
+
   <section id="s-kupon">
     <div id="sistem-karne"></div>
     <div class="kart">
@@ -1266,6 +1294,7 @@
     <button class="sekme" data-s="oranlar"><svg class="ic"><use href="#i-tablo"/></svg><span>Oranlar</span></button>
     <button class="sekme" data-s="skarne"><svg class="ic"><use href="#i-karne"/></svg><span>Sistem Karnesi</span></button>
     <button class="sekme" data-s="devre"><svg class="ic"><use href="#i-oynaniyor"/></svg><span>Devre Arası</span></button>
+    <button class="sekme" data-s="kasa"><svg class="ic"><use href="#i-banka"/></svg><span>Kasa</span></button>
     <button class="sekme" data-s="takim"><svg class="ic"><use href="#i-hedef"/></svg><span>Takım Analizi</span></button>
     <button class="sekme" data-s="gecmis"><svg class="ic"><use href="#i-gecmis"/></svg><span>Geçmiş Maçlar</span></button>
     <button class="sekme" data-s="btest"><svg class="ic"><use href="#i-backtest"/></svg><span>Backtest</span></button>
@@ -1529,6 +1558,7 @@ const BOLUM = {
   surpriz: ['Sürpriz Radarı',   'İY/MS çapraz sonuç taraması'],
   sistem:  ['Sistem Önerisi',   'ölçülmüş karneye göre günün en mantıklı kuponu'],
   rolling: ['Rolling',          'kasa zinciri ve adım takibi'],
+  kasa:    ['Kasa',             'bakiye, kâr eğrisi, drawdown ve kırılım — gerçek para birimiyle'],
   oranlar: ['Oranlar',          'maç maç piyasa fiyatı, keskin sınır ve iddaa.com sütunu'],
   skarne:  ['Sistem Karnesi',   'sistemin kendi ileriye dönük kayıt defteri'],
   devre:   ['Devre Arası',      'devredeki maçlar için ölçülmüş 2. yarı olasılıkları'],
@@ -1555,6 +1585,7 @@ function sekmeAc(ad){
   window.scrollTo({top: 0, behavior: 'instant'});
   if(ad === 'kupon') kuponSekmesiCiz();   // defter + sistem karnesi
   if(ad === 'rolling') rollingYukle();
+  if(ad === 'kasa') kasaYukle(true);
   if(ad === 'oranlar') oranlarYukle();
   if(ad === 'skarne') sistemKarneYukle();
   if(ad === 'devre') devreYukle();
@@ -2328,11 +2359,13 @@ function fisOzetCiz(){
     <div class="fis-ozet" style="align-items:center;margin-top:10px">
       <span>Olası kazanç</span><span class="fis-kazanc">${kazanc.toLocaleString('tr-TR',{maximumFractionDigits:0})} ₺</span>
     </div>
+    <div id="fis-kelly" class="ipucu" style="margin-top:6px"></div>
     <div style="display:flex;gap:8px;margin-top:10px">
       <select id="fis-sistem" style="flex:1;padding:10px">${fisSistemSecenek(n)}</select>
       <button class="btn" onclick="fisKaydet()">${iks('kaydet')}Kuponu Kaydet</button>
     </div>
     <div class="not" style="margin-top:8px">Kayıt sonrası sonuçlar maçlar bitince otomatik işlenir; Kupon sekmesinden takip edin.</div>`;
+  fisKellyGuncelle();
 }
 
 function fisSistemSecenek(n){
@@ -2371,7 +2404,7 @@ async function fisKaydet(){
   if(!KUPON_TASLAK.length) return;
   const sistem = ($('#fis-sistem') || {}).value || 'kombine';
   try{
-    await api('/api/kuponlar', {secimler: KUPON_TASLAK, sistem, ad: ''});
+    await api('/api/kuponlar', {secimler: KUPON_TASLAK, sistem, ad: '', miktar: FIS_TUTAR});
     KUPON_TASLAK = [];
     try{ localStorage.removeItem('kupon_taslak'); }catch(_e){}
     fisCiz(); fisKapat();
@@ -2450,7 +2483,7 @@ async function kuponKaydet(){
   const ad = ($('#kupon-ad') || {}).value || '';
   const b = $('#kupon-kaydet'); if(b) b.disabled = true;
   try{
-    await api('/api/kuponlar', {secimler: KUPON_TASLAK, sistem, ad});
+    await api('/api/kuponlar', {secimler: KUPON_TASLAK, sistem, ad, miktar: FIS_TUTAR});
     KUPON_TASLAK = [];
     try{ localStorage.removeItem('kupon_taslak'); }catch(_e){}
     kuponRozetGuncelle();
@@ -2484,7 +2517,7 @@ function kuponKartHTML(k){
       <span class="ipucu">· ${esc(k.olusturma)} · ${k.sistem === 'kombine'
         ? 'toplam oran ' + (k.toplam_oran || 0).toFixed(2)
         : k.maliyet + ' kolon'}</span></h2>
-    <div style="margin-bottom:8px">${chip}${(k.durum !== 'tuttu' && k.durum !== 'yatti') ? ` <span class="chip" data-kupon-sans="${k.id}" hidden></span>` : ''}
+    <div style="margin-bottom:8px">${chip}${(k.durum !== 'tuttu' && k.durum !== 'yatti') ? ` <span class="chip" data-kupon-sans="${k.id}" hidden></span>` : ''}${kuponParaHTML(k)}
       <button class="mini-btn" style="float:right" onclick="kuponSil(${k.id})">${iks('sil')}Sil</button></div>
     ${k.secimler.map((s, i) => `
       <div class="one-cikan" style="border:none;padding:6px 0">
@@ -4441,6 +4474,133 @@ async function bacakSansGuncelle(){
   BACAK_SANS_MESGUL = false;
 }
 setInterval(() => { if(document.querySelector('#s-kupon.aktif [data-bacak-sans]')) bacakSansGuncelle(); }, 60000);
+
+// ───────────────────────────── Kasa & performans: defter gerçek para birimiyle
+// Bakiye = başlangıç + gerçekleşen kârlar (bekleyenler açık risk, düşülmez). Tutarsız eski kupon
+// birim bahisle sayılır (işaretli). Kelly yalnız ölçülmüş olasılık taşıyan fişlerde; kazandırmaz, batmayı önler.
+let PERF_SON = null, PERF_GUN = 90, KASA_SON = null, FIS_KELLY_SAYAC = 0;
+function tlPara(x){ return (Number(x) || 0).toLocaleString('tr-TR', {maximumFractionDigits: 0}) + ' ₺'; }
+function kuponParaHTML(k){
+  if(k.miktar_etkin === null || k.miktar_etkin === undefined) return '';
+  const tutar = `<span class="chip" title="${k.miktar_tahmini ? 'tutar girilmemişti: kasa birim bahisiyle sayılır' : 'kupon tutarı'}">${tlPara(k.miktar_etkin)}${k.miktar_tahmini ? ' <span class="ipucu">(birim)</span>' : ''}</span>`;
+  const kar = (k.kar !== null && k.kar !== undefined)
+    ? ` <span class="chip ${k.kar >= 0 ? 'ev-poz' : 'ev-neg'}" title="gerçekleşen kâr/zarar">${k.kar >= 0 ? '+' : ''}${tlPara(k.kar)}</span>` : '';
+  const duzenle = (k.durum !== 'tuttu' && k.durum !== 'yatti')
+    ? ` <input type="number" min="0" step="10" value="${k.miktar === null || k.miktar === undefined ? '' : k.miktar}" placeholder="tutar ₺"
+          style="width:88px;padding:2px 6px" title="kupon tutarını değiştir (₺)" onchange="kuponMiktar(${k.id}, this.value)">` : '';
+  return ` ${tutar}${kar}${duzenle}`;
+}
+async function kuponMiktar(id, v){
+  try{ await api('/api/kupon-miktar', {id, miktar: v === '' ? null : +v}); bildir('Kupon tutarı güncellendi.'); PERF_SON = null; kuponSekmesiCiz(); }
+  catch(h){ bildir(h.message, true); }
+}
+async function fisKellyGuncelle(){
+  const el = $('#fis-kelly'); if(!el) return;
+  const n = KUPON_TASLAK.length; if(!n){ el.innerHTML = ''; return; }
+  const olcusuz = KUPON_TASLAK.filter(s => !(typeof s.p === 'number' && s.p > 0 && s.p < 1)).length;
+  if(olcusuz){ el.innerHTML = `${iks('bilgi')} Kelly önerisi yok: ${olcusuz} bacakta ölçülmüş olasılık yok (yalnız Sistem Önerisi / Devre Arası seçimleri taşır).`; return; }
+  if(fisAyniMacSayisi()){ el.innerHTML = `${iks('dikkat')} Aynı maçtan birden fazla seçim: olasılıklar bağımsız değil, Kelly hesaplanmaz.`; return; }
+  const p = KUPON_TASLAK.reduce((a, s) => a * s.p, 1), o = fisToplamOran(), sayac = ++FIS_KELLY_SAYAC;
+  el.innerHTML = `${iks('spinner')} Kelly hesaplanıyor…`;
+  try{
+    const r = await api('/api/kelly', {p, oran: o});
+    if(sayac !== FIS_KELLY_SAYAC) return;
+    el.innerHTML = r.oynama
+      ? `${iks('dikkat')} Kelly: <b>oynama</b> — ölçülen olasılık %${(p*100).toFixed(0)} × oran ${o.toFixed(2)}: kenar yok (p·o ≤ 1).`
+      : `${iks('terazi')} 1/${r.bolen} Kelly: <b>${tlPara(r.miktar)}</b> <span class="ipucu">(bakiye ${tlPara(r.bakiye)} · kesir %${(r.kesir*100).toFixed(1)} · ölçülen p %${(p*100).toFixed(0)})</span>
+         <button class="mini-btn" onclick="fisTutarSec(${Math.round(r.miktar)})">öneriyi kullan</button> <span class="ipucu">kazandırmaz, batmayı önler</span>`;
+  }catch(h){ if(sayac === FIS_KELLY_SAYAC) el.innerHTML = `<span class="ipucu">${esc(h.message)}</span>`; }
+}
+async function kasaYukle(yenile){
+  const kutu = $('#kasa-liste'); if(!kutu) return;
+  if(!yenile && PERF_SON && PERF_SON._gun === PERF_GUN){ kasaCiz(); return; }
+  kutu.innerHTML = '<div class="kart bos-durum"><p>Kupon defteri okunuyor, bekleyenler sonuçlandırılıyor…</p></div>';
+  try{ PERF_SON = await api('/api/performans?gun=' + PERF_GUN); PERF_SON._gun = PERF_GUN; KASA_SON = PERF_SON.kasa; kasaCiz(); }
+  catch(h){ kutu.innerHTML = `<div class="kart bos-durum"><p>${esc(h.message)}</p></div>`; }
+}
+function kasaGunSec(g){ PERF_GUN = g; kasaYukle(true); }
+async function kasaKaydet(){
+  const govde = {baslangic: +$('#kasa-baslangic').value, birim: +$('#kasa-birim').value, kelly_bolen: +$('#kasa-bolen').value, baslangic_tarihi: $('#kasa-tarih').value};
+  try{ KASA_SON = await api('/api/kasa', govde); bildir('Kasa ayarları kaydedildi.'); await kasaYukle(true); }
+  catch(h){ bildir(h.message, true); }
+}
+function kasaTarih(t){ const [g, a, y] = String(t).split('.').map(Number); return new Date(y, a - 1, g).getTime(); }
+function kasaEgriSVG(egri, baslangic){
+  if(!egri || egri.length < 2) return '<div class="ipucu">Eğri için en az bir sonuçlanmış kupon gerekir.</div>';
+  const W = 920, H = 240, pL = 60, pR = 12, pT = 12, pB = 26;
+  const t0 = kasaTarih(egri[0].t), t1 = kasaTarih(egri[egri.length - 1].t) || t0 + 1;
+  const degerler = egri.map(e => e.bakiye).concat([baslangic]);
+  const min = Math.min(...degerler), max = Math.max(...degerler);
+  const x = e => pL + (W - pL - pR) * ((kasaTarih(e.t) - t0) / ((t1 - t0) || 1));
+  const y = v => pT + (H - pT - pB) * (1 - (v - min) / ((max - min) || 1));
+  let tepe = -Infinity; const zirve = egri.map(e => { tepe = Math.max(tepe, e.bakiye); return tepe; });
+  const cizgi = egri.map(e => `${x(e).toFixed(1)},${y(e.bakiye).toFixed(1)}`).join(' ');
+  const govde = egri.map((e, i) => `${x(e).toFixed(1)},${y(zirve[i]).toFixed(1)}`).concat(egri.slice().reverse().map(e => `${x(e).toFixed(1)},${y(e.bakiye).toFixed(1)}`)).join(' ');
+  const son = egri[egri.length - 1];
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block" role="img" aria-label="bakiye eğrisi">
+    <polygon points="${govde}" fill="rgba(239,68,68,.18)" stroke="none"/>
+    <line x1="${pL}" y1="${y(baslangic)}" x2="${W - pR}" y2="${y(baslangic)}" stroke="#5b6b8c" stroke-dasharray="4 4" stroke-width="1"/>
+    <text x="${pL - 6}" y="${y(baslangic) + 4}" fill="#8ea0bf" font-size="11" text-anchor="end">${baslangic.toFixed(0)}</text>
+    <text x="${pL - 6}" y="${y(max) + 4}" fill="#8ea0bf" font-size="11" text-anchor="end">${max.toFixed(0)}</text>
+    <text x="${pL - 6}" y="${y(min) + 4}" fill="#8ea0bf" font-size="11" text-anchor="end">${min.toFixed(0)}</text>
+    <polyline points="${cizgi}" fill="none" stroke="${son.bakiye >= baslangic ? '#34d399' : '#f87171'}" stroke-width="2"/>
+    <text x="${pL}" y="${H - 8}" fill="#5b6b8c" font-size="11">${esc(egri[0].t)}</text>
+    <text x="${W - pR}" y="${H - 8}" fill="#5b6b8c" font-size="11" text-anchor="end">${esc(son.t)}</text>
+  </svg>
+  <div class="ipucu">Kırmızı gölge: zirveden düşüş (drawdown). Kesikli çizgi: başlangıç kasası. Eğri gerçekleşen bakiyedir; açık risk dahil değildir.</div>`;
+}
+function kasaHaftalikSVG(h){
+  if(!h || !h.length) return '';
+  const W = 920, H = 120, pL = 60, pR = 12, pT = 10, pB = 22, n = h.length;
+  const maks = Math.max(...h.map(x => Math.abs(x.kar)), 1);
+  const gw = (W - pL - pR) / n, bw = Math.max(4, Math.min(28, gw * 0.7));
+  const y0 = pT + (H - pT - pB) / 2, sc = (H - pT - pB) / 2 / maks;
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block" role="img" aria-label="haftalık kâr">
+    <line x1="${pL}" y1="${y0}" x2="${W - pR}" y2="${y0}" stroke="#5b6b8c" stroke-width="1"/>
+    ${h.map((x, i) => { const cx = pL + gw * i + gw / 2, hh = Math.abs(x.kar) * sc;
+      return `<rect x="${(cx - bw / 2).toFixed(1)}" y="${(x.kar >= 0 ? y0 - hh : y0).toFixed(1)}" width="${bw.toFixed(1)}" height="${hh.toFixed(1)}" fill="${x.kar >= 0 ? '#34d399' : '#f87171'}"><title>${esc(x.hafta)} haftası: ${x.kar >= 0 ? '+' : ''}${x.kar.toFixed(0)} ₺ · ${x.tutan}/${x.n} kupon</title></rect>
+        ${(n <= 16 || i % Math.ceil(n / 16) === 0) ? `<text x="${cx.toFixed(1)}" y="${H - 6}" fill="#5b6b8c" font-size="10" text-anchor="middle">${esc(x.hafta)}</text>` : ''}`; }).join('')}
+  </svg>`;
+}
+function kasaYuzde(x, b = 1){ return (x === null || x === undefined) ? '—' : (x >= 0 ? '+' : '') + '%' + (x*100).toFixed(b); }
+function kasaCiz(){
+  const kutu = $('#kasa-liste'); if(!kutu || !PERF_SON) return;
+  const d = PERF_SON, o = d.ozet || {}, k = d.kasa || {};
+  $('#kasa-baslangic').value = k.baslangic; $('#kasa-birim').value = k.birim; $('#kasa-bolen').value = k.kelly_bolen; $('#kasa-tarih').value = k.baslangic_tarihi || '';
+  document.querySelectorAll('.kasa-gun').forEach(b => b.classList.toggle('aktif', +b.dataset.gun === PERF_GUN));
+  const n = $('#kasa-not'); if(n) n.textContent = `${k.kayitli ? 'kayıtlı ayarlar' : 'varsayılan ayarlar (henüz kaydedilmedi)'} · başlangıç ${esc(k.baslangic_tarihi || '')} · ${o.toplam_kupon || 0} kupon · pencere ${PERF_GUN ? PERF_GUN + ' gün' : 'hepsi'}`;
+  const kpi = (ad, deger, alt, sinif) => `<div class="capraz-kutu" style="padding:8px 10px"><div class="ipucu">${ad}</div><div style="font-size:18px;font-weight:750" class="${sinif || ''}">${deger}</div>${alt ? `<div class="ipucu">${alt}</div>` : ''}</div>`;
+  const kar = o.kar || 0;
+  let html = `<div class="kart"><h2>${iks('banka')} Bakiye <span class="ipucu">· gerçekleşen sonuçlar · ${esc(o.pencere_baslangic || '')} → bugün</span></h2>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px">
+      ${kpi('Bakiye', tlPara(o.bakiye), `başlangıç ${tlPara(o.baslangic)}`, (o.bakiye || 0) >= (o.baslangic || 0) ? 'ev-poz' : 'ev-neg')}
+      ${kpi('Kâr (pencere)', (kar >= 0 ? '+' : '') + tlPara(kar), `${o.sonuclu || 0} sonuçlu · ${o.tutan || 0} tuttu`, kar >= 0 ? 'ev-poz' : 'ev-neg')}
+      ${kpi('Getiri (ROI)', kasaYuzde(o.roi), `yatırım ${tlPara(o.yatirim)}`, (o.roi || 0) >= 0 ? 'ev-poz' : 'ev-neg')}
+      ${kpi('Açık risk', tlPara(o.acik_risk), `${o.bekleyen || 0} bekleyen kupon — bakiyeden düşülmedi`)}
+      ${kpi('Maks. düşüş', '−' + tlPara(o.max_dd), `zirveden ${kasaYuzde(-(o.max_dd_yuzde || 0), 1).replace('+', '')}`, (o.max_dd || 0) > 0 ? 'ev-neg' : '')}
+      ${kpi('Kapanış çizgisi (CLV)', o.clv_ort === null || o.clv_ort === undefined ? '—' : kasaYuzde(o.clv_ort, 1), `${o.clv_n || 0} bacak · kapanışı yenme ${o.clv_yenen === null || o.clv_yenen === undefined ? '—' : '%' + (o.clv_yenen*100).toFixed(0)}`, (o.clv_ort || 0) > 0 ? 'ev-poz' : '')}
+      ${kpi('En uzun kayıp serisi', `${o.en_uzun_kayip || 0} kupon`, o.miktar_tahmini ? `${o.miktar_tahmini} kupon birim bahisle sayıldı` : '')}
+    </div>
+    <div style="margin-top:10px">${kasaEgriSVG(d.egri || [], o.baslangic || 0)}</div>
+  </div>`;
+  if((d.haftalik || []).length) html += `<div class="kart"><h2>Haftalık kâr / zarar</h2>${kasaHaftalikSVG(d.haftalik)}</div>`;
+  const secim = ($('#kasa-kirilim') || {}).value || 'pazar';
+  const satirlar = ((d.kirilim || {})[secim] || []);
+  html += `<div class="kart"><h2>Kırılım <select id="kasa-kirilim" style="width:auto;padding:4px 8px;margin-left:8px" onchange="kasaCiz()">
+      <option value="pazar"${secim === 'pazar' ? ' selected' : ''}>pazar ailesi</option><option value="lig"${secim === 'lig' ? ' selected' : ''}>lig</option><option value="kaynak"${secim === 'kaynak' ? ' selected' : ''}>kaynak</option></select></h2>
+    ${satirlar.length ? `<div style="overflow-x:auto"><table class="roll-tablo"><thead><tr><th>${esc(secim)}</th><th>bacak</th><th>isabet</th><th>kâr payı (~)</th><th>ROI (~)</th></tr></thead><tbody>
+      ${satirlar.map(r => `<tr><td><b>${esc(r.ad)}</b></td><td>${r.n} <span class="ipucu">${r.tutan}✓ ${r.yatan}✗</span></td><td>${r.isabet === null || r.isabet === undefined ? '—' : '%' + (r.isabet*100).toFixed(0)}</td>
+        <td class="${(r.kar_payi || 0) >= 0 ? 'ev-poz' : 'ev-neg'}">${(r.kar_payi || 0) >= 0 ? '+' : ''}${tlPara(r.kar_payi)}</td><td>${kasaYuzde(r.roi, 0)}</td></tr>`).join('')}
+    </tbody></table></div><div class="ipucu" style="margin-top:6px">(~) Kupon kârı bacaklara eşit bölündü — çok bacaklı kuponda yaklaşımdır; isabet oranı kesindir.</div>`
+    : '<div class="bos-durum" style="padding:10px 0"><p>Pencerede sonuçlanmış kupon yok.</p></div>'}
+  </div>`;
+  if(d.sistem) html += `<div class="kart"><h2>Ölçülmüş olasılıklı bacaklar</h2><div class="capraz-kutu">
+    <div class="capraz-satir" style="border-top:0"><span style="flex:1">Sistem Önerisi / Devre Arası'ndan gelen bacak</span><b>${d.sistem.n}</b><span class="ipucu">${d.sistem.sonuclu} sonuçlandı</span></div>
+    <div class="capraz-satir"><span style="flex:1">Sistem dedi / gerçek</span><b>${d.sistem.dedi === null ? '—' : '%' + (d.sistem.dedi*100).toFixed(0)} / ${d.sistem.gercek === null ? '—' : '%' + (d.sistem.gercek*100).toFixed(0)}</b><span class="ipucu">${d.sistem.sonuclu < 30 ? '30 sonuçlu bacaktan önce yargı yok' : ''}</span></div>
+  </div></div>`;
+  html += `<div class="kart"><div class="ipucu">${esc((d.kelly || {}).not || '')} Bakiye gerçekleşen sonuçlardır; bekleyen kuponların tutarı açık risk olarak ayrı durur. Kâr iddiası yok: bu panel neyi kazanıp kaybettiğini <b>gerçek sayılarla</b> gösterir.</div></div>`;
+  kutu.innerHTML = html;
+}
 
 // ───────────────────────────── Sistem karnesi: senin sonuçların vs beklenti
 function normalCdf(z){ const t = 1/(1+0.2316419*Math.abs(z)); const dd = 0.3989423*Math.exp(-z*z/2);

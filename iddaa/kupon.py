@@ -63,9 +63,20 @@ def _sistem_dogrula(sistem: str, bacak_sayisi: int) -> str:
     raise ValueError(f"Geçersiz sistem: {sistem}")
 
 
-def olustur(secimler: list[dict], sistem: str = "kombine", ad: str = "") -> dict:
+def _miktar_dogrula(miktar):
+    """Kupon tutarı (₺): None = girilmedi (kasa birim bahisle sayar)."""
+    if miktar is None or miktar == "":
+        return None
+    m = float(miktar)
+    if not (0 <= m <= 10_000_000):
+        raise ValueError("Kupon tutarı 0 ile 10 milyon ₺ arasında olmalı.")
+    return round(m, 2)
+
+
+def olustur(secimler: list[dict], sistem: str = "kombine", ad: str = "", miktar=None) -> dict:
     if not isinstance(secimler, list) or not (1 <= len(secimler) <= 12):
         raise ValueError("Kupon 1-12 seçim içermeli.")
+    miktar = _miktar_dogrula(miktar)
     bacaklar = []
     for s in secimler:
         oran = float(s.get("oran", 0))
@@ -92,6 +103,7 @@ def olustur(secimler: list[dict], sistem: str = "kombine", ad: str = "") -> dict
         "olusturma": time.strftime("%d.%m.%Y %H:%M"),
         "sistem": _sistem_dogrula(sistem, len(bacaklar)),
         "secimler": bacaklar,
+        "miktar": miktar,          # ₺; None ise kasa paneli birim bahisle sayar (işaretli)
     }
     kuponlar = _oku()
     kuponlar.insert(0, kupon)
@@ -106,6 +118,20 @@ def sil(kupon_id: int) -> bool:
         return False
     _yaz(yeni)
     return True
+
+
+def miktar_degistir(kupon_id: int, miktar) -> bool:
+    """Bekleyen kuponun tutarını değiştirir; sonuçlanmış kuponda ValueError."""
+    m = _miktar_dogrula(miktar)
+    kuponlar = _oku()
+    for k in kuponlar:
+        if k.get("id") == kupon_id:
+            if not any(b.get("durum") == "bekliyor" for b in k.get("secimler") or []):
+                raise ValueError("Sonuçlanmış kuponun tutarı değiştirilemez.")
+            k["miktar"] = m
+            _yaz(kuponlar)
+            return True
+    return False
 
 
 def elle_isaretle(kupon_id: int, indeks: int, durum: str) -> bool:
@@ -305,8 +331,12 @@ def acik_bacaklar(gunler: set[str] | None = None, dosya: str = KUPON_DOSYASI) ->
     return cikti
 
 
-def degerlendir(kupon: dict) -> dict:
-    """Kuponun toplam oranı, durumu ve (sonuçlanmışsa) net getirisi."""
+def degerlendir(kupon: dict, birim: float | None = None) -> dict:
+    """Kuponun toplam oranı, durumu ve (sonuçlanmışsa) net getirisi.
+
+    birim verilirse para alanları da hesaplanır: miktar_etkin (kuponun tutarı,
+    yoksa birim → miktar_tahmini=True), yatirim (toplam tutar), kar = net ·
+    miktar / maliyet (sistemde kolon başına tutar = miktar / kolon sayısı)."""
     bacaklar = kupon["secimler"]
     oranlar = [b["oran"] for b in bacaklar]
     durumlar = [b["durum"] for b in bacaklar]
@@ -344,5 +374,14 @@ def degerlendir(kupon: dict) -> dict:
             net = kazanc - maliyet
             durum = "tuttu" if net > 0 else "yatti"
 
+    miktar = kupon.get("miktar")
+    tahmini = miktar is None
+    if tahmini:
+        etkin = float(birim) if birim is not None else None
+    else:
+        etkin = float(miktar)
+    kar = (net * etkin / maliyet) if (net is not None and etkin is not None) else None
     return {**kupon, "toplam_oran": toplam_oran, "maliyet": maliyet,
-            "durum": durum, "net": net, "tutan": tutan, "bekleyen": bekleyen}
+            "durum": durum, "net": net, "tutan": tutan, "bekleyen": bekleyen,
+            "miktar_etkin": etkin, "miktar_tahmini": bool(tahmini and etkin is not None),
+            "yatirim": etkin, "kar": (round(kar, 2) if kar is not None else None)}
