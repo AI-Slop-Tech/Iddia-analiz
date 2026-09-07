@@ -14,6 +14,10 @@ Uç noktalar:
   POST /api/sistem-defteri/simdi  {"mod":"hepsi","tarih":?} günün kuponlarını hemen yaz
   POST /api/devre-arasi     {tarih?,esik?,marj?,site_oranlari?} devredeki maçların ölçülmüş 2. yarı olasılıkları
   POST /api/bacak-sans      {} | {maclar:[..]} bekleyen bacakların kesinleşmesi / devre arası olasılığı
+  GET/POST /api/kasa        kasa ayarları (başlangıç, birim, Kelly böleni) + bakiye / açık risk
+  POST /api/kupon-miktar    {id, miktar} bekleyen kuponun tutarı (₺)
+  GET  /api/performans      ?gun=90 bakiye eğrisi, drawdown, ROI, CLV, haftalık, kırılım
+  POST /api/kelly           {p, oran} bakiyeye göre kesirli Kelly tutarı
 """
 
 from __future__ import annotations
@@ -25,7 +29,7 @@ import time
 import pandas as pd
 
 from . import __version__ as SURUM
-from . import analiz, backtest, kayit, kupon, oneri, rapor, rolling, sistem, sistem_defteri, veri, yorum
+from . import analiz, backtest, kasa, kayit, kupon, oneri, rapor, rolling, sistem, sistem_defteri, veri, yorum
 
 _DURUM: dict = {
     "df": None, "elo": None, "fikstur": None, "kitapcilar": [],
@@ -2567,7 +2571,8 @@ def uygulama_olustur():
         except FileNotFoundError:
             df = None
         kuponlar = kupon.sonuclandir(df)
-        return jsonify({"kuponlar": [kupon.degerlendir(k) for k in kuponlar]})
+        birim = kasa.oku()["birim"]     # tutarsız eski kuponlar birim bahisle (işaretli)
+        return jsonify({"kuponlar": [kupon.degerlendir(k, birim) for k in kuponlar]})
 
     @app.post("/api/kuponlar")
     def kupon_olustur():
@@ -2575,7 +2580,8 @@ def uygulama_olustur():
         try:
             yeni = kupon.olustur(govde.get("secimler") or [],
                                  sistem=govde.get("sistem", "kombine"),
-                                 ad=govde.get("ad", ""))
+                                 ad=govde.get("ad", ""),
+                                 miktar=govde.get("miktar"))
         except (ValueError, TypeError) as hata:
             return jsonify({"hata": str(hata)}), 400
         return jsonify({"tamam": True, "id": yeni["id"]})
@@ -2595,6 +2601,73 @@ def uygulama_olustur():
         except (ValueError, TypeError) as hata:
             return jsonify({"hata": str(hata)}), 400
         return jsonify({"tamam": tamam})
+
+    # ---------------------------------------------------------- 💰 Kasa & performans
+    def _kasa_kuponlari():
+        """Kasa ayarları + değerlendirilmiş (₺'li) kupon defteri."""
+        try:
+            df = _df()
+        except FileNotFoundError:
+            df = None
+        ayar = kasa.oku()
+        return ayar, [kupon.degerlendir(k, ayar["birim"]) for k in kupon.sonuclandir(df)]
+
+    def _kasa_ozeti(ayar, kuponlar):
+        perf = kasa.performans(kuponlar, ayar, gun=0)
+        return {**ayar, "bakiye": perf["ozet"]["bakiye"], "acik_risk": perf["ozet"]["acik_risk"],
+                "bekleyen": perf["ozet"]["bekleyen"]}
+
+    @app.get("/api/kasa")
+    def kasa_oku():
+        ayar, kuponlar = _kasa_kuponlari()
+        return jsonify(_kasa_ozeti(ayar, kuponlar))
+
+    @app.post("/api/kasa")
+    def kasa_yaz():
+        govde = request.get_json(silent=True) or {}
+        try:
+            kasa.yaz(govde)
+        except ValueError as hata:
+            return jsonify({"hata": str(hata)}), 400
+        ayar, kuponlar = _kasa_kuponlari()
+        return jsonify(_kasa_ozeti(ayar, kuponlar))
+
+    @app.post("/api/kupon-miktar")
+    def kupon_miktar():
+        govde = request.get_json(silent=True) or {}
+        try:
+            tamam = kupon.miktar_degistir(int(govde.get("id", 0)), govde.get("miktar"))
+        except (ValueError, TypeError) as hata:
+            return jsonify({"hata": str(hata)}), 400
+        return jsonify({"tamam": tamam})
+
+    @app.get("/api/performans")
+    def performans():
+        """Bakiye eğrisi, drawdown, ROI, CLV, haftalık ve kırılım (gun=0 → hepsi).
+        Bakiye gerçekleşen sonuçlardır; bekleyenler açık risk olarak ayrı."""
+        try:
+            gun = max(0, min(3650, int(request.args.get("gun", 90))))
+        except (TypeError, ValueError):
+            return jsonify({"hata": "gun sayı olmalı"}), 400
+        ayar, kuponlar = _kasa_kuponlari()
+        perf = kasa.performans(kuponlar, ayar, gun=gun)
+        return jsonify({"kasa": {**ayar, "bakiye": perf["ozet"]["bakiye"], "acik_risk": perf["ozet"]["acik_risk"]},
+                        **perf})
+
+    @app.post("/api/kelly")
+    def kelly():
+        """Fiş için kesirli Kelly tutarı: {p, oran} → bakiyeye göre ₺. Girdi ölçülmüş
+        olasılık olmalı; arayüz p'si olmayan bacak varsa hiç sormaz."""
+        govde = request.get_json(silent=True) or {}
+        try:
+            p, oran = float(govde.get("p")), float(govde.get("oran"))
+        except (TypeError, ValueError):
+            return jsonify({"hata": "p ve oran sayı olmalı"}), 400
+        if not (0 < p < 1) or oran <= 1.0:
+            return jsonify({"hata": "p (0,1) aralığında, oran 1'den büyük olmalı"}), 400
+        ayar, kuponlar = _kasa_kuponlari()
+        bakiye = kasa.performans(kuponlar, ayar, gun=0)["ozet"]["bakiye"]
+        return jsonify({**kasa.kelly_oneri(p, oran, bakiye, ayar["kelly_bolen"]), "bakiye": bakiye})
 
     # ---------------------------------------------------------- 📈 Rolling
     @app.get("/api/rolling")

@@ -150,6 +150,19 @@ dakika bazlı olasılık (arşivde gol dakikası yok; bu yüzden 2. yarı sürer
 kesinleşme). Uçlar: `POST /api/devre-arasi` (`{esik, marj, min_oran, site_oranlari}`),
 `POST /api/bacak-sans` (`{}` defterdeki bugün/dün bekleyenler ya da `{maclar:[...]}`).
 
+### Kasa & performans paneli (v4.0)
+
+Kupon defteri **gerçek para birimiyle** izlenir: başlangıç kasası, birim bahis ve Kelly böleni
+`data/kasa.json`'da; her kuponun tutarı (`miktar`, fişten ya da defterden) ve gerçekleşen kârı ile
+bakiye eğrisi, **maksimum düşüş** (drawdown), getiri, kapanış çizgisi (CLV), haftalık seyir ve
+pazar ailesi / lig / kaynak kırılımı. Fişte, tüm bacakları ölçülmüş olasılık taşıyan kuponlar için
+kesirli Kelly tutarı önerilir (`rolling.kelly_kesri`); ölçülmemiş bacak varsa hesaplanmaz.
+
+Dürüstlük kuralları: bakiye yalnız gerçekleşen sonuçlardır, bekleyen kuponların tutarı **açık risk**
+olarak ayrı durur; tutarı girilmemiş eski kuponlar birim bahisle sayılır ve işaretlenir; kırılımda
+kupon kârı bacaklara eşit bölünür (yaklaşım, isabet oranı kesindir); Kelly kazandırmaz, batmayı önler.
+Uçlar: `GET/POST /api/kasa`, `POST /api/kupon-miktar`, `GET /api/performans?gun=90`, `POST /api/kelly`.
+
 ## Komutlar
 
 | Komut | Açıklama |
