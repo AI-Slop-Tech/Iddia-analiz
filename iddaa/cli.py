@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 
 import pandas as pd
@@ -46,6 +47,37 @@ def _cmd_baglanti(args: argparse.Namespace) -> int:  # noqa: ARG001
     if s.get("ipucu"):
         print(f"\n{s['ipucu']}")
     return 2
+
+
+def _cmd_kaynak(args: argparse.Namespace) -> int:
+    """Veri kaynağının adresini gösterir / kalıcı olarak değiştirir.
+
+    Türkiye'den football-data.co.uk kapalı olduğu için, yurt dışında çalışan
+    kendi sunucunun aynası buraya yazılır:
+        python tahmin.py kaynak https://siteniz.com/kaynak
+    Ortam değişkeni (IDDAA_KAYNAK_TABAN) tanımlıysa o kazanır.
+    """
+    if args.adres is None:
+        print(f"Kaynak : {veri.kaynak_taban()}")
+        env = (os.environ.get("IDDAA_KAYNAK_TABAN") or "").strip()
+        kayit = veri.ayar_oku("kaynak_taban")
+        print(f"Nereden: {'IDDAA_KAYNAK_TABAN ortam değişkeni' if env else ('ayarlar.json' if kayit else 'varsayılan (kaynağın kendisi)')}")
+        print("\nDeğiştirmek için: python tahmin.py kaynak https://siteniz.com/kaynak")
+        print("Sıfırlamak için  : python tahmin.py kaynak --sifirla")
+        return 0
+    if args.sifirla:
+        veri.ayar_yaz("kaynak_taban", "")
+        print(f"Sıfırlandı. Kaynak : {veri.kaynak_taban()}")
+        return 0
+    adres = args.adres.strip().rstrip("/")
+    if not adres.startswith(("http://", "https://")):
+        print("Adres http:// veya https:// ile başlamalı.")
+        return 1
+    veri.ayar_yaz("kaynak_taban", adres)
+    print(f"Kaydedildi. Kaynak : {veri.kaynak_taban()}")
+    s = veri.baglanti_testi()
+    print(f"Sonuç  : {'✅ erişim var (%d ms)' % s['sure_ms'] if s['tamam'] else '❌ erişilemedi (%s)' % s['hata']}")
+    return 0 if s["tamam"] else 2
 
 
 def _cmd_durum(args: argparse.Namespace) -> int:  # noqa: ARG001
@@ -237,6 +269,11 @@ def arg_ayristirici() -> argparse.ArgumentParser:
 
     bg = alt.add_parser("baglanti", help="Veri kaynağına erişimi/vekil ayarını test et")
     bg.set_defaults(fn=_cmd_baglanti)
+
+    kn = alt.add_parser("kaynak", help="Veri kaynağı adresini göster/değiştir (kendi aynanız)")
+    kn.add_argument("adres", nargs="?", help="Ayna kök adresi, ör. https://siteniz.com/kaynak")
+    kn.add_argument("--sifirla", action="store_true", help="Kayıtlı adresi sil, kaynağa dön")
+    kn.set_defaults(fn=_cmd_kaynak)
 
     t = alt.add_parser("takimlar", help="Veri setindeki takım adlarını listele")
     t.add_argument("--lig", help="Tek lige filtrele (ör. T1)")

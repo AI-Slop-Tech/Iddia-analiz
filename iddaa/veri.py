@@ -70,8 +70,41 @@ class ErisimHatasi(RuntimeError):
 
 
 def kaynak_taban() -> str:
-    """Veri kaynağının kök adresi (IDDAA_KAYNAK_TABAN ile değiştirilebilir)."""
-    return (os.environ.get("IDDAA_KAYNAK_TABAN") or VARSAYILAN_TABAN).strip().rstrip("/")
+    """Veri kaynağının kök adresi.
+
+    Sıra: IDDAA_KAYNAK_TABAN ortam değişkeni → data/ayarlar.json'daki
+    "kaynak_taban" → kaynağın kendisi. Ayar dosyası da okunuyor ki Türkiye'deki
+    bir bilgisayarda ortam değişkeni kurcalamadan `tahmin.py kaynak <adres>`
+    ile kendi sunucunun aynası gösterilebilsin.
+    """
+    taban = (os.environ.get("IDDAA_KAYNAK_TABAN") or "").strip()
+    if not taban:
+        try:
+            taban = ayar_oku("kaynak_taban")
+        except Exception:  # noqa: BLE001 — ayar dosyası yoksa/bozuksa kaynağa düş
+            taban = ""
+    return (taban or VARSAYILAN_TABAN).strip().rstrip("/")
+
+
+# Aynanın (ters vekil) aktarmasına izin verilen yollar. Bu projenin indirdiği
+# dosyalar dışında hiçbir şey geçmez: uç AÇIK VEKİL DEĞİLDİR.
+AYNA_YOLLARI = re.compile(
+    r"^(?:mmz4281/\d{4}/[A-Za-z0-9]{1,5}\.csv"
+    r"|fixtures\.csv"
+    r"|new_league_fixtures\.csv"
+    r"|new/[A-Za-z0-9]{1,5}\.csv)$")
+AYNA_EN_BUYUK = 20 * 1024 * 1024      # tek CSV birkaç yüz KB; tavan emniyet payı
+
+
+def ayna_getir(yol: str, basliklar: dict | None = None):
+    """Aynanın tek işi: izin verilen yolu KAYNAĞIN KENDİSİNDEN çeker.
+
+    yol doğrulanmadan çağrılmamalı (AYNA_YOLLARI). Koşullu GET başlıkları
+    olduğu gibi iletilir ki istemcinin 304'ü çalışsın.
+    """
+    if not AYNA_YOLLARI.fullmatch(yol or ""):
+        raise ValueError("Bu yol aynada aktarılmıyor.")
+    return _getir(_oturum(), f"{VARSAYILAN_TABAN}/{yol}", basliklar=basliklar or None)
 
 
 def kaynak_url(sezon: str, lig: str) -> str:

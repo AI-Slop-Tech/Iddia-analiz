@@ -493,6 +493,37 @@ def uygulama_olustur():
         except Exception as hata:  # noqa: BLE001
             return jsonify({"sonuc": "Test çalıştırılamadı.", "hata": str(hata)[:300]}), 500
 
+    # ── Kaynak aynası: Türkiye'den football-data.co.uk kapalı, bu sunucu değil
+    #
+    # Kendi bilgisayarında `tahmin.py kaynak https://<bu-site>/kaynak` dedikten
+    # sonra indirme bu sunucu üzerinden geçer; VPN gerekmez. AÇIK VEKİL DEĞİL:
+    # yalnız veri.AYNA_YOLLARI'ndaki dört dosya kalıbı aktarılır. IDDAA_KAYNAK_ANAHTAR
+    # tanımlanırsa ?anahtar=... da istenir (site herkese açıksa işe yarar).
+    @app.get("/kaynak/<path:yol>")
+    def kaynak_aynasi(yol):
+        anahtar = (os.environ.get("IDDAA_KAYNAK_ANAHTAR") or "").strip()
+        if anahtar and request.args.get("anahtar", "") != anahtar:
+            return jsonify({"hata": "Ayna anahtarı gerekli."}), 403
+        basliklar = {ad: request.headers[ad] for ad in ("If-None-Match", "If-Modified-Since")
+                     if request.headers.get(ad)}
+        try:
+            yanit = veri.ayna_getir(yol, basliklar)
+        except ValueError:
+            return jsonify({"hata": "Bu yol aynada aktarılmıyor."}), 404
+        except Exception as hata:  # noqa: BLE001 — kaynak erişilemezse dürüst 502
+            return jsonify({"hata": f"Kaynağa ulaşılamadı: {str(hata)[:200]}"}), 502
+        gecen = {a: yanit.headers[a] for a in ("ETag", "Last-Modified", "Content-Type")
+                 if yanit.headers.get(a)}
+        if yanit.status_code == 304:
+            return app.response_class(status=304, headers=gecen)
+        if yanit.status_code != 200:
+            return jsonify({"hata": f"Kaynak HTTP {yanit.status_code}"}), yanit.status_code
+        govde = yanit.content
+        if len(govde) > veri.AYNA_EN_BUYUK:
+            return jsonify({"hata": "Dosya beklenenden büyük."}), 502
+        gecen.setdefault("Content-Type", "text/csv")
+        return app.response_class(govde, status=200, headers=gecen)
+
     @app.get("/api/durum")
     def durum():
         try:

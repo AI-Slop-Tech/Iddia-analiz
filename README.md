@@ -574,6 +574,29 @@ açık dünya fikstürü/arşivi ve Pinnacle. Türkiye'den engelli olanlar bunla
 **Ayarlar → Teşhis** ekranındaki *"Ağ yolu"* satırı hangi adresin doğrudan,
 hangisinin vekilden, hangisinin anahtarlı olduğu için vekilsiz gittiğini gösterir.
 
+### 0. En kolayı: kendi sunucunuz zaten bir ayna (v4.2)
+
+Siteyi yurt dışında (Coolify, VPS, Fly…) çalıştırıyorsanız o sunucu kaynağa
+erişebiliyor demektir. Sürüm 4.2'den beri site **kendi aynasını** sunuyor:
+
+```bash
+# Türkiye'deki bilgisayarınızda, bir kez:
+python tahmin.py kaynak https://siteniz.com/kaynak
+python tahmin.py guncelle        # indirme artık kendi sunucunuzdan geçer
+```
+
+VPN, vekil aboneliği ya da Cloudflare hesabı gerekmez. Adres `data/ayarlar.json`
+içine yazılır; `python tahmin.py kaynak` mevcut ayarı gösterir,
+`python tahmin.py kaynak --sifirla` siler.
+
+`/kaynak/<yol>` **açık vekil değildir**: yalnız bu projenin indirdiği dört dosya
+kalıbı geçer (`mmz4281/<sezon>/<lig>.csv`, `fixtures.csv`,
+`new_league_fixtures.csv`, `new/<lig>.csv`), başka her yol 404 döner. Koşullu
+GET (ETag / Last-Modified) olduğu gibi aktarılır, yani artımlı indirme çalışmaya
+devam eder. Siteniz herkese açıksa `IDDAA_KAYNAK_ANAHTAR=<parola>` tanımlayın;
+o zaman ayna `?anahtar=<parola>` ister ve istemci tarafında adresi
+`https://siteniz.com/kaynak` yerine sorgulu hâliyle verirsiniz.
+
 ### 3. `IDDAA_KAYNAK_TABAN` — kendi ters vekiliniz (ücretsiz)
 
 Vekil satın almak istemiyorsanız, ücretsiz bir Cloudflare Worker kaynağın
