@@ -2401,6 +2401,125 @@ def af_iyms(ev: str, dep: str, tarih: pd.Timestamp,
         return None
 
 
+# ── Kadro ve sakatlık: arşivde OLMAYAN tek bilgi (maç bazlı veri oyuncu tutmaz)
+#
+# Masaüstü danışma uygulaması bunları dokümana koyuyor; site bunları kullanmıyor
+# ve olasılık modeline girmiyorlar (ölçülemedi: arşivde kadro geçmişi yok).
+# İkisi de _af_getir üzerinden gider — günlük tavan ve dakikalık aralık aynen
+# korunur. Kadro çoğu maçta kickoff'a ~40 dk kala yayımlanır; o saatten önce
+# istek yapmak kotayı boşa yakar, bu yüzden çağıran taraf "yok" cevabını
+# normal karşılamalı.
+_AF_KADRO_TTL = 30 * 60      # kadro açıklanınca değişmez; 30 dk yeterli
+_AF_SAKAT_TTL = 6 * 3600
+
+
+def _af_mac_id(ev: str, dep: str, tarih, sadece_onbellek: bool = False):
+    """Bizim (ev, dep, tarih) satırımızı AF fikstür kimliğine eşler."""
+    utc_gun = (pd.Timestamp(tarih) - pd.Timedelta(hours=3)).strftime("%Y-%m-%d")
+    mac_id, en_puan, kayit = None, 0.0, None
+    for m in _af_gun_fiksturu(utc_gun, sadece_onbellek=sadece_onbellek):
+        puan = min(_oddsapi_takim_puani(ev, m.get("ev") or ""),
+                   _oddsapi_takim_puani(dep, m.get("dep") or ""))
+        if puan > en_puan:
+            mac_id, en_puan, kayit = m["id"], puan, m
+    return (mac_id, kayit) if (mac_id is not None and en_puan >= 0.5) else (None, None)
+
+
+def _af_pencere_disi(tarih) -> bool:
+    gun_farki = abs((pd.Timestamp(tarih).normalize() - simdi_tr().normalize()).days)
+    return bool(AF_SON_DURUM.get("pencere_free") and gun_farki > 1)
+
+
+def af_kadro(ev: str, dep: str, tarih, sadece_onbellek: bool = False) -> dict | None:
+    """Maçın açıklanmış 11'leri ve dizilişi (API-Football). Anahtar/kadro yoksa None.
+
+    Dönen: {"ev": {"takim","dizilis","ilk11":[{ad,numara,mevki}],"yedek":[ad]},
+            "dep": {...}, "kaynak": "API-Football", "mac_id": id}
+    """
+    AF_SON_DURUM["anahtar_var"] = bool(_af_anahtar())
+    if not AF_SON_DURUM["anahtar_var"] or _af_pencere_disi(tarih):
+        return None
+    try:
+        mac_id, _kayit = _af_mac_id(ev, dep, tarih, sadece_onbellek=sadece_onbellek)
+        if mac_id is None:
+            return None
+        onbellek = _oddsapi_onbellek("af_kadro.json")
+        kayit = onbellek.get(str(mac_id))
+        if kayit and time.time() - kayit.get("zaman", 0) < _AF_KADRO_TTL:
+            return kayit["veri"] or None
+        if sadece_onbellek:
+            return (kayit or {}).get("veri") or None
+
+        govde = _af_getir("/fixtures/lineups", {"fixture": mac_id})
+
+        def _oyuncu(x):
+            p = (x or {}).get("player") or {}
+            return {"ad": p.get("name"), "numara": p.get("number"), "mevki": p.get("pos")}
+
+        taraflar = []
+        for r in govde.get("response", [])[:2]:
+            taraflar.append({
+                "takim": (r.get("team") or {}).get("name"),
+                "dizilis": r.get("formation"),
+                "ilk11": [_oyuncu(x) for x in (r.get("startXI") or [])],
+                "yedek": [(_oyuncu(x) or {}).get("ad") for x in (r.get("substitutes") or [])],
+            })
+        sonuc = ({"ev": taraflar[0], "dep": taraflar[1] if len(taraflar) > 1 else None,
+                  "kaynak": "API-Football", "mac_id": mac_id}
+                 if taraflar else None)
+        onbellek[str(mac_id)] = {"zaman": time.time(), "veri": sonuc}
+        for eski in [k for k, v in onbellek.items()
+                     if time.time() - v.get("zaman", 0) > 2 * 86400]:
+            onbellek.pop(eski, None)
+        _oddsapi_onbellek_yaz("af_kadro.json", onbellek)
+        return sonuc
+    except Exception as hata:  # noqa: BLE001
+        AF_SON_DURUM["hata"] = str(hata)[:160]
+        return None
+
+
+def af_sakatlik(ev: str, dep: str, tarih, sadece_onbellek: bool = False) -> dict | None:
+    """Maçın sakat/cezalı listesi (API-Football). Anahtar/veri yoksa None.
+
+    Dönen: {"ev": [{ad, sebep, tur}], "dep": [...], "kaynak": "API-Football"}
+    """
+    AF_SON_DURUM["anahtar_var"] = bool(_af_anahtar())
+    if not AF_SON_DURUM["anahtar_var"] or _af_pencere_disi(tarih):
+        return None
+    try:
+        mac_id, _kayit = _af_mac_id(ev, dep, tarih, sadece_onbellek=sadece_onbellek)
+        if mac_id is None:
+            return None
+        onbellek = _oddsapi_onbellek("af_sakatlik.json")
+        kayit = onbellek.get(str(mac_id))
+        if kayit and time.time() - kayit.get("zaman", 0) < _AF_SAKAT_TTL:
+            return kayit["veri"] or None
+        if sadece_onbellek:
+            return (kayit or {}).get("veri") or None
+
+        govde = _af_getir("/injuries", {"fixture": mac_id})
+        taraflar: dict[str, list] = {}
+        for r in govde.get("response", []):
+            takim = ((r.get("team") or {}).get("name")) or ""
+            p = r.get("player") or {}
+            taraflar.setdefault(takim, []).append({
+                "ad": p.get("name"), "sebep": p.get("reason"), "tur": p.get("type")})
+        ev_ad = max(taraflar, key=lambda t: _oddsapi_takim_puani(ev, t), default=None)
+        dep_ad = max((t for t in taraflar if t != ev_ad),
+                     key=lambda t: _oddsapi_takim_puani(dep, t), default=None)
+        sonuc = ({"ev": taraflar.get(ev_ad or "", []), "dep": taraflar.get(dep_ad or "", []),
+                  "kaynak": "API-Football", "mac_id": mac_id} if taraflar else None)
+        onbellek[str(mac_id)] = {"zaman": time.time(), "veri": sonuc}
+        for eski in [k for k, v in onbellek.items()
+                     if time.time() - v.get("zaman", 0) > 2 * 86400]:
+            onbellek.pop(eski, None)
+        _oddsapi_onbellek_yaz("af_sakatlik.json", onbellek)
+        return sonuc
+    except Exception as hata:  # noqa: BLE001
+        AF_SON_DURUM["hata"] = str(hata)[:160]
+        return None
+
+
 # ══════════════════════════════════════════════════════════════════════════
 # Açık dünya fikstürü — anahtarsız kapsama katmanı
 # ══════════════════════════════════════════════════════════════════════════

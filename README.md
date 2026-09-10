@@ -163,6 +163,39 @@ olarak ayrı durur; tutarı girilmemiş eski kuponlar birim bahisle sayılır ve
 kupon kârı bacaklara eşit bölünür (yaklaşım, isabet oranı kesindir); Kelly kazandırmaz, batmayı önler.
 Uçlar: `GET/POST /api/kasa`, `POST /api/kupon-miktar`, `GET /api/performans?gun=90`, `POST /api/kelly`.
 
+## 🖥️ Masaüstü danışma uygulaması (v4.1)
+
+Siteden **bağımsız** bir bilgisayar programı: bir maçı seçersin, elimizdeki bütün veriyi tek dokümana
+toplar, dokümanı **ChatGPT / Gemini / Grok / Reddit**'e sormak için hazırlar, cevapları deftere yazar
+ve maç bitince kimin tutturduğunu sayar.
+
+```bash
+python masaustu.py          # site çalışıyor olmak zorunda değil
+```
+
+Tkinter gerekir: Ubuntu/Debian `sudo apt install python3-tk`, Fedora `sudo dnf install python3-tkinter`;
+macOS/Windows'ta python.org kurulumunda hazır gelir.
+
+**Nasıl çalışır.** Doküman 11 bölümdür: piyasa (bülten + Pinnacle marjsız), model (λ, MS, en olası
+skorlar), **yalnız kalibrasyon kapısını geçen pazarlar** (her satırda kendi ölçümü: n / model ne dedi /
+gerçekte ne oldu), form, aralarındaki maçlar, Elo, korner-kart, ilk yarı + devre arası ampirik tablosu,
+kadro/sakatlık, canlı durum ve **modelin bilmedikleri**. Danışman düğmesi metni panoya kopyalar ve
+ilgili sayfayı açar; yapıştırıp göndermeyi **sen** yaparsın. Cevabı geri yapıştırınca program
+`SONUÇ / SKOR / GÜVEN` alanlarını ayıklar, sen düzeltirsin, deftere (`data/ai_defteri.json`) yazılır.
+
+**Neden otomatik değil.** ChatGPT/Gemini/Grok arayüzlerini bot ile sürmek kullanım şartlarına aykırı ve
+her arayüz değişiminde bozulur; Reddit'e otomatik post atmak spam sayılır ve hesabı banlatır. Program
+bu yüzden yalnız metni hazırlar.
+
+**Kadro ve sakatlık** yalnız senin API-Football anahtarınla gelir (`APIFOOTBALL_KEY` ya da panelden
+`data/ayarlar.json`). Mevcut hız sınırlayıcı aynen kullanılır (günde 90, dakikada 10); ücretsiz planda
+maç başına 2 istek gider. Arşivde oyuncu verisi **yoktur**, bu bölüm ölçülmemiştir.
+
+**Karne dürüstlüğü:** kayıt yalnız **maç başlamadan** alınır (sonrasında program reddeder), aynı
+(maç, danışman) bir kez tutulur, 20 sonuçlu cevaptan önce yargı gösterilmez. Bu bir kalibrasyon ölçümü
+değil **sayımdır**; danışman cevapları olasılık modeline girmez ve kupon kurmaz. Aynı maçlarda bizim
+modelin ne dediği de kaydedilir, böylece "AI beni geçiyor mu" sorusu sayıyla cevaplanır.
+
 ## Komutlar
 
 | Komut | Açıklama |
